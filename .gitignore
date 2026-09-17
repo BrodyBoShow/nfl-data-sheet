@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# Personal Claude Code overrides (project-shared settings.json is committed, this isn't)
+.claude/settings.local.json
+
+# Local caches (KICKOFF.md: never load full datasets into context / repo)
+data/
+.cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
