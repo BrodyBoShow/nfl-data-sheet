@@ -7,6 +7,7 @@ import pytest
 from pipeline.collectors.nflverse_bulk import (
     _NGS_ALL_METRIC_COLS,
     _PFR_ALL_METRIC_COLS,
+    _TEAM_ABBR_ALIASES,
     NflverseBulkCollector,
     _aggregate_team_week,
     _build_depth,
@@ -188,16 +189,19 @@ def test_points_defaults_unrecognized_drive_result_to_zero():
     assert team_week.filter(pl.col("team") == "AA").to_dicts()[0]["points"] == 0
 
 
-def test_snaps_normalizes_retired_team_codes():
+@pytest.mark.parametrize(("old_code", "current_code"), sorted(_TEAM_ABBR_ALIASES.items()))
+def test_snaps_normalizes_retired_team_codes(old_code, current_code):
+    """Every PFR code in _TEAM_ABBR_ALIASES that differs from nflverse's current
+    abbreviation must be normalized on both the team and opponent_team columns."""
     snap_counts = pl.DataFrame(
         {
             "game_type": ["REG"],
-            "game_id": ["2019_01_OAK_DEN"],
+            "game_id": [f"2019_01_{old_code}_DEN"],
             "pfr_player_id": ["SomeGuy00"],
             "season": [2019],
             "week": [1],
-            "team": ["OAK"],
-            "opponent": ["DEN"],
+            "team": [old_code],
+            "opponent": [old_code],
             "position": ["QB"],
             "offense_snaps": [60],
             "offense_pct": [1.0],
@@ -209,8 +213,15 @@ def test_snaps_normalizes_retired_team_codes():
     )
     snaps = _build_snaps(snap_counts)
     row = snaps.to_dicts()[0]
-    assert row["team"] == "LV"
-    assert row["opponent_team"] == "DEN"
+    assert row["team"] == current_code
+    assert row["opponent_team"] == current_code
+
+
+def test_team_abbr_aliases_only_covers_retired_codes():
+    """Guards against a code drifting back onto an alias key it no longer needs (e.g. if
+    nflreadpy starts returning the current code for a season this table still aliases)."""
+    assert set(_TEAM_ABBR_ALIASES) == {"OAK", "SD", "STL"}
+    assert _TEAM_ABBR_ALIASES == {"OAK": "LV", "SD": "LAC", "STL": "LA"}
 
 
 def test_datasets_scoping_limits_fetch_validate_store():

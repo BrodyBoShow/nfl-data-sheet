@@ -184,9 +184,16 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     wholesale into `teams`, so `SELECT * FROM teams` is **not** a safe way to enumerate
     "the current 32 teams" for any future code. The Efficiency analyst instead derives
     its team list from which codes actually appear in `team_week`.
-  - `load_snap_counts()`'s `position` column uses plain `C`/`G`/`T` for O-line (full set:
-    `C`, `CB`, `DB`, `DE`, `DT`, `FB`, `FS`, `G`, `K`, `LB`, `LS`, `NT`, `P`, `QB`, `RB`,
-    `S`, `SS`, `T`, `TE`, `WR`). `load_depth_charts()`'s `pos_abb` instead uses
+  - `load_snap_counts()`'s `position` column uses `C`/`G`/`T` for O-line **only for teams
+    PFR breaks the line out individually** — some teams' snaps are tagged with the
+    generic `OL` instead, with zero `C`/`G`/`T` rows at all. Checked 2025 and 2026 live:
+    ARI/CHI/JAX/LA report 100% of their O-line snaps as generic `OL` in both seasons;
+    most other teams mix granular `C`/`G`/`T` rows with some generic `OL` rows (e.g.
+    backups); full position set seen: `C`, `CB`, `DB`, `DE`, `DL`, `DT`, `FB`, `FS`, `G`,
+    `HB`, `K`, `LB`, `LS`, `NT`, `OL`, `P`, `QB`, `RB`, `S`, `SS`, `T`, `TE`, `WR`. The
+    Efficiency analyst's `_OL_SNAP_POSITIONS` must include `OL` alongside `C`/`G`/`T` or
+    it silently empties the O-line group for the generic-only teams.
+    `load_depth_charts()`'s `pos_abb` instead uses
     side-specific O-line slots — `C`, `LG`, `LT`, `RG`, `RT` — among a larger set
     including `FB`, `FS`, `H`, `KR`, `LCB`, `LDE`, `LDT`, `LILB`, `LS`, `MLB`, `NB`,
     `NT`, `P`, `PK`, `PR`, `QB`, `RB`, `RCB`, `RDE`, `RDT`, `RILB`, `SLB`, `SS`, `TE`,

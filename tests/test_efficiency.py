@@ -4,6 +4,7 @@ import polars as pl
 import pytest
 
 from pipeline.analysts.efficiency import (
+    _OL_SNAP_POSITIONS,
     OL_MIN_FACTOR,
     QB_CHANGE_DISCOUNT,
     MetricConfig,
@@ -14,6 +15,7 @@ from pipeline.analysts.efficiency import (
     _league_avg,
     _offense_discount,
     _ol_continuity_factor,
+    _ol_group,
     _qb_change_factor,
     _solve_ratings,
 )
@@ -259,6 +261,38 @@ def test_ol_continuity_factor_full_vs_no_overlap():
     assert _ol_continuity_factor(group, group) == 1.0
     disjoint = {"f", "g", "h", "i", "j"}
     assert _ol_continuity_factor(group, disjoint) == OL_MIN_FACTOR
+
+
+def test_ol_snap_positions_includes_generic_ol_tag():
+    """Regression guard: ARI/CHI/JAX/LA report 100% of their O-line snaps under the
+    generic "OL" position in snap_counts, with zero C/G/T rows at all (verified live,
+    docs/sources.md). Dropping "OL" from this set silently empties _ol_group for those
+    teams every time they're the *prior*-season side."""
+    assert _OL_SNAP_POSITIONS == {"C", "G", "T", "OL"}
+
+
+def test_ol_group_builds_from_generic_ol_position_only():
+    """A team whose snap_counts rows are entirely position="OL" (no C/G/T at all) must
+    still yield a 5-player group -- this is the exact shape that produced "OL-continuity
+    discount skipped (unknown group) -- current=... prior=set()" for ARI/CHI/JAX/LA."""
+    snaps_df = pl.DataFrame(
+        {
+            "player_id": ["p1", "p2", "p3", "p4", "p5", "p6"],
+            "team": ["ARI"] * 6,
+            "offense_snaps": [60, 58, 55, 50, 45, 10],
+        }
+    ).filter(pl.col("team").is_in({"ARI"}))
+    # Simulates what _fetch_snaps_ol's SQL now returns once _OL_SNAP_POSITIONS includes
+    # "OL": every row already passed the position filter, so _ol_group only groups/sorts.
+    group = _ol_group(snaps_df, "ARI")
+    assert group == {"p1", "p2", "p3", "p4", "p5"}
+
+
+def test_ol_group_empty_when_team_has_no_snaps_rows():
+    snaps_df = pl.DataFrame(
+        {"player_id": ["p1"], "team": ["KC"], "offense_snaps": [60]}
+    )
+    assert _ol_group(snaps_df, "ARI") == set()
 
 
 def test_offense_discount_sensitivity_scales_the_effect():

@@ -35,10 +35,16 @@ OL_MIN_FACTOR = 0.7
 _SOLVER_TOLERANCE = 1e-6
 _SOLVER_MAX_ITERATIONS = 200
 
-# snaps.position uses plain C/G/T; depth.pos_abb uses side-specific slots instead --
+# snaps.position uses C/G/T for teams PFR breaks out by individual line spot, but some
+# teams' snap counts lump every lineman under a generic "OL" tag instead (verified live,
+# docs/sources.md: ARI/CHI/JAX/LA have zero C/G/T rows in both 2025 and 2026 snap_counts
+# -- 100% of their O-line snaps are tagged "OL"). Omitting "OL" here silently emptied
+# _ol_group for exactly those teams every time they were the *prior*-season side (the
+# live-week depth-chart fallback masked it for the *current* week only, producing "5
+# players current, prior=set()"). depth.pos_abb uses side-specific slots instead --
 # verified live (docs/sources.md). depth.pos_grp is NOT offense/defense (it's a
 # formation label, e.g. "Base 4-3 D") and must never be used to filter for O-line.
-_OL_SNAP_POSITIONS = {"C", "G", "T"}
+_OL_SNAP_POSITIONS = {"C", "G", "T", "OL"}
 _OL_DEPTH_SLOTS = {"C", "LG", "LT", "RG", "RT"}
 
 _INPUTS_VERSION_TAGS = ("pbp", "stats_player", "snap_counts", "depth_charts")
