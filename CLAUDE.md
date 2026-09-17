@@ -32,9 +32,14 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`�
 - `agent_runs` table: `id, agent, started_at, finished_at, status, rows_written,
   source_version, error, meta jsonb`
 - `Collector`: `should_run(ctx) -> bool` → `fetch(ctx)` → `validate(raw)` →
-  `store(ctx, validated) -> int`
+  `store(ctx, validated) -> WorkResult`
 - `Analyst`: `inputs_ready(ctx) -> bool` → `compute(ctx) -> polars.DataFrame` →
-  `write_signals(ctx, df) -> int`
+  `write_signals(ctx, df) -> WorkResult`
+- `WorkResult` (`pipeline/core/base.py`): `rows_written: int, meta: dict = {}`. `meta`
+  flows straight into `agent_runs.meta` — most `store`/`write_signals` implementations
+  just return `WorkResult(rows_written)` and leave `meta` at its default; a job that wants
+  to record per-run detail (e.g. Efficiency's per-team discount factors) returns
+  `WorkResult(rows_written, {...})` instead.
 - `ctx` (`RunContext`) carries `season, week, season_type, now, settings`, and one open
   `conn` shared by every step of that run (so `store`/`write_signals` write through it,
   and `should_run`/`inputs_ready` can query state like `source_freshness` through it too).

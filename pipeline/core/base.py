@@ -13,7 +13,7 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,6 +38,18 @@ class RunContext:
     now: datetime
     settings: Settings
     conn: psycopg.Connection
+
+
+@dataclass(frozen=True)
+class WorkResult:
+    """What `Collector.store`/`Analyst.write_signals` hand back to `_execute`: the row
+    count (as before) plus optional per-run metadata for `agent_runs.meta` (e.g. per-team
+    discount factors) -- most implementations just return `WorkResult(rows_written)` and
+    leave `meta` at its default `{}`.
+    """
+
+    rows_written: int
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -75,7 +87,7 @@ def _execute(
     week: int,
     season_type: str,
     is_ready: Callable[[RunContext], bool | str],
-    do_work: Callable[[RunContext], int],
+    do_work: Callable[[RunContext], WorkResult],
 ) -> RunResult:
     settings = get_settings()
     started = time.monotonic()
@@ -98,11 +110,17 @@ def _execute(
                 conn.commit()
                 return RunResult(name, skip_status, 0, time.monotonic() - started)
 
-            rows_written = do_work(ctx)
+            result = do_work(ctx)
             conn.commit()
-            run_log.finish_run(conn, run_id, status="success", rows_written=rows_written)
+            run_log.finish_run(
+                conn,
+                run_id,
+                status="success",
+                rows_written=result.rows_written,
+                meta=result.meta,
+            )
             conn.commit()
-            return RunResult(name, "success", rows_written, time.monotonic() - started)
+            return RunResult(name, "success", result.rows_written, time.monotonic() - started)
         except Exception as exc:
             conn.rollback()
             error = f"{type(exc).__name__}: {exc}"
@@ -117,7 +135,7 @@ class Collector(ABC):
 
     One collector per source family (see docs/architecture.md's L1 table). Contract:
     should_run(ctx) -> bool → fetch(ctx) -> raw → validate(raw) -> validated →
-    store(ctx, validated) -> rows_written.
+    store(ctx, validated) -> WorkResult.
     """
 
     name: str
@@ -137,8 +155,8 @@ class Collector(ABC):
         """Pydantic/Polars schema checks. Raise on unrecoverable bad data."""
 
     @abstractmethod
-    def store(self, ctx: RunContext, validated: Any) -> int:
-        """Write to Postgres via ctx.conn. Returns rows_written."""
+    def store(self, ctx: RunContext, validated: Any) -> WorkResult:
+        """Write to Postgres via ctx.conn. Returns WorkResult(rows_written, meta)."""
 
     def run(
         self, *, season: int, week: int, season_type: str = "REG", force: bool = False
@@ -158,7 +176,7 @@ class Analyst(ABC):
 
     One analyst per sector (see docs/architecture.md's L2 table). Contract:
     inputs_ready(ctx) -> bool → compute(ctx) -> polars.DataFrame →
-    write_signals(ctx, df) -> rows_written.
+    write_signals(ctx, df) -> WorkResult.
     """
 
     name: str
@@ -173,8 +191,8 @@ class Analyst(ABC):
         """Read staged tables via ctx.conn, return rows in `signals` shape."""
 
     @abstractmethod
-    def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> int:
-        """Upsert df into `signals` via ctx.conn. Returns rows_written."""
+    def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
+        """Upsert df into `signals` via ctx.conn. Returns WorkResult(rows_written, meta)."""
 
     def run(
         self, *, season: int, week: int, season_type: str = "REG", force: bool = False

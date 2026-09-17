@@ -20,7 +20,7 @@ import httpx
 import nflreadpy as nfl
 import polars as pl
 
-from pipeline.core.base import Collector, RunContext
+from pipeline.core.base import Collector, RunContext, WorkResult
 from pipeline.core.db import filter_changed, upsert_rows
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
@@ -600,7 +600,7 @@ class NflverseBulkCollector(Collector):
             validated["depth"] = _build_depth(raw["depth_charts"])
         return validated
 
-    def store(self, ctx: RunContext, validated: dict[str, pl.DataFrame]) -> int:
+    def store(self, ctx: RunContext, validated: dict[str, pl.DataFrame]) -> WorkResult:
         conn = ctx.conn
         total_written = 0
 
@@ -805,4 +805,4 @@ class NflverseBulkCollector(Collector):
         for tag, value in self._live_timestamps.items():
             set_last_value(conn, f"nflverse:{tag}", value)
 
-        return total_written
+        return WorkResult(total_written)

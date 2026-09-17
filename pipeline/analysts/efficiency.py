@@ -21,7 +21,7 @@ import nflreadpy as nfl
 import polars as pl
 import psycopg
 
-from pipeline.core.base import Analyst, RunContext
+from pipeline.core.base import Analyst, RunContext, WorkResult
 from pipeline.core.db import upsert_rows
 from pipeline.core.freshness import get_last_value
 
@@ -668,6 +668,13 @@ def _build_inputs_version(conn: psycopg.Connection) -> str:
 class EfficiencyAnalyst(Analyst):
     name = "efficiency"
 
+    # Stashed by compute() for write_signals() to hand to WorkResult.meta -- compute()
+    # always runs immediately before write_signals() within one Analyst.run() call (see
+    # base.py), so this is safe despite being instance state rather than a return value;
+    # threading it through compute()'s -> pl.DataFrame contract isn't an option without
+    # widening that contract too, which wasn't part of this change.
+    _last_run_meta: dict[str, Any]
+
     def inputs_ready(self, ctx: RunContext) -> bool | str:
         """Gates on the prior season existing, not the current one -- a week-1 run is
         valid and expected to produce prior+league-only signals (see _blend)."""
@@ -716,6 +723,7 @@ class EfficiencyAnalyst(Analyst):
 
         qb_factor: dict[str, float] = {}
         ol_factor: dict[str, float] = {}
+        team_meta: dict[str, dict[str, Any]] = {}
         for team in teams:
             cur_qb = _resolve_current_qb(ctx, current_pw, depth_df, team)
             team_prior_total_attempts = _prior_season_team_total_attempts(prior_pw, team)
@@ -729,6 +737,19 @@ class EfficiencyAnalyst(Analyst):
             cur_ol = _resolve_current_ol_group(ctx, current_snaps, depth_df, team)
             prior_ol = _ol_group(prior_snaps, team)
             ol_factor[team] = _ol_continuity_factor(cur_ol, prior_ol)
+
+            team_meta[team] = {
+                "qb_factor": round(qb_factor[team], 4),
+                "current_qb": cur_qb,
+                "current_qb_prior_attempts": cur_qb_prior_attempts,
+                "team_prior_total_attempts": team_prior_total_attempts,
+                "ol_factor": round(ol_factor[team], 4),
+                "ol_overlap": len(cur_ol & prior_ol),
+                "current_ol": sorted(cur_ol),
+                "prior_ol": sorted(prior_ol),
+            }
+
+        self._last_run_meta = {"teams": team_meta}
 
         inputs_version = _build_inputs_version(conn)
 
@@ -758,10 +779,11 @@ class EfficiencyAnalyst(Analyst):
             return pl.DataFrame(rows, schema=_SIGNAL_COLS)
         return pl.DataFrame(schema=_SIGNAL_SCHEMA)
 
-    def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> int:
+    def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
+        meta = self._last_run_meta
         rows = df.to_dicts()
         if not rows:
-            return 0
+            return WorkResult(0, meta)
         conflict_cols = [
             "season",
             "week",
@@ -773,6 +795,7 @@ class EfficiencyAnalyst(Analyst):
         ]
         identity_cols = ("season", "week", "game_id", "team", "player_id", "sector", "signal")
         update_cols = [c for c in _SIGNAL_COLS if c not in identity_cols]
-        return upsert_rows(
+        rows_written = upsert_rows(
             ctx.conn, "signals", rows, conflict_cols=conflict_cols, update_cols=update_cols
         )
+        return WorkResult(rows_written, meta)

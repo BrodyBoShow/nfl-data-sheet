@@ -82,6 +82,10 @@ prior_discount = (1 - qb_sensitivity * (1 - qb_factor)) * (1 - ol_sensitivity * 
   rating still pools all of that season's plays under one number (old and new starter
   alike) until enough of the new starter's own games accumulate.
 - Coordinator changes are out of scope unless a verified live source exists.
+- **Debugging:** every `efficiency` run records each team's `qb_factor`, `ol_factor`,
+  current starter, prior/team attempts totals, OL overlap count, and both seasons' O-line
+  groups to `agent_runs.meta` (`{"teams": {"<team>": {...}}}`) — read that instead of
+  re-deriving these factors from `team_week`/`player_week`/`snaps` by hand.
 - `QB_CHANGE_DISCOUNT`/`OL_MIN_FACTOR`/every `k_metric` below are pinned judgment-call
   constants, not tuned to any data — flagged as tunable once Phase 5's grader can measure
   whether they help (`docs/architecture.md`'s `GRADE ==> A_EFF` feedback arrow).
