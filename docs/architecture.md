@@ -140,7 +140,7 @@ daily, **T3** weekly, **OD** on demand.
 
 | Analyst | Phase | Signals |
 |---|---|---|
-| Efficiency | 2 | Opponent-adjusted EPA/play, success rate, explosive rate, points/drive, three-and-out rate, red-zone TD rate; pass/rush and down splits; garbage time filtered; prior-blended. |
+| Efficiency | 2 | Opponent-adjusted EPA/play, success rate, explosive rate, points/drive, three-and-out rate, red-zone TD rate, for both offense and defense; pass/rush and down splits; garbage time filtered; prior-and-league blended (see `docs/signals.md`). |
 | Availability impact | 3 | Target/carry redistribution, replacement quality gap, OL/secondary cluster flags, practice-trend risk. Uses raw snap shares (from the nflverse bulk collector's `snaps` table) as the redistribution baseline, since Usage/role (Phase 7) isn't built yet at this phase. |
 | Market | 4 | Open vs. current line, movement velocity, implied team totals, key-number crossings. No "sharp money" claims. |
 | Environment | 4 | Wind/precip flags for passing/kicking, dome/outdoor, surface, altitude, rest differential, travel distance, timezone crossings. |

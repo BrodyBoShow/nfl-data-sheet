@@ -14,7 +14,9 @@ from typing import Any, Literal
 
 import psycopg
 
-RunStatus = Literal["running", "success", "skipped_fresh", "partial", "failed"]
+RunStatus = Literal[
+    "running", "success", "skipped_fresh", "skipped_no_prior", "partial", "failed"
+]
 
 
 def start_run(conn: psycopg.Connection, agent: str) -> int:

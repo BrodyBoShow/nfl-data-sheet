@@ -53,13 +53,28 @@ class RunResult:
     error: str | None = None
 
 
+def _resolve_skip_status(ready_result: bool | str) -> run_log.RunStatus | None:
+    """`None` means proceed. Otherwise, the exact status to log and return.
+
+    `is_ready` returning `True` proceeds, `False` is the generic "nothing changed"
+    skip (`skipped_fresh`), and any other string is that exact status verbatim (e.g.
+    `EfficiencyAnalyst.inputs_ready`'s `"skipped_no_prior"`) — a more specific reason
+    than a routine freshness-gate skip.
+    """
+    if ready_result is True:
+        return None
+    if isinstance(ready_result, str):
+        return ready_result  # type: ignore[return-value]
+    return "skipped_fresh"
+
+
 def _execute(
     *,
     name: str,
     season: int,
     week: int,
     season_type: str,
-    is_ready: Callable[[RunContext], bool],
+    is_ready: Callable[[RunContext], bool | str],
     do_work: Callable[[RunContext], int],
 ) -> RunResult:
     settings = get_settings()
@@ -77,10 +92,11 @@ def _execute(
             conn=conn,
         )
         try:
-            if not is_ready(ctx):
-                run_log.finish_run(conn, run_id, status="skipped_fresh")
+            skip_status = _resolve_skip_status(is_ready(ctx))
+            if skip_status is not None:
+                run_log.finish_run(conn, run_id, status=skip_status)
                 conn.commit()
-                return RunResult(name, "skipped_fresh", 0, time.monotonic() - started)
+                return RunResult(name, skip_status, 0, time.monotonic() - started)
 
             rows_written = do_work(ctx)
             conn.commit()
@@ -107,8 +123,10 @@ class Collector(ABC):
     name: str
 
     @abstractmethod
-    def should_run(self, ctx: RunContext) -> bool:
-        """Freshness gate. Return False to skip this run (logged as skipped_fresh)."""
+    def should_run(self, ctx: RunContext) -> bool | str:
+        """Freshness gate. `False` skips as `skipped_fresh`; a string skips as that
+        exact status instead, for a more specific reason than a routine freshness skip.
+        """
 
     @abstractmethod
     def fetch(self, ctx: RunContext) -> Any:
@@ -122,13 +140,15 @@ class Collector(ABC):
     def store(self, ctx: RunContext, validated: Any) -> int:
         """Write to Postgres via ctx.conn. Returns rows_written."""
 
-    def run(self, *, season: int, week: int, season_type: str = "REG") -> RunResult:
+    def run(
+        self, *, season: int, week: int, season_type: str = "REG", force: bool = False
+    ) -> RunResult:
         return _execute(
             name=self.name,
             season=season,
             week=week,
             season_type=season_type,
-            is_ready=self.should_run,
+            is_ready=(lambda ctx: True) if force else self.should_run,
             do_work=lambda ctx: self.store(ctx, self.validate(self.fetch(ctx))),
         )
 
@@ -144,8 +164,9 @@ class Analyst(ABC):
     name: str
 
     @abstractmethod
-    def inputs_ready(self, ctx: RunContext) -> bool:
-        """Return False (logged as skipped_fresh) if required staged data isn't there yet."""
+    def inputs_ready(self, ctx: RunContext) -> bool | str:
+        """`False` skips as `skipped_fresh` if required staged data isn't there yet; a
+        string skips as that exact status instead (e.g. `"skipped_no_prior"`)."""
 
     @abstractmethod
     def compute(self, ctx: RunContext) -> pl.DataFrame:
@@ -155,12 +176,14 @@ class Analyst(ABC):
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> int:
         """Upsert df into `signals` via ctx.conn. Returns rows_written."""
 
-    def run(self, *, season: int, week: int, season_type: str = "REG") -> RunResult:
+    def run(
+        self, *, season: int, week: int, season_type: str = "REG", force: bool = False
+    ) -> RunResult:
         return _execute(
             name=self.name,
             season=season,
             week=week,
             season_type=season_type,
-            is_ready=self.inputs_ready,
+            is_ready=(lambda ctx: True) if force else self.inputs_ready,
             do_work=lambda ctx: self.write_signals(ctx, self.compute(ctx)),
         )

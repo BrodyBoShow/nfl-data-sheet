@@ -12,6 +12,7 @@ Phase: P2
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -24,21 +25,28 @@ from pipeline.core.db import filter_changed, upsert_rows
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 
+_log = logging.getLogger(__name__)
+
 _TIMESTAMP_URL = "https://github.com/nflverse/nflverse-data/releases/download/{tag}/timestamp.json"
 # Real release tags, confirmed live against nflreadpy's own download path (docs/sources.md
 # "IMPORTANT" note) -- several differ from the function/stat_type name, e.g. load_player_stats
-# downloads from tag `stats_player`, not `player_stats`.
-_TRACKED_TAGS = (
-    "pbp",
-    "stats_player",
-    "snap_counts",
-    "ftn_charting",
-    "depth_charts",
-    "nextgen_stats",
-    "pfr_advstats",
-)
+# downloads from tag `stats_player`, not `player_stats`. The full set of tracked tags is
+# `set(_DATASET_SOURCES.values())`, defined below alongside the dataset-name mapping.
 
 _SEASON_TYPES = ("REG", "POST")
+
+# Maps each staged table to the release tag it depends on (a subset of _TRACKED_TAGS) --
+# used by --datasets to scope a run (fetch/validate/store/should_run) to just the tables
+# a given analyst actually reads, e.g. Efficiency only needs team_week/player_week/snaps.
+_DATASET_SOURCES: dict[str, str] = {
+    "team_week": "pbp",
+    "player_week": "stats_player",
+    "snaps": "snap_counts",
+    "ftn": "ftn_charting",
+    "depth": "depth_charts",
+    "ngs": "nextgen_stats",
+    "pfr_advstats": "pfr_advstats",
+}
 
 # Garbage time = win probability for the team with the ball is a near-lock either way.
 # Judgment call (docs/signals.md doesn't pin an exact definition) -- simple, deterministic,
@@ -111,7 +119,37 @@ _TEAM_WEEK_COUNT_COLS = [
     "three_and_out_drives",
     "red_zone_trips",
     "red_zone_tds",
+    "points",
 ]
+
+# Offense points scored per drive, from pbp's own fixed_drive_result (not the game
+# scoreboard, so it can be garbage-time-filtered and offense-only like the rest of
+# team_week's drive columns) -- verified live against 2023 pbp (docs/sources.md), which
+# has exactly these ten fixed_drive_result values (incl. null). Anything not listed here
+# scores 0: Punt/Turnover/Turnover on downs/Missed field goal/End of half score nothing;
+# Safety and Opp touchdown are points for the OTHER team (2 and 6 respectively) that this
+# per-team offense-drive schema has no clean place to attribute -- documented limitation,
+# not fixed here (rare enough league-wide to not be worth re-architecting around).
+_DRIVE_RESULT_POINTS: dict[str, int] = {"Touchdown": 6, "Field goal": 3}
+_DRIVE_RESULT_KNOWN_ZERO = {
+    "Punt",
+    "Turnover",
+    "Turnover on downs",
+    "Missed field goal",
+    "End of half",
+    "Safety",
+    "Opp touchdown",
+}
+_DRIVE_RESULT_KNOWN = set(_DRIVE_RESULT_POINTS) | _DRIVE_RESULT_KNOWN_ZERO
+
+# snap_counts/pfr_advstats (both PFR-sourced) still carry retired franchise codes for
+# historical seasons that pbp/player_stats/nextgen_stats already normalize -- verified
+# live (docs/sources.md): 2019 snap_counts/pfr_advstats show 'OAK', 2016 snap_counts
+# shows 'SD', 2015 snap_counts shows 'STL', while pbp/player_stats/nextgen_stats already
+# show the current code for the same seasons/games. Without normalizing here, a team's
+# prior-season join (pipeline/analysts/efficiency.py) would silently miss a relocated
+# franchise's history.
+_TEAM_ABBR_ALIASES: dict[str, str] = {"OAK": "LV", "SD": "LAC", "STL": "LA"}
 _TEAM_WEEK_SUM_COLS = [
     "epa_sum",
     "pass_epa_sum",
@@ -195,6 +233,27 @@ def _derive_season_type(df: pl.DataFrame, game_type_col: str = "game_type") -> p
 
 def _garbage_time_expr() -> pl.Expr:
     return (pl.col("wp") < _GARBAGE_TIME_WP_LOW) | (pl.col("wp") > _GARBAGE_TIME_WP_HIGH)
+
+
+def _normalize_team_abbr(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
+    """Map retired franchise codes (_TEAM_ABBR_ALIASES) to their current abbreviation
+    in every listed column that's actually present."""
+    present = [c for c in cols if c in df.columns]
+    if not present:
+        return df
+    return df.with_columns(pl.col(c).replace(_TEAM_ABBR_ALIASES) for c in present)
+
+
+def _warn_on_unknown_drive_results(drives: pl.DataFrame) -> None:
+    seen = set(drives["fixed_drive_result"].drop_nulls().unique().to_list())
+    unknown = seen - _DRIVE_RESULT_KNOWN
+    if unknown:
+        _log.warning(
+            "team_week points: unrecognized fixed_drive_result value(s) %s scored as 0 "
+            "points -- update _DRIVE_RESULT_POINTS/_DRIVE_RESULT_KNOWN_ZERO if these are "
+            "legitimate scoring outcomes",
+            sorted(unknown),
+        )
 
 
 def _build_player_week(player_stats: pl.DataFrame) -> pl.DataFrame:
@@ -282,9 +341,15 @@ def _aggregate_team_week(pbp: pl.DataFrame) -> pl.DataFrame:
         )
         .filter(pl.col("_competitive"))
     )
+    _warn_on_unknown_drive_results(drives)
 
-    drive_summary = drives.group_by(["game_id", "posteam"]).agg(
+    drive_summary = drives.with_columns(
+        pl.col("fixed_drive_result")
+        .replace_strict(_DRIVE_RESULT_POINTS, default=0, return_dtype=pl.Int64)
+        .alias("_drive_points")
+    ).group_by(["game_id", "posteam"]).agg(
         pl.len().alias("drives"),
+        pl.col("_drive_points").sum().alias("points"),
         ((pl.col("fixed_drive_result") == "Punt") & (pl.col("drive_play_count") == 3))
         .sum()
         .alias("three_and_out_drives"),
@@ -369,11 +434,11 @@ def _build_pfr_advstats(pfr_frames: dict[str, pl.DataFrame]) -> pl.DataFrame:
                 + _PFR_ALL_METRIC_COLS
             )
         )
-    return pl.concat(parts, how="vertical")
+    return _normalize_team_abbr(pl.concat(parts, how="vertical"), ["team", "opponent_team"])
 
 
 def _build_snaps(snap_counts: pl.DataFrame) -> pl.DataFrame:
-    return (
+    built = (
         _derive_season_type(snap_counts)
         .filter(pl.col("pfr_player_id").is_not_null() & pl.col("game_id").is_not_null())
         .rename({"opponent": "opponent_team"})
@@ -399,6 +464,7 @@ def _build_snaps(snap_counts: pl.DataFrame) -> pl.DataFrame:
             "st_pct",
         )
     )
+    return _normalize_team_abbr(built, ["team", "opponent_team"])
 
 
 def _build_ftn(ftn: pl.DataFrame) -> pl.DataFrame:
@@ -445,12 +511,32 @@ def _resolve_pfr_player_ids(conn: Any, pfr_ids: list[str]) -> dict[str, str]:
 class NflverseBulkCollector(Collector):
     name = "nflverse_bulk"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        seasons_override: list[int] | None = None,
+        datasets: set[str] | None = None,
+    ) -> None:
+        """`seasons_override` widens the default `[season - 1, season]` fetch (e.g. for
+        a historical backfill). `datasets` scopes fetch/validate/store/should_run to a
+        subset of the 7 staged tables (e.g. `{"team_week", "player_week", "snaps"}` for
+        what the Efficiency analyst reads) instead of all of them; `None` means all.
+        """
+        if datasets is not None:
+            unknown = datasets - set(_DATASET_SOURCES)
+            if unknown:
+                raise ValueError(f"unknown dataset(s): {sorted(unknown)}")
         self._live_timestamps: dict[str, str] = {}
+        self.seasons_override = seasons_override
+        self.datasets = datasets
+
+    def _active_datasets(self) -> set[str]:
+        return self.datasets if self.datasets is not None else set(_DATASET_SOURCES)
 
     def should_run(self, ctx: RunContext) -> bool:
+        active_tags = {_DATASET_SOURCES[d] for d in self._active_datasets()}
         changed = False
-        for tag in _TRACKED_TAGS:
+        for tag in active_tags:
             live_value = _fetch_timestamp(tag)
             self._live_timestamps[tag] = live_value
             if get_last_value(ctx.conn, f"nflverse:{tag}") != live_value:
@@ -458,22 +544,30 @@ class NflverseBulkCollector(Collector):
         return changed
 
     def fetch(self, ctx: RunContext) -> dict[str, Any]:
-        seasons = [ctx.season - 1, ctx.season]
-        return {
-            "pbp": nfl.load_pbp(seasons=seasons),
-            "player_stats": nfl.load_player_stats(seasons=seasons),
-            "snap_counts": nfl.load_snap_counts(seasons=seasons),
-            "ftn_charting": nfl.load_ftn_charting(seasons=seasons),
-            "depth_charts": nfl.load_depth_charts(seasons=ctx.season),
-            "ngs": {
+        seasons = self.seasons_override or [ctx.season - 1, ctx.season]
+        active = self._active_datasets()
+        raw: dict[str, Any] = {}
+        if "team_week" in active:
+            raw["pbp"] = nfl.load_pbp(seasons=seasons)
+        if "player_week" in active:
+            raw["player_stats"] = nfl.load_player_stats(seasons=seasons)
+        if "snaps" in active:
+            raw["snap_counts"] = nfl.load_snap_counts(seasons=seasons)
+        if "ftn" in active:
+            raw["ftn_charting"] = nfl.load_ftn_charting(seasons=seasons)
+        if "depth" in active:
+            raw["depth_charts"] = nfl.load_depth_charts(seasons=ctx.season)
+        if "ngs" in active:
+            raw["ngs"] = {
                 stat_type: nfl.load_nextgen_stats(seasons=seasons, stat_type=stat_type)
                 for stat_type in _NGS_STAT_TYPES
-            },
-            "pfr_advstats": {
+            }
+        if "pfr_advstats" in active:
+            raw["pfr_advstats"] = {
                 stat_type: nfl.load_pfr_advstats(seasons=seasons, stat_type=stat_type)
                 for stat_type in _PFR_STAT_TYPES
-            },
-        }
+            }
+        return raw
 
     def validate(self, raw: dict[str, Any]) -> dict[str, pl.DataFrame]:
         for name, required in (
@@ -483,205 +577,230 @@ class NflverseBulkCollector(Collector):
             ("ftn_charting", {"nflverse_game_id", "nflverse_play_id"}),
             ("depth_charts", {"team", "dt", "gsis_id"}),
         ):
+            if name not in raw:
+                continue
             missing = required - set(raw[name].columns)
             if missing:
                 raise ValueError(f"{name} missing expected columns: {missing}")
 
-        return {
-            "player_week": _build_player_week(raw["player_stats"]),
-            "team_week": _aggregate_team_week(raw["pbp"]),
-            "snaps": _build_snaps(raw["snap_counts"]),
-            "ngs": _build_ngs(raw["ngs"]),
-            "pfr_advstats": _build_pfr_advstats(raw["pfr_advstats"]),
-            "ftn": _build_ftn(raw["ftn_charting"]),
-            "depth": _build_depth(raw["depth_charts"]),
-        }
+        validated: dict[str, pl.DataFrame] = {}
+        if "player_stats" in raw:
+            validated["player_week"] = _build_player_week(raw["player_stats"])
+        if "pbp" in raw:
+            validated["team_week"] = _aggregate_team_week(raw["pbp"])
+        if "snap_counts" in raw:
+            validated["snaps"] = _build_snaps(raw["snap_counts"])
+        if "ngs" in raw:
+            validated["ngs"] = _build_ngs(raw["ngs"])
+        if "pfr_advstats" in raw:
+            validated["pfr_advstats"] = _build_pfr_advstats(raw["pfr_advstats"])
+        if "ftn_charting" in raw:
+            validated["ftn"] = _build_ftn(raw["ftn_charting"])
+        if "depth_charts" in raw:
+            validated["depth"] = _build_depth(raw["depth_charts"])
+        return validated
 
     def store(self, ctx: RunContext, validated: dict[str, pl.DataFrame]) -> int:
         conn = ctx.conn
         total_written = 0
 
-        player_week_rows = [
-            _finalize(
-                r, ctx.now, [c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")]
+        if "player_week" in validated:
+            player_week_rows = [
+                _finalize(
+                    r,
+                    ctx.now,
+                    [c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")],
+                )
+                for r in validated["player_week"].to_dicts()
+            ]
+            player_week_rows = filter_changed(
+                conn, "player_week", ["player_id", "game_id"], player_week_rows
             )
-            for r in validated["player_week"].to_dicts()
-        ]
-        player_week_rows = filter_changed(
-            conn, "player_week", ["player_id", "game_id"], player_week_rows
-        )
-        total_written += upsert_rows(
-            conn,
-            "player_week",
-            player_week_rows,
-            conflict_cols=["player_id", "game_id"],
-            update_cols=[c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")]
-            + ["content_hash", "updated_at"],
-        )
+            total_written += upsert_rows(
+                conn,
+                "player_week",
+                player_week_rows,
+                conflict_cols=["player_id", "game_id"],
+                update_cols=[c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")]
+                + ["content_hash", "updated_at"],
+            )
 
-        team_week_rows = [
-            _finalize(r, ctx.now, [c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")])
-            for r in validated["team_week"].to_dicts()
-        ]
-        team_week_rows = filter_changed(conn, "team_week", ["game_id", "team"], team_week_rows)
-        total_written += upsert_rows(
-            conn,
-            "team_week",
-            team_week_rows,
-            conflict_cols=["game_id", "team"],
-            update_cols=[c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")]
-            + ["content_hash", "updated_at"],
-        )
+        if "team_week" in validated:
+            team_week_rows = [
+                _finalize(r, ctx.now, [c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")])
+                for r in validated["team_week"].to_dicts()
+            ]
+            team_week_rows = filter_changed(conn, "team_week", ["game_id", "team"], team_week_rows)
+            total_written += upsert_rows(
+                conn,
+                "team_week",
+                team_week_rows,
+                conflict_cols=["game_id", "team"],
+                update_cols=[c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")]
+                + ["content_hash", "updated_at"],
+            )
 
-        ngs_cols = [
-            "player_id",
-            "season",
-            "week",
-            "season_type",
-            "stat_type",
-            "team",
-        ] + _NGS_ALL_METRIC_COLS
-        ngs_rows = [
-            _finalize(
-                r,
-                ctx.now,
-                [
+        if "ngs" in validated:
+            ngs_cols = [
+                "player_id",
+                "season",
+                "week",
+                "season_type",
+                "stat_type",
+                "team",
+            ] + _NGS_ALL_METRIC_COLS
+            ngs_rows = [
+                _finalize(
+                    r,
+                    ctx.now,
+                    [
+                        c
+                        for c in ngs_cols
+                        if c not in ("player_id", "season", "week", "season_type", "stat_type")
+                    ],
+                )
+                for r in validated["ngs"].to_dicts()
+            ]
+            ngs_rows = filter_changed(
+                conn, "ngs", ["player_id", "season", "week", "season_type", "stat_type"], ngs_rows
+            )
+            total_written += upsert_rows(
+                conn,
+                "ngs",
+                ngs_rows,
+                conflict_cols=["player_id", "season", "week", "season_type", "stat_type"],
+                update_cols=[
                     c
                     for c in ngs_cols
                     if c not in ("player_id", "season", "week", "season_type", "stat_type")
-                ],
+                ]
+                + ["content_hash", "updated_at"],
             )
-            for r in validated["ngs"].to_dicts()
-        ]
-        ngs_rows = filter_changed(
-            conn, "ngs", ["player_id", "season", "week", "season_type", "stat_type"], ngs_rows
-        )
-        total_written += upsert_rows(
-            conn,
-            "ngs",
-            ngs_rows,
-            conflict_cols=["player_id", "season", "week", "season_type", "stat_type"],
-            update_cols=[
-                c
-                for c in ngs_cols
-                if c not in ("player_id", "season", "week", "season_type", "stat_type")
+
+        if "ftn" in validated:
+            ftn_rows = [
+                _finalize(r, ctx.now, [c for c in _FTN_COLS if c not in ("game_id", "play_id")])
+                for r in validated["ftn"].to_dicts()
             ]
-            + ["content_hash", "updated_at"],
-        )
+            ftn_rows = filter_changed(conn, "ftn", ["game_id", "play_id"], ftn_rows)
+            total_written += upsert_rows(
+                conn,
+                "ftn",
+                ftn_rows,
+                conflict_cols=["game_id", "play_id"],
+                update_cols=[c for c in _FTN_COLS if c not in ("game_id", "play_id")]
+                + ["content_hash", "updated_at"],
+            )
 
-        ftn_rows = [
-            _finalize(r, ctx.now, [c for c in _FTN_COLS if c not in ("game_id", "play_id")])
-            for r in validated["ftn"].to_dicts()
-        ]
-        ftn_rows = filter_changed(conn, "ftn", ["game_id", "play_id"], ftn_rows)
-        total_written += upsert_rows(
-            conn,
-            "ftn",
-            ftn_rows,
-            conflict_cols=["game_id", "play_id"],
-            update_cols=[c for c in _FTN_COLS if c not in ("game_id", "play_id")]
-            + ["content_hash", "updated_at"],
-        )
+        if "pfr_advstats" in validated:
+            pfr_df = validated["pfr_advstats"]
+            pfr_ids = pfr_df["pfr_player_id"].unique().to_list()
+            pfr_crosswalk = _resolve_pfr_player_ids(conn, pfr_ids)
+            pfr_cols = [
+                "game_id",
+                "pfr_player_id",
+                "season",
+                "week",
+                "season_type",
+                "stat_type",
+                "team",
+                "opponent_team",
+            ] + _PFR_ALL_METRIC_COLS
+            pfr_rows = []
+            for r in pfr_df.to_dicts():
+                r = dict(r)
+                r["player_id"] = pfr_crosswalk.get(r["pfr_player_id"])
+                pfr_rows.append(
+                    _finalize(
+                        r,
+                        ctx.now,
+                        [
+                            c
+                            for c in pfr_cols
+                            if c not in ("game_id", "pfr_player_id", "stat_type")
+                        ]
+                        + ["player_id"],
+                    )
+                )
+            pfr_rows = filter_changed(
+                conn, "pfr_advstats", ["game_id", "pfr_player_id", "stat_type"], pfr_rows
+            )
+            total_written += upsert_rows(
+                conn,
+                "pfr_advstats",
+                pfr_rows,
+                conflict_cols=["game_id", "pfr_player_id", "stat_type"],
+                update_cols=[
+                    c for c in pfr_cols if c not in ("game_id", "pfr_player_id", "stat_type")
+                ]
+                + ["player_id", "content_hash", "updated_at"],
+            )
 
-        pfr_df = validated["pfr_advstats"]
-        pfr_ids = pfr_df["pfr_player_id"].unique().to_list()
-        pfr_crosswalk = _resolve_pfr_player_ids(conn, pfr_ids)
-        pfr_cols = [
-            "game_id",
-            "pfr_player_id",
-            "season",
-            "week",
-            "season_type",
-            "stat_type",
-            "team",
-            "opponent_team",
-        ] + _PFR_ALL_METRIC_COLS
-        pfr_rows = []
-        for r in pfr_df.to_dicts():
-            r = dict(r)
-            r["player_id"] = pfr_crosswalk.get(r["pfr_player_id"])
-            pfr_rows.append(
+        if "snaps" in validated:
+            snaps_df = validated["snaps"]
+            snap_pfr_ids = snaps_df["pfr_player_id"].unique().to_list()
+            snap_crosswalk = _resolve_pfr_player_ids(conn, snap_pfr_ids)
+            snap_cols = [
+                "game_id",
+                "pfr_player_id",
+                "season",
+                "week",
+                "season_type",
+                "team",
+                "opponent_team",
+                "position",
+                "offense_snaps",
+                "offense_pct",
+                "defense_snaps",
+                "defense_pct",
+                "st_snaps",
+                "st_pct",
+            ]
+            snap_rows = []
+            for r in snaps_df.to_dicts():
+                r = dict(r)
+                r["player_id"] = snap_crosswalk.get(r["pfr_player_id"])
+                snap_rows.append(
+                    _finalize(
+                        r,
+                        ctx.now,
+                        [c for c in snap_cols if c not in ("game_id", "pfr_player_id")]
+                        + ["player_id"],
+                    )
+                )
+            snap_rows = filter_changed(conn, "snaps", ["game_id", "pfr_player_id"], snap_rows)
+            total_written += upsert_rows(
+                conn,
+                "snaps",
+                snap_rows,
+                conflict_cols=["game_id", "pfr_player_id"],
+                update_cols=[c for c in snap_cols if c not in ("game_id", "pfr_player_id")]
+                + ["player_id", "content_hash", "updated_at"],
+            )
+
+        if "depth" in validated:
+            depth_cols = ["team", "pos_grp", "pos_abb", "pos_rank", "player_id", "as_of"]
+            depth_rows = [
                 _finalize(
                     r,
                     ctx.now,
-                    [c for c in pfr_cols if c not in ("game_id", "pfr_player_id", "stat_type")]
-                    + ["player_id"],
+                    [c for c in depth_cols if c not in ("team", "pos_grp", "pos_abb", "pos_rank")],
                 )
-            )
-        pfr_rows = filter_changed(
-            conn, "pfr_advstats", ["game_id", "pfr_player_id", "stat_type"], pfr_rows
-        )
-        total_written += upsert_rows(
-            conn,
-            "pfr_advstats",
-            pfr_rows,
-            conflict_cols=["game_id", "pfr_player_id", "stat_type"],
-            update_cols=[c for c in pfr_cols if c not in ("game_id", "pfr_player_id", "stat_type")]
-            + ["player_id", "content_hash", "updated_at"],
-        )
-
-        snaps_df = validated["snaps"]
-        snap_pfr_ids = snaps_df["pfr_player_id"].unique().to_list()
-        snap_crosswalk = _resolve_pfr_player_ids(conn, snap_pfr_ids)
-        snap_cols = [
-            "game_id",
-            "pfr_player_id",
-            "season",
-            "week",
-            "season_type",
-            "team",
-            "opponent_team",
-            "position",
-            "offense_snaps",
-            "offense_pct",
-            "defense_snaps",
-            "defense_pct",
-            "st_snaps",
-            "st_pct",
-        ]
-        snap_rows = []
-        for r in snaps_df.to_dicts():
-            r = dict(r)
-            r["player_id"] = snap_crosswalk.get(r["pfr_player_id"])
-            snap_rows.append(
-                _finalize(
-                    r,
-                    ctx.now,
-                    [c for c in snap_cols if c not in ("game_id", "pfr_player_id")] + ["player_id"],
-                )
-            )
-        snap_rows = filter_changed(conn, "snaps", ["game_id", "pfr_player_id"], snap_rows)
-        total_written += upsert_rows(
-            conn,
-            "snaps",
-            snap_rows,
-            conflict_cols=["game_id", "pfr_player_id"],
-            update_cols=[c for c in snap_cols if c not in ("game_id", "pfr_player_id")]
-            + ["player_id", "content_hash", "updated_at"],
-        )
-
-        depth_cols = ["team", "pos_grp", "pos_abb", "pos_rank", "player_id", "as_of"]
-        depth_rows = [
-            _finalize(
-                r,
-                ctx.now,
-                [c for c in depth_cols if c not in ("team", "pos_grp", "pos_abb", "pos_rank")],
-            )
-            for r in validated["depth"].to_dicts()
-        ]
-        depth_rows = filter_changed(
-            conn, "depth", ["team", "pos_grp", "pos_abb", "pos_rank"], depth_rows
-        )
-        total_written += upsert_rows(
-            conn,
-            "depth",
-            depth_rows,
-            conflict_cols=["team", "pos_grp", "pos_abb", "pos_rank"],
-            update_cols=[
-                c for c in depth_cols if c not in ("team", "pos_grp", "pos_abb", "pos_rank")
+                for r in validated["depth"].to_dicts()
             ]
-            + ["content_hash", "updated_at"],
-        )
+            depth_rows = filter_changed(
+                conn, "depth", ["team", "pos_grp", "pos_abb", "pos_rank"], depth_rows
+            )
+            total_written += upsert_rows(
+                conn,
+                "depth",
+                depth_rows,
+                conflict_cols=["team", "pos_grp", "pos_abb", "pos_rank"],
+                update_cols=[
+                    c for c in depth_cols if c not in ("team", "pos_grp", "pos_abb", "pos_rank")
+                ]
+                + ["content_hash", "updated_at"],
+            )
 
         for tag, value in self._live_timestamps.items():
             set_last_value(conn, f"nflverse:{tag}", value)

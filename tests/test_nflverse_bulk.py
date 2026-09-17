@@ -8,6 +8,7 @@ from pipeline.collectors.nflverse_bulk import (
     _NGS_ALL_METRIC_COLS,
     _PFR_ALL_METRIC_COLS,
     NflverseBulkCollector,
+    _aggregate_team_week,
     _build_depth,
     _build_ftn,
     _build_ngs,
@@ -132,6 +133,98 @@ def test_ftn_renames_nflverse_ids():
     assert "game_id" in ftn.columns
     assert "play_id" in ftn.columns
     assert ftn["game_id"].null_count() == 0
+
+
+def _synthetic_drive_row(
+    fixed_drive: int,
+    fixed_drive_result: str,
+    *,
+    wp: float = 0.5,
+    is_pass: bool = True,
+) -> dict:
+    return {
+        "game_id": "2099_01_AA_BB",
+        "season": 2099,
+        "week": 1,
+        "season_type": "REG",
+        "posteam": "AA",
+        "defteam": "BB",
+        "play_deleted": 0,
+        "epa": 1.0,
+        "success": 1,
+        "pass": 1 if is_pass else 0,
+        "rush": 0 if is_pass else 1,
+        "yards_gained": 5,
+        "down": 1,
+        "wp": wp,
+        "fixed_drive": fixed_drive,
+        "drive_play_count": 1,
+        "fixed_drive_result": fixed_drive_result,
+        "yardline_100": 10,
+    }
+
+
+def test_points_maps_drive_results_and_excludes_garbage_time():
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown"),
+            _synthetic_drive_row(2, "Field goal"),
+            _synthetic_drive_row(3, "Touchdown", wp=0.97),  # garbage time, excluded
+            _synthetic_drive_row(4, "Safety"),
+            _synthetic_drive_row(5, "Opp touchdown"),
+            _synthetic_drive_row(6, "Punt"),
+        ]
+    )
+    team_week = _aggregate_team_week(pbp)
+    row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    # Touchdown (6) + Field goal (3); garbage-time TD, Safety, Opp touchdown, and Punt
+    # all score 0 for this team's offense.
+    assert row["points"] == 9
+
+
+def test_points_defaults_unrecognized_drive_result_to_zero():
+    pbp = pl.DataFrame([_synthetic_drive_row(1, "Some future result nflverse hasn't used yet")])
+    team_week = _aggregate_team_week(pbp)
+    assert team_week.filter(pl.col("team") == "AA").to_dicts()[0]["points"] == 0
+
+
+def test_snaps_normalizes_retired_team_codes():
+    snap_counts = pl.DataFrame(
+        {
+            "game_type": ["REG"],
+            "game_id": ["2019_01_OAK_DEN"],
+            "pfr_player_id": ["SomeGuy00"],
+            "season": [2019],
+            "week": [1],
+            "team": ["OAK"],
+            "opponent": ["DEN"],
+            "position": ["QB"],
+            "offense_snaps": [60],
+            "offense_pct": [1.0],
+            "defense_snaps": [0],
+            "defense_pct": [0.0],
+            "st_snaps": [0],
+            "st_pct": [0.0],
+        }
+    )
+    snaps = _build_snaps(snap_counts)
+    row = snaps.to_dicts()[0]
+    assert row["team"] == "LV"
+    assert row["opponent_team"] == "DEN"
+
+
+def test_datasets_scoping_limits_fetch_validate_store():
+    collector = NflverseBulkCollector(datasets={"team_week"})
+    raw = _load_raw()
+    # Only pass through the raw source team_week actually needs, mirroring what a
+    # --datasets-scoped fetch() would produce.
+    validated = collector.validate({"pbp": raw["pbp"]})
+    assert set(validated) == {"team_week"}
+
+
+def test_datasets_rejects_unknown_name():
+    with pytest.raises(ValueError, match="unknown dataset"):
+        NflverseBulkCollector(datasets={"not_a_real_table"})
 
 
 def test_depth_keeps_only_latest_snapshot_per_team():

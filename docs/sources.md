@@ -163,6 +163,43 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `nflreadpy_nextgen_{passing,rushing,receiving}_sample.parquet`,
     `nflreadpy_pfr_advstats_{pass,rush,rec,def}_sample.parquet`. Regenerate with
     `uv run python scripts/make_nflverse_bulk_fixtures.py`.
+- **Verified live for the Efficiency analyst (P2, as of 2026):**
+  - `load_pbp(seasons=[2023])`'s `fixed_drive_result` has exactly 10 distinct values:
+    `Touchdown`, `Field goal`, `Punt`, `Turnover`, `Turnover on downs`, `Missed field
+    goal`, `End of half`, `Safety`, `Opp touchdown`, and `null`. Only `Touchdown` (6) and
+    `Field goal` (3) score points for the possessing offense; `Safety` and `Opp
+    touchdown` award points to the *other* team, which this schema (one row per team's
+    own offense-drive) has no clean way to attribute — documented as a limitation in
+    `docs/signals.md` rather than fixed.
+  - **Team abbreviations across a relocation year are inconsistent between sources.**
+    Checked `posteam`/`team`/`team_abbr` for 2019 (Oakland→Las Vegas Raiders), 2016 (San
+    Diego→LA Chargers), 2015 (St. Louis→LA Rams): `load_pbp`, `load_player_stats`, and
+    `load_nextgen_stats` already show the **current** code (`LV`/`LAC`/`LA`) even for the
+    old season. `load_snap_counts` and `load_pfr_advstats` (both PFR-sourced) still show
+    the **old** code (`OAK`/`SD`/`STL`) for the same seasons. `nflverse_bulk.py`
+    normalizes `snaps`/`pfr_advstats` via `_TEAM_ABBR_ALIASES` to compensate.
+  - **`load_teams()` returns 36 rows, not 32** — every current franchise code plus the
+    retired `OAK`/`SD`/`STL`/`LAR` aliases (it's a static "every code nflverse has ever
+    used" reference, not a "currently active" list). P1's id_spine collector stores this
+    wholesale into `teams`, so `SELECT * FROM teams` is **not** a safe way to enumerate
+    "the current 32 teams" for any future code. The Efficiency analyst instead derives
+    its team list from which codes actually appear in `team_week`.
+  - `load_snap_counts()`'s `position` column uses plain `C`/`G`/`T` for O-line (full set:
+    `C`, `CB`, `DB`, `DE`, `DT`, `FB`, `FS`, `G`, `K`, `LB`, `LS`, `NT`, `P`, `QB`, `RB`,
+    `S`, `SS`, `T`, `TE`, `WR`). `load_depth_charts()`'s `pos_abb` instead uses
+    side-specific O-line slots — `C`, `LG`, `LT`, `RG`, `RT` — among a larger set
+    including `FB`, `FS`, `H`, `KR`, `LCB`, `LDE`, `LDT`, `LILB`, `LS`, `MLB`, `NB`,
+    `NT`, `P`, `PK`, `PR`, `QB`, `RB`, `RCB`, `RDE`, `RDT`, `RILB`, `SLB`, `SS`, `TE`,
+    `WLB`, `WR`. **`load_depth_charts()`'s `pos_grp` is not an offense/defense flag** —
+    observed values are formation labels (`3WR 1TE`, `Base 3-4 D`, `Base 4-3 D`, `Special
+    Teams`), so O-line filtering must go through `pos_abb`, never `pos_grp`.
+  - `nflreadpy.get_current_season()` is pure local date arithmetic (no network call) —
+    safe for L2 code to call directly. `nflreadpy.get_current_week()`'s **default**
+    (`use_date=False`) path calls `load_schedules()` internally — a network fetch, **not**
+    safe from L2 code (`CLAUDE.md`: analysts "never call external sources"). Its
+    `use_date=True` variant is pure local date math instead (documented by nflreadpy
+    itself as a "rough approximation," not schedule-exact) — used by the Efficiency
+    analyst's `_depth_fallback_allowed` for exactly that reason.
 - **Known traps:**
   - No 2025+ injury data — the source that fed nflverse injuries died after 2024. Use the
     Availability collector instead.
