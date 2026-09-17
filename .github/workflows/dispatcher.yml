@@ -1,12 +1,12 @@
 name: dispatcher
 
-on:
+"on":
   schedule:
     # Every ~10 min, never on :00 (CLAUDE.md convention). Phase 1 skeleton: this always
     # runs every registered collector/analyst; each one's own should_run()/inputs_ready()
     # decides whether there's anything to do. Full calendar-aware triggering is Phase 8.
     - cron: "3,13,23,33,43,53 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   run:
