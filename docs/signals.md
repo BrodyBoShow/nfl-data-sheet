@@ -121,13 +121,42 @@ Copy this block per signal when it's implemented.
 null, `team` set). Every signal below exists twice, `<name>_off` and `<name>_def` (the
 team's own offense, and its defense — see the "Prior blending" note on why defense skips
 the QB/OL discount), for **40 signals/team/week** total. All are opponent-adjusted per
-the "Prior blending" section above; garbage time and the explosive-play thresholds are
-filtered upstream at collection (`pipeline/collectors/nflverse_bulk.py`'s
-`_GARBAGE_TIME_WP_LOW/HIGH`, `_EXPLOSIVE_PASS_YARDS`/`_EXPLOSIVE_RUSH_YARDS`), not
-re-filtered here. `sample_n` = the current-season denominator only (prior-season sample
-size isn't folded in). Source table for every one of these: `team_week`
-(`pipeline/collectors/nflverse_bulk.py`), self-joined on `opponent_team` for the
-opponent-adjustment solve. **Added:** Phase 2, 2026.
+the "Prior blending" section above; no-play/garbage-time filtering and the explosive-play
+thresholds are applied upstream at collection
+(`pipeline/collectors/nflverse_bulk.py`), not re-filtered here. `sample_n` = the
+current-season denominator only (prior-season sample size isn't folded in). Source table
+for every one of these: `team_week` (`pipeline/collectors/nflverse_bulk.py`), self-joined
+on `opponent_team` for the opponent-adjustment solve. **Added:** Phase 2, 2026.
+
+**Play filtering (`_aggregate_team_week`):**
+- A penalty no-play still carries the original called play's `pass`/`rush` flag and a
+  non-null `epa` — verified live, 2025–2026: 1,622 `no_play`/`qb_kneel`/`qb_spike` rows
+  leaked into "plays" this way before this filter existed. Excluded via `play_type !=
+  "no_play"` plus a `qb_kneel`/`qb_spike` flag check as a safety net (verified live that
+  those flags are never actually set on a `pass==1`/`rush==1` row in this data — the net
+  only guards against `no_play`, but is kept in case that ever changes).
+- **Garbage time is time-aware**, not a single WP threshold applied to the whole game —
+  a flat threshold triggers as early as the 2nd quarter of a blowout (verified live: one
+  team's 51 eligible plays got cut to 13 this way). `_garbage_time_expr()`:
+  - **Q1–Q2:** never garbage time — win probability swings fastest and least
+    meaningfully this early; excluding on it here would discard real plays from both
+    teams' normal game plans.
+  - **Q3:** excluded only if `wp < _GARBAGE_TIME_Q3_WP_LOW (0.02)` or `> _GARBAGE_TIME_Q3_WP_HIGH
+    (0.98)` — a tighter band than Q4, since a comfortable-but-not-yet-decided Q3 lead can
+    still reverse.
+  - **Q4/OT:** `wp < _GARBAGE_TIME_WP_LOW (0.05)` or `> _GARBAGE_TIME_WP_HIGH (0.95)` — the
+    original band; by Q4 a WP this lopsided realistically means the outcome is decided.
+  - Verified live across all 2025–2026 games (602 team-games): this raised the minimum
+    team-game play count from 8 to 14 and cut the number of team-games under 30 plays
+    from 30 to 18, with negligible effect on the median/p90 (within a few plays, from
+    the no-play exclusion above, not this rule).
+  - All four thresholds are pinned judgment calls, not tuned to any data — like
+    `QB_CHANGE_DISCOUNT`/`OL_MIN_FACTOR` above, flagged as tunable once Phase 5's grader
+    can measure whether they help (`docs/architecture.md`'s `GRADE ==> A_EFF` feedback
+    arrow).
+  - This same `_garbage_time_expr()` also governs which drives count as competitive for
+    `points_per_drive`/`three_and_out_rate`/`red_zone_td_rate` (see the drive-scope note
+    below) — one definition, not two.
 
 No down-split explosive-rate signals exist — `team_week` has no
 `down{1-4}_explosive_count` column, so none is fabricated.

@@ -142,6 +142,10 @@ def _synthetic_drive_row(
     *,
     wp: float = 0.5,
     is_pass: bool = True,
+    qtr: int = 4,
+    play_type: str | None = None,
+    qb_kneel: int = 0,
+    qb_spike: int = 0,
 ) -> dict:
     return {
         "game_id": "2099_01_AA_BB",
@@ -157,7 +161,11 @@ def _synthetic_drive_row(
         "rush": 0 if is_pass else 1,
         "yards_gained": 5,
         "down": 1,
+        "qtr": qtr,
         "wp": wp,
+        "play_type": play_type or ("pass" if is_pass else "run"),
+        "qb_kneel": qb_kneel,
+        "qb_spike": qb_spike,
         "fixed_drive": fixed_drive,
         "drive_play_count": 1,
         "fixed_drive_result": fixed_drive_result,
@@ -187,6 +195,76 @@ def test_points_defaults_unrecognized_drive_result_to_zero():
     pbp = pl.DataFrame([_synthetic_drive_row(1, "Some future result nflverse hasn't used yet")])
     team_week = _aggregate_team_week(pbp)
     assert team_week.filter(pl.col("team") == "AA").to_dicts()[0]["points"] == 0
+
+
+def test_no_play_penalty_row_excluded_from_plays_despite_pass_flag():
+    # A penalty no-play still carries the original called play's pass=1 and a non-null
+    # epa -- verified live, this leaked 1,622 rows into "plays" across 2025-2026 before
+    # this fix (docs/sources.md).
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", play_type="no_play"),
+            _synthetic_drive_row(2, "Field goal"),  # a real pass, play_type="pass"
+        ]
+    )
+    team_week = _aggregate_team_week(pbp)
+    row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 1
+
+
+def test_qb_kneel_and_spike_excluded_even_if_pass_rush_flag_ever_lets_them_through():
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", qb_kneel=1),
+            _synthetic_drive_row(2, "Field goal", qb_spike=1),
+            _synthetic_drive_row(3, "Safety"),  # the one real play
+        ]
+    )
+    team_week = _aggregate_team_week(pbp)
+    row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 1
+
+
+def test_garbage_time_q1_q2_never_excluded_even_at_extreme_win_probability():
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", wp=0.99, qtr=1),
+            _synthetic_drive_row(2, "Field goal", wp=0.01, qtr=2),
+        ]
+    )
+    team_week = _aggregate_team_week(pbp)
+    row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 2
+    assert row["garbage_time_plays_excluded"] == 0
+
+
+def test_garbage_time_q3_uses_tighter_band_than_q4():
+    pbp = pl.DataFrame(
+        [
+            # Inside the old 0.05/0.95 band but outside Q3's tighter 0.02/0.98 -- kept.
+            _synthetic_drive_row(1, "Touchdown", wp=0.97, qtr=3),
+            # Beyond Q3's tighter band -- still excluded.
+            _synthetic_drive_row(2, "Field goal", wp=0.99, qtr=3),
+        ]
+    )
+    team_week = _aggregate_team_week(pbp)
+    row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 1
+    assert row["garbage_time_plays_excluded"] == 1
+
+
+def test_garbage_time_q4_and_ot_keep_the_original_band():
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", wp=0.5, qtr=4),  # kept, so team has a row
+            _synthetic_drive_row(2, "Field goal", wp=0.97, qtr=4),  # excluded, as before
+            _synthetic_drive_row(3, "Safety", wp=0.97, qtr=5),  # OT, excluded too
+        ]
+    )
+    team_week = _aggregate_team_week(pbp)
+    row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 1
+    assert row["garbage_time_plays_excluded"] == 2
 
 
 @pytest.mark.parametrize(("old_code", "current_code"), sorted(_TEAM_ABBR_ALIASES.items()))

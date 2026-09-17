@@ -48,11 +48,20 @@ _DATASET_SOURCES: dict[str, str] = {
     "pfr_advstats": "pfr_advstats",
 }
 
-# Garbage time = win probability for the team with the ball is a near-lock either way.
-# Judgment call (docs/signals.md doesn't pin an exact definition) -- simple, deterministic,
-# and uses a column nflverse already computes rather than hand-tuned score/time thresholds.
+# Garbage time = win probability for the team with the ball is a near-lock either way, but
+# a pure WP threshold applied uniformly across the whole game is too aggressive in an
+# early blowout: it can trigger as early as the 2nd quarter, discarding plays the trailing
+# team still ran with a real game plan (verified live, 2025-2026: 38 of one team's 51
+# eligible plays got cut this way, leaving 13 -- see docs/signals.md). Time-aware instead:
+# Q1-Q2 is never garbage time (WP swings fastest and least meaningfully early); Q3 uses a
+# tighter band (only a near-certain outcome counts); Q4/OT keeps the original band, where a
+# comfortable-but-not-locked WP still means the outcome is realistically decided. Judgment
+# call (docs/signals.md doesn't pin an exact definition) -- tunable once Phase 5's grader
+# exists (docs/signals.md's "Debugging" note / `docs/architecture.md`'s GRADE ==> A_EFF).
 _GARBAGE_TIME_WP_LOW = 0.05
 _GARBAGE_TIME_WP_HIGH = 0.95
+_GARBAGE_TIME_Q3_WP_LOW = 0.02
+_GARBAGE_TIME_Q3_WP_HIGH = 0.98
 
 # "Explosive play" thresholds -- the common analytics convention (20+ yard pass, 10+ yard
 # rush), also a judgment call absent a pinned definition in docs/signals.md.
@@ -232,7 +241,16 @@ def _derive_season_type(df: pl.DataFrame, game_type_col: str = "game_type") -> p
 
 
 def _garbage_time_expr() -> pl.Expr:
-    return (pl.col("wp") < _GARBAGE_TIME_WP_LOW) | (pl.col("wp") > _GARBAGE_TIME_WP_HIGH)
+    """Time-aware: Q1-Q2 never garbage time; Q3 only a near-certain WP; Q4/OT the
+    original band. Callers still wrap this in `.fill_null(False)` -- a null `qtr` or `wp`
+    propagates to a null comparison here, same as before."""
+    return (
+        pl.when(pl.col("qtr") <= 2)
+        .then(pl.lit(False))
+        .when(pl.col("qtr") == 3)
+        .then((pl.col("wp") < _GARBAGE_TIME_Q3_WP_LOW) | (pl.col("wp") > _GARBAGE_TIME_Q3_WP_HIGH))
+        .otherwise((pl.col("wp") < _GARBAGE_TIME_WP_LOW) | (pl.col("wp") > _GARBAGE_TIME_WP_HIGH))
+    )
 
 
 def _normalize_team_abbr(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
@@ -269,6 +287,16 @@ def _aggregate_team_week(pbp: pl.DataFrame) -> pl.DataFrame:
         (pl.col("play_deleted") != 1)
         & pl.col("epa").is_not_null()
         & ((pl.col("pass") == 1) | (pl.col("rush") == 1))
+        # A penalty no-play still carries the original called play's pass/rush flags and
+        # a non-null epa -- verified live (docs/sources.md): 1,622 no_play/qb_kneel/
+        # qb_spike rows leaked into "plays" this way across 2025-2026. None of those are
+        # real plays, so they're excluded from every split below (overall/pass/rush/down),
+        # all of which derive from this one filtered frame. Drive-level aggregation below
+        # is deliberately NOT filtered this way -- it uses every play in a drive regardless
+        # of type, since drive_play_count/fixed_drive_result are drive-constant fields.
+        & (pl.col("play_type") != "no_play")
+        & (pl.col("qb_kneel") != 1)
+        & (pl.col("qb_spike") != 1)
         & pl.col("posteam").is_not_null()
         & pl.col("season_type").is_in(_SEASON_TYPES)
     ).with_columns(
