@@ -87,6 +87,15 @@ web/                      # Phase 6+
   before refetching; skip unchanged.
 - Weeks 1–5 efficiency is noisy — prior-blend with last season, shifting weight to
   current season as weeks accumulate (see `docs/signals.md`).
+- **Verification scripts call production functions, never reimplement the logic in
+  hand-written SQL.** A hand-written reconstruction can silently drift from what the
+  analyst/collector actually does — e.g. an ad-hoc query for QB-continuity inputs once
+  used a join missing a `season` filter, which mixed 2025 and 2026 rows together and
+  misidentified two teams' current starters (caught by comparing it against
+  `scripts/inspect_qb_continuity.py`, which imports and calls
+  `pipeline/analysts/efficiency.py`'s own current-starter/prior-attempts functions
+  instead). When a one-off diagnostic needs to show what an agent's logic produces,
+  import and call that logic — don't re-derive it.
 
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector — never combine two sources or
