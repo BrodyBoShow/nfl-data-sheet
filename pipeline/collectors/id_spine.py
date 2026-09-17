@@ -99,8 +99,17 @@ def _finalize(row: dict[str, Any], now: Any, hash_fields: list[str]) -> dict[str
 class IdSpineCollector(Collector):
     name = "id_spine"
 
-    def __init__(self) -> None:
+    def __init__(self, *, seasons_override: list[int] | None = None) -> None:
+        """`seasons_override` widens the default `[season - 1, season]` schedules/games
+        fetch (e.g. for a historical backfill) -- `games` is the only one of this
+        collector's four tables that's season-scoped at all. `teams`/`players`/
+        `ff_playerids` each fetch nflreadpy's one wholesale, no-season-argument reference
+        table regardless (docs/sources.md: `load_teams()` alone already returns every
+        code ever used, current and retired), so a historical `games` range needs no
+        corresponding change to them.
+        """
         self._live_timestamps: dict[str, str] = {}
+        self.seasons_override = seasons_override
 
     def should_run(self, ctx: RunContext) -> bool:
         changed = False
@@ -112,8 +121,9 @@ class IdSpineCollector(Collector):
         return changed
 
     def fetch(self, ctx: RunContext) -> dict[str, pl.DataFrame]:
+        seasons = self.seasons_override or [ctx.season - 1, ctx.season]
         return {
-            "schedules": nfl.load_schedules(seasons=[ctx.season - 1, ctx.season]),
+            "schedules": nfl.load_schedules(seasons=seasons),
             "teams": nfl.load_teams(),
             "players": nfl.load_players(),
             "ff_playerids": nfl.load_ff_playerids(),

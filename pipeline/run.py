@@ -26,7 +26,11 @@ _JOBS: dict[str, Collector | Analyst] = {
 
 _USAGE = (
     "usage: uv run python -m pipeline.run <job> [--force] [--season N] [--week N] "
-    "[--seasons START-END] [--datasets a,b,c]"
+    "[--seasons START-END] [--datasets a,b,c]\n"
+    "  --seasons: nflverse_bulk or id_spine (id_spine only widens its season-scoped "
+    "games/schedules fetch -- teams/players/ff_playerids are unaffected, see "
+    "IdSpineCollector.__init__)\n"
+    "  --datasets: nflverse_bulk only"
 )
 
 
@@ -79,22 +83,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     job_name, force, season_arg, week_arg, seasons_range, datasets_arg = parsed
 
-    if (seasons_range or datasets_arg) and job_name != "nflverse_bulk":
-        print("--seasons/--datasets are only valid for the nflverse_bulk job", file=sys.stderr)
+    if datasets_arg and job_name != "nflverse_bulk":
+        print("--datasets is only valid for the nflverse_bulk job", file=sys.stderr)
         return 1
+    if seasons_range and job_name not in ("nflverse_bulk", "id_spine"):
+        print("--seasons is only valid for the nflverse_bulk/id_spine jobs", file=sys.stderr)
+        return 1
+
+    seasons_override = None
+    if seasons_range:
+        start, end = seasons_range.split("-")
+        seasons_override = list(range(int(start), int(end) + 1))
 
     job = _JOBS[job_name]
     if isinstance(job, NflverseBulkCollector) and (seasons_range or datasets_arg):
-        seasons_override = None
-        if seasons_range:
-            start, end = seasons_range.split("-")
-            seasons_override = list(range(int(start), int(end) + 1))
         datasets = set(datasets_arg.split(",")) if datasets_arg else None
         try:
             job = NflverseBulkCollector(seasons_override=seasons_override, datasets=datasets)
         except ValueError as exc:
             print(f"--datasets error: {exc}", file=sys.stderr)
             return 1
+    elif isinstance(job, IdSpineCollector) and seasons_range:
+        job = IdSpineCollector(seasons_override=seasons_override)
 
     season = season_arg if season_arg is not None else nfl.get_current_season()
     week = week_arg if week_arg is not None else nfl.get_current_week()
