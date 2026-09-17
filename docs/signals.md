@@ -52,10 +52,23 @@ the way it discounts a pass split):
 ```
 prior_discount = (1 - qb_sensitivity * (1 - qb_factor)) * (1 - ol_sensitivity * (1 - ol_factor))
 ```
-- `qb_factor`: 1.0 if this season's starter (by most attempts in the most recent game so
-  far) matches last season's primary starter (by total attempts); `QB_CHANGE_DISCOUNT =
-  0.6` if different; 1.0 (no discount) if either starter is unknown — never guessed, and
-  logged when it happens.
+- `qb_factor`: a continuity-*share* discount, not a binary same/different-starter flag —
+  a starter who missed half the prior season to injury (or was traded in) isn't penalized
+  like a brand-new starter just because a backup led the team in attempts.
+  ```
+  share = min(1, current_starter_prior_attempts / team_prior_total_attempts)
+  continuity = min(1, share / 0.5)
+  qb_factor = 1 - (1 - QB_CHANGE_DISCOUNT) * (1 - continuity)
+  ```
+  `current_starter_prior_attempts` is this season's starter's (by most attempts in the
+  most recent game so far) own prior-season pass attempts, summed across **any** team
+  they played for (a traded veteran gets full credit for attempts thrown elsewhere);
+  `team_prior_total_attempts` is the *current* team's total prior-season pass attempts
+  across every QB who played for it. Reaching half the team's prior passing workload
+  already earns full continuity (`qb_factor = 1.0`); a share of 0 (brand-new starter, no
+  prior attempts anywhere) reduces to the old floor, `qb_factor = QB_CHANGE_DISCOUNT =
+  0.6`. `qb_factor = 1.0` (no discount) if the current starter or the team's prior-season
+  attempts total is unknown — never guessed, and logged when it happens.
 - `ol_factor`: `OL_MIN_FACTOR + (1 - OL_MIN_FACTOR) * continuity_ratio` where
   `continuity_ratio` is the overlap (out of 5) between this season's and last season's
   top-5-by-snaps O-line group; `OL_MIN_FACTOR = 0.7`. 1.0 (no discount) if either group

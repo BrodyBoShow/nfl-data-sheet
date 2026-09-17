@@ -16,6 +16,8 @@ from pipeline.analysts.efficiency import (
     _offense_discount,
     _ol_continuity_factor,
     _ol_group,
+    _prior_season_qb_attempts,
+    _prior_season_team_total_attempts,
     _qb_change_factor,
     _solve_ratings,
 )
@@ -246,14 +248,70 @@ def test_week_one_prior_only():
 # --------------------------------------------------------------------------------------
 
 
-def test_qb_change_factor_same_vs_different():
-    assert _qb_change_factor("00-1", "00-1") == 1.0
-    assert _qb_change_factor("00-1", "00-2") == QB_CHANGE_DISCOUNT
+def test_qb_change_factor_full_season_starter_no_discount():
+    # Team's only QB last season, same starter this season -- full continuity share.
+    factor = _qb_change_factor("QB1", current_qb_prior_attempts=500, team_prior_total_attempts=500)
+    assert factor == 1.0
 
 
-def test_qb_change_factor_unknown_defaults_to_no_discount():
-    assert _qb_change_factor(None, "00-2") == 1.0
-    assert _qb_change_factor("00-1", None) == 1.0
+def test_qb_change_factor_fifty_percent_injury_season_earns_full_continuity():
+    # min(1, share/0.5) already reaches full continuity at exactly a 50% share -- a
+    # starter who missed half the season to injury isn't penalized like a new starter.
+    factor = _qb_change_factor("QB1", current_qb_prior_attempts=250, team_prior_total_attempts=500)
+    assert factor == 1.0
+    # Below 50% share the discount partially applies (e.g. a 30% share).
+    factor = _qb_change_factor("QB1", current_qb_prior_attempts=150, team_prior_total_attempts=500)
+    expected_continuity = min(1.0, (150 / 500) / 0.5)
+    assert factor == pytest.approx(1.0 - (1.0 - QB_CHANGE_DISCOUNT) * (1.0 - expected_continuity))
+
+
+def test_qb_change_factor_traded_veteran_gets_full_credit_from_other_team():
+    # QB1 threw 400 attempts for a DIFFERENT team last season; the current team's own
+    # prior-season total was only 300 (a different backup led it). Share is capped at 1
+    # rather than crediting the veteran beyond the current team's whole QB room.
+    factor = _qb_change_factor("QB1", current_qb_prior_attempts=400, team_prior_total_attempts=300)
+    assert factor == 1.0
+
+
+def test_qb_change_factor_rookie_with_zero_prior_attempts_gets_full_discount():
+    # Brand-new starter, zero prior-season attempts anywhere -- share=0, continuity=0,
+    # reduces to the same floor the old binary "different starter" case used.
+    factor = _qb_change_factor("QB1", current_qb_prior_attempts=0, team_prior_total_attempts=500)
+    assert factor == pytest.approx(QB_CHANGE_DISCOUNT)
+
+
+def test_qb_change_factor_unknown_starter_or_no_team_data_defaults_to_no_discount():
+    factor = _qb_change_factor(None, current_qb_prior_attempts=0, team_prior_total_attempts=500)
+    assert factor == 1.0
+    factor = _qb_change_factor("QB1", current_qb_prior_attempts=0, team_prior_total_attempts=0)
+    assert factor == 1.0
+
+
+def test_prior_season_team_total_attempts_sums_all_qbs_on_team():
+    prior_pw = pl.DataFrame(
+        {
+            "player_id": ["QB1", "QB2", "QB3"],
+            "team": ["KC", "KC", "BUF"],
+            "attempts": [400, 100, 300],
+        }
+    )
+    assert _prior_season_team_total_attempts(prior_pw, "KC") == 500.0
+    assert _prior_season_team_total_attempts(prior_pw, "BUF") == 300.0
+    assert _prior_season_team_total_attempts(prior_pw, "MIA") == 0.0
+
+
+def test_prior_season_qb_attempts_sums_across_every_team_the_qb_played_for():
+    # QB1 was traded mid-season: some attempts for KC, the rest for BUF after the trade.
+    prior_pw = pl.DataFrame(
+        {
+            "player_id": ["QB1", "QB1", "QB2"],
+            "team": ["KC", "BUF", "KC"],
+            "attempts": [200, 200, 100],
+        }
+    )
+    assert _prior_season_qb_attempts(prior_pw, "QB1") == 400.0
+    assert _prior_season_qb_attempts(prior_pw, "QB2") == 100.0
+    assert _prior_season_qb_attempts(prior_pw, "QB3") == 0.0
 
 
 def test_ol_continuity_factor_full_vs_no_overlap():

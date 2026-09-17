@@ -375,17 +375,22 @@ def _current_season_starting_qb(player_week_current: pl.DataFrame, team: str) ->
     return candidates["player_id"][0] if candidates.height else None
 
 
-def _prior_season_primary_qb(player_week_prior: pl.DataFrame, team: str) -> str | None:
-    """Most-attempts starter across the full prior season."""
+def _prior_season_team_total_attempts(player_week_prior: pl.DataFrame, team: str) -> float:
+    """Every pass attempt thrown by any of the team's QBs across the full prior season."""
     team_qbs = player_week_prior.filter(pl.col("team") == team)
     if team_qbs.height == 0:
-        return None
-    totals = (
-        team_qbs.group_by("player_id")
-        .agg(pl.col("attempts").fill_null(0).sum().alias("attempts"))
-        .sort(["attempts", "player_id"], descending=[True, False])
-    )
-    return totals["player_id"][0] if totals.height else None
+        return 0.0
+    return float(team_qbs["attempts"].fill_null(0).sum())
+
+
+def _prior_season_qb_attempts(player_week_prior: pl.DataFrame, player_id: str) -> float:
+    """This QB's own prior-season pass attempts, summed across every team they played for
+    (not just the current one) -- so a traded veteran's continuity share counts their
+    attempts from the old team too."""
+    rows = player_week_prior.filter(pl.col("player_id") == player_id)
+    if rows.height == 0:
+        return 0.0
+    return float(rows["attempts"].fill_null(0).sum())
 
 
 def _ol_group(snaps_df: pl.DataFrame, team: str) -> set[str]:
@@ -459,19 +464,43 @@ def _resolve_current_ol_group(
     return set()
 
 
-def _qb_change_factor(current_qb: str | None, prior_qb: str | None) -> float:
-    """1.0 = no discount (same starter, or unknown -- never guessed). Mid-season QB
-    changes aren't specially handled: this only compares year-over-year starters, so a
-    benched/injured QB replaced mid-current-season isn't caught until enough of the new
-    starter's own games accumulate (documented gap, docs/signals.md)."""
-    if current_qb is None or prior_qb is None:
+_QB_FULL_CONTINUITY_SHARE = 0.5
+
+
+def _qb_change_factor(
+    current_qb: str | None,
+    current_qb_prior_attempts: float,
+    team_prior_total_attempts: float,
+) -> float:
+    """Continuity-share discount, not a binary same/different starter flag: a starter who
+    missed half the prior season to injury (or was traded in from elsewhere) isn't
+    penalized like a brand-new starter just because a backup led the team in attempts.
+
+    `share` = this season's starter's own prior-season pass attempts -- summed across
+    ANY team they played for, so a traded veteran gets full credit -- divided by the
+    *current* team's prior-season total attempts, capped at 1 (a starter who threw more
+    passes elsewhere last season than this team's whole QB room combined still only earns
+    full continuity, not bonus credit). `continuity = min(1, share / 0.5)`: reaching half
+    of the team's prior passing workload already earns full trust (1.0 = no discount);
+    below that it scales linearly down to a brand-new starter's `share = 0`, which
+    reduces to the same `QB_CHANGE_DISCOUNT` floor as before.
+
+    1.0 = no discount (unknown starter, or no prior-season team data -- never guessed).
+    Mid-season QB changes aren't specially handled: this only compares year-over-year
+    workload, so a benched/injured QB replaced mid-current-season isn't caught until
+    enough of the new starter's own games accumulate (documented gap, docs/signals.md).
+    """
+    if current_qb is None or team_prior_total_attempts <= 0:
         _log.warning(
-            "efficiency: QB-change discount skipped (unknown starter) -- current=%s prior=%s",
+            "efficiency: QB-change discount skipped (unknown starter or no prior team "
+            "attempts) -- current=%s team_prior_total_attempts=%s",
             current_qb,
-            prior_qb,
+            team_prior_total_attempts,
         )
         return 1.0
-    return 1.0 if current_qb == prior_qb else QB_CHANGE_DISCOUNT
+    share = min(1.0, current_qb_prior_attempts / team_prior_total_attempts)
+    continuity = min(1.0, share / _QB_FULL_CONTINUITY_SHARE)
+    return 1.0 - (1.0 - QB_CHANGE_DISCOUNT) * (1.0 - continuity)
 
 
 def _ol_continuity_factor(current_group: set[str], prior_group: set[str]) -> float:
@@ -689,8 +718,13 @@ class EfficiencyAnalyst(Analyst):
         ol_factor: dict[str, float] = {}
         for team in teams:
             cur_qb = _resolve_current_qb(ctx, current_pw, depth_df, team)
-            prior_qb = _prior_season_primary_qb(prior_pw, team)
-            qb_factor[team] = _qb_change_factor(cur_qb, prior_qb)
+            team_prior_total_attempts = _prior_season_team_total_attempts(prior_pw, team)
+            cur_qb_prior_attempts = (
+                _prior_season_qb_attempts(prior_pw, cur_qb) if cur_qb is not None else 0.0
+            )
+            qb_factor[team] = _qb_change_factor(
+                cur_qb, cur_qb_prior_attempts, team_prior_total_attempts
+            )
 
             cur_ol = _resolve_current_ol_group(ctx, current_snaps, depth_df, team)
             prior_ol = _ol_group(prior_snaps, team)
