@@ -181,9 +181,12 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   - **`load_teams()` returns 36 rows, not 32** — every current franchise code plus the
     retired `OAK`/`SD`/`STL`/`LAR` aliases (it's a static "every code nflverse has ever
     used" reference, not a "currently active" list). P1's id_spine collector stores this
-    wholesale into `teams`, so `SELECT * FROM teams` is **not** a safe way to enumerate
-    "the current 32 teams" for any future code. The Efficiency analyst instead derives
-    its team list from which codes actually appear in `team_week`.
+    wholesale into `teams`. **Fixed in P2's wrap-up**: `teams.is_active` (migration
+    `0010_teams_is_active.sql`, set explicitly on every `id_spine` run via
+    `_RETIRED_TEAM_CODES`) — any future code enumerating "the current 32 teams" must
+    filter `WHERE is_active`, per CLAUDE.md's Canonical keys section. The Efficiency
+    analyst still derives its own team list from which codes actually appear in
+    `team_week` rather than querying `teams` at all, unaffected by this.
   - `load_snap_counts()`'s `position` column uses `C`/`G`/`T` for O-line **only for teams
     PFR breaks the line out individually** — some teams' snaps are tagged with the
     generic `OL` instead, with zero `C`/`G`/`T` rows at all. Checked 2025 and 2026 live:

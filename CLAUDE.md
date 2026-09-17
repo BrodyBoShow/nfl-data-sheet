@@ -25,6 +25,10 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
 - `game_id` text, nflverse format: `2026_02_KC_BUF`
 - `team` text, nflverse abbreviations
 - `player_id` text = gsis ID; other providers' IDs live only in the ID crosswalk
+- `teams` holds 36 rows, not 32 â€” `load_teams()` is a static "every code ever used"
+  reference (current codes plus retired `OAK`/`SD`/`STL`/`LAR` aliases). Code enumerating
+  "the current 32 teams" must filter `WHERE is_active`, never `SELECT * FROM teams`
+  unfiltered (`is_active` set by `id_spine`, migration `0010_teams_is_active.sql`).
 - All timestamps stored **UTC** (`timestamptz`); display ET in the UI
 
 ## Data contracts

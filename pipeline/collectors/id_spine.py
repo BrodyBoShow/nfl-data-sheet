@@ -23,6 +23,12 @@ from pipeline.core.hashing import hash_row
 _TIMESTAMP_URL = "https://github.com/nflverse/nflverse-data/releases/download/{tag}/timestamp.json"
 _TRACKED_TAGS = ("schedules", "teams", "players")
 
+# load_teams() is a static "every code ever used" reference table -- verified live
+# (docs/phases/P2.md): 36 rows, not 32, every current code plus these four retired
+# franchise aliases. Any code enumerating "the current 32 teams" must filter
+# `WHERE is_active` rather than `SELECT * FROM teams` (see CLAUDE.md).
+_RETIRED_TEAM_CODES = frozenset({"OAK", "SD", "STL", "LAR"})
+
 _SCHEDULE_REQUIRED = {"game_id", "season", "week", "game_type", "away_team", "home_team"}
 _TEAM_REQUIRED = {"team_abbr", "team_name"}
 _PLAYER_REQUIRED = {"gsis_id", "display_name"}
@@ -188,7 +194,11 @@ class IdSpineCollector(Collector):
         total_written = 0
 
         team_rows = [
-            _finalize(r, ctx.now, ["team_name", "team_nick", "team_conf", "team_division"])
+            _finalize(
+                {**r, "is_active": r["team_abbr"] not in _RETIRED_TEAM_CODES},
+                ctx.now,
+                ["team_name", "team_nick", "team_conf", "team_division", "is_active"],
+            )
             for r in teams_df.select(
                 ["team_abbr", "team_name", "team_nick", "team_conf", "team_division"]
             ).to_dicts()
@@ -204,6 +214,7 @@ class IdSpineCollector(Collector):
                 "team_nick",
                 "team_conf",
                 "team_division",
+                "is_active",
                 "content_hash",
                 "updated_at",
             ],

@@ -3,7 +3,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pipeline.collectors.id_spine import IdSpineCollector
+from pipeline.collectors.id_spine import _RETIRED_TEAM_CODES, IdSpineCollector
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -28,6 +28,12 @@ def test_validate_drops_null_keys():
     assert validated["players"]["gsis_id"].null_count() == 0
     assert validated["teams"]["team_abbr"].null_count() == 0
     assert validated["schedules"]["game_id"].null_count() == 0
+
+
+def test_retired_team_codes_are_exactly_the_documented_four():
+    """Guards against drift from the verified-live 36-row teams table
+    (docs/phases/P2.md) -- 32 current codes plus these four retired aliases."""
+    assert _RETIRED_TEAM_CODES == frozenset({"OAK", "SD", "STL", "LAR"})
 
 
 def test_validate_dedupes_ff_playerids_by_gsis_id():
