@@ -57,35 +57,142 @@ class MetricConfig(NamedTuple):
     k_metric: float
     qb_sensitivity: float
     ol_sensitivity: float
+    # Year-over-year reliability r (see docs/signals.md's "Prior-blend reliability r"
+    # section for the full method) -- multiplies prior_discount in _blend, alongside the
+    # QB/OL discount for offense. `_raw` is the pooled measured value before shrinkage;
+    # the un-suffixed field is what actually feeds the blend. Both default to 1.0 (full
+    # trust, today's pre-estimation behavior) for any MetricConfig built without them,
+    # e.g. test helpers.
+    reliability_off: float = 1.0
+    reliability_def: float = 1.0
+    reliability_off_raw: float = 1.0
+    reliability_def_raw: float = 1.0
 
+
+# Estimated by scripts/estimate_reliability.py -- see docs/signals.md for the method,
+# and re-run once each season completes (a full season's worth of new pairs shifts the
+# pooled estimate).
+_RELIABILITY_ESTIMATED_FROM_SEASONS = "2018-2025"
+_RELIABILITY_ESTIMATED_ON = "2026-09-17"
 
 # Full registry entries (formula/filters/sample_n) live in docs/signals.md -- this is
-# just the (numerator, denominator, shrinkage, discount-sensitivity) config each of the
-# 20 base metrics needs. qb_sensitivity/ol_sensitivity scale how much the offense-side
-# QB-change/OL-continuity discount applies to that metric (0 = no effect, 1 = full
-# effect) -- e.g. a QB change shouldn't discount a pure rush split the way it discounts
-# a pass split. Defense never uses these (see _offense_discount's caller).
+# just the (numerator, denominator, shrinkage, discount-sensitivity, reliability) config
+# each of the 20 base metrics needs. qb_sensitivity/ol_sensitivity scale how much the
+# offense-side QB-change/OL-continuity discount applies to that metric (0 = no effect,
+# 1 = full effect) -- e.g. a QB change shouldn't discount a pure rush split the way it
+# discounts a pass split. Defense never uses these (see _offense_discount's caller).
 _METRIC_CONFIG: list[MetricConfig] = [
-    MetricConfig("epa_per_play", "epa_sum", "plays", 200, 0.5, 0.5),
-    MetricConfig("epa_per_play_pass", "pass_epa_sum", "pass_plays", 120, 1.0, 0.5),
-    MetricConfig("epa_per_play_rush", "rush_epa_sum", "rush_plays", 120, 0.0, 1.0),
-    MetricConfig("epa_per_play_down1", "down1_epa_sum", "down1_plays", 50, 0.5, 0.5),
-    MetricConfig("epa_per_play_down2", "down2_epa_sum", "down2_plays", 50, 0.5, 0.5),
-    MetricConfig("epa_per_play_down3", "down3_epa_sum", "down3_plays", 50, 0.5, 0.5),
-    MetricConfig("epa_per_play_down4", "down4_epa_sum", "down4_plays", 50, 0.5, 0.5),
-    MetricConfig("success_rate", "success_count", "plays", 200, 0.5, 0.5),
-    MetricConfig("success_rate_pass", "pass_success_count", "pass_plays", 120, 1.0, 0.5),
-    MetricConfig("success_rate_rush", "rush_success_count", "rush_plays", 120, 0.0, 1.0),
-    MetricConfig("success_rate_down1", "down1_success_count", "down1_plays", 50, 0.5, 0.5),
-    MetricConfig("success_rate_down2", "down2_success_count", "down2_plays", 50, 0.5, 0.5),
-    MetricConfig("success_rate_down3", "down3_success_count", "down3_plays", 50, 0.5, 0.5),
-    MetricConfig("success_rate_down4", "down4_success_count", "down4_plays", 50, 0.5, 0.5),
-    MetricConfig("explosive_rate", "explosive_count", "plays", 200, 0.5, 0.5),
-    MetricConfig("explosive_rate_pass", "pass_explosive_count", "pass_plays", 120, 1.0, 0.5),
-    MetricConfig("explosive_rate_rush", "rush_explosive_count", "rush_plays", 120, 0.0, 1.0),
-    MetricConfig("points_per_drive", "points", "drives", 15, 0.5, 0.5),
-    MetricConfig("three_and_out_rate", "three_and_out_drives", "drives", 15, 0.5, 0.5),
-    MetricConfig("red_zone_td_rate", "red_zone_tds", "red_zone_trips", 8, 0.5, 0.5),
+    MetricConfig(
+        "epa_per_play", "epa_sum", "plays", 200, 0.5, 0.5,
+        reliability_off=0.3608, reliability_def=0.2262,
+        reliability_off_raw=0.3960, reliability_def_raw=0.2482,
+    ),
+    MetricConfig(
+        "epa_per_play_pass", "pass_epa_sum", "pass_plays", 120, 1.0, 0.5,
+        reliability_off=0.3701, reliability_def=0.2050,
+        reliability_off_raw=0.4146, reliability_def_raw=0.2058,
+    ),
+    MetricConfig(
+        "epa_per_play_rush", "rush_epa_sum", "rush_plays", 120, 0.0, 1.0,
+        reliability_off=0.2938, reliability_def=0.1986,
+        reliability_off_raw=0.2620, reliability_def_raw=0.1930,
+    ),
+    MetricConfig(
+        "epa_per_play_down1", "down1_epa_sum", "down1_plays", 50, 0.5, 0.5,
+        reliability_off=0.2780, reliability_def=0.1994,
+        reliability_off_raw=0.2305, reliability_def_raw=0.1947,
+    ),
+    MetricConfig(
+        "epa_per_play_down2", "down2_epa_sum", "down2_plays", 50, 0.5, 0.5,
+        reliability_off=0.3217, reliability_def=0.1807,
+        reliability_off_raw=0.3178, reliability_def_raw=0.1573,
+    ),
+    MetricConfig(
+        "epa_per_play_down3", "down3_epa_sum", "down3_plays", 50, 0.5, 0.5,
+        reliability_off=0.3078, reliability_def=0.1810,
+        reliability_off_raw=0.2901, reliability_def_raw=0.1578,
+    ),
+    MetricConfig(
+        # 0.0/0.0, not shrunk toward the side mean like every other metric here --
+        # 4th-down attempts are too rare a denominator for any year-over-year signal to
+        # survive (raw pooled r was NEGATIVE, -0.168/-0.211, before clipping). Real
+        # finding, not noise -- see docs/signals.md.
+        "epa_per_play_down4", "down4_epa_sum", "down4_plays", 50, 0.5, 0.5,
+        reliability_off=0.0, reliability_def=0.0,
+        reliability_off_raw=0.0, reliability_def_raw=0.0,
+    ),
+    MetricConfig(
+        "success_rate", "success_count", "plays", 200, 0.5, 0.5,
+        reliability_off=0.3690, reliability_def=0.2232,
+        reliability_off_raw=0.4124, reliability_def_raw=0.2422,
+    ),
+    MetricConfig(
+        "success_rate_pass", "pass_success_count", "pass_plays", 120, 1.0, 0.5,
+        reliability_off=0.3789, reliability_def=0.2367,
+        reliability_off_raw=0.4322, reliability_def_raw=0.2692,
+    ),
+    MetricConfig(
+        "success_rate_rush", "rush_success_count", "rush_plays", 120, 0.0, 1.0,
+        reliability_off=0.3354, reliability_def=0.1946,
+        reliability_off_raw=0.3452, reliability_def_raw=0.1851,
+    ),
+    MetricConfig(
+        "success_rate_down1", "down1_success_count", "down1_plays", 50, 0.5, 0.5,
+        reliability_off=0.2807, reliability_def=0.1795,
+        reliability_off_raw=0.2359, reliability_def_raw=0.1547,
+    ),
+    MetricConfig(
+        "success_rate_down2", "down2_success_count", "down2_plays", 50, 0.5, 0.5,
+        reliability_off=0.3446, reliability_def=0.2107,
+        reliability_off_raw=0.3637, reliability_def_raw=0.2173,
+    ),
+    MetricConfig(
+        "success_rate_down3", "down3_success_count", "down3_plays", 50, 0.5, 0.5,
+        reliability_off=0.3267, reliability_def=0.1729,
+        reliability_off_raw=0.3279, reliability_def_raw=0.1417,
+    ),
+    MetricConfig(
+        # See epa_per_play_down4 above -- same reasoning, same rare denominator.
+        "success_rate_down4", "down4_success_count", "down4_plays", 50, 0.5, 0.5,
+        reliability_off=0.0, reliability_def=0.0,
+        reliability_off_raw=0.0, reliability_def_raw=0.0,
+    ),
+    MetricConfig(
+        "explosive_rate", "explosive_count", "plays", 200, 0.5, 0.5,
+        reliability_off=0.3168, reliability_def=0.2422,
+        reliability_off_raw=0.3080, reliability_def_raw=0.2803,
+    ),
+    MetricConfig(
+        "explosive_rate_pass", "pass_explosive_count", "pass_plays", 120, 1.0, 0.5,
+        reliability_off=0.2838, reliability_def=0.1830,
+        reliability_off_raw=0.2421, reliability_def_raw=0.1618,
+    ),
+    MetricConfig(
+        # Flagged for review: raw defense r (0.3249) exceeds raw offense r (0.3181) by
+        # 0.007 -- accepted as within estimation noise for 7 season-pairs, not a sign
+        # something's backwards (docs/signals.md).
+        "explosive_rate_rush", "rush_explosive_count", "rush_plays", 120, 0.0, 1.0,
+        reliability_off=0.3218, reliability_def=0.2645,
+        reliability_off_raw=0.3181, reliability_def_raw=0.3249,
+    ),
+    MetricConfig(
+        "points_per_drive", "points", "drives", 15, 0.5, 0.5,
+        reliability_off=0.3601, reliability_def=0.2184,
+        reliability_off_raw=0.3947, reliability_def_raw=0.2327,
+    ),
+    MetricConfig(
+        "three_and_out_rate", "three_and_out_drives", "drives", 15, 0.5, 0.5,
+        reliability_off=0.3483, reliability_def=0.1888,
+        reliability_off_raw=0.3710, reliability_def_raw=0.1734,
+    ),
+    MetricConfig(
+        # Flagged for review: raw offense r (0.1980) sits just under the 0.2 threshold --
+        # accepted as within estimation noise, not treated as zero-signal like down4
+        # (docs/signals.md).
+        "red_zone_td_rate", "red_zone_tds", "red_zone_trips", 8, 0.5, 0.5,
+        reliability_off=0.2618, reliability_def=0.1695,
+        reliability_off_raw=0.1980, reliability_def_raw=0.1349,
+    ),
 ]
 
 _TEAM_WEEK_SELECT_COLS = sorted(
@@ -571,7 +678,10 @@ def _build_metric_signal_rows(
     for team in teams:
         cur = current_ratings.get(team)
         pri = prior_ratings.get(team)
-        for side, discount in (("off", offense_discount[team]), ("def", 1.0)):
+        for side, discount in (
+            ("off", offense_discount[team] * metric.reliability_off),
+            ("def", metric.reliability_def),
+        ):
             cur_val = (cur.off if side == "off" else cur.def_) if cur else None
             cur_n = (cur.off_n if side == "off" else cur.def_n) if cur else 0.0
             pri_val = (pri.off if side == "off" else pri.def_) if pri else None

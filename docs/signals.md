@@ -39,7 +39,10 @@ value — the same number stored in `sample_n`) and that signal's `k_metric` (a 
 constant in the same units, set per metric below):
 
 - `w_cur = n_cur / (n_cur + k_metric)`
-- `w_prior = (1 - w_cur) * prior_discount`
+- `w_prior = (1 - w_cur) * prior_discount * r` — `r` is the metric/side's year-over-year
+  reliability factor (see "Prior-blend reliability r" below); `prior_discount` is the
+  QB/OL-continuity discount below for offense, or `1.0` for defense (no continuity data
+  staged for defense — `r` is still applied to defense, just not `prior_discount`).
 - `w_league = 1 - w_cur - w_prior`
 - `value = w_cur * current + w_prior * prior + w_league * league_avg`
 - **`stability = w_cur + w_prior`** — read confidence off `stability`, not `sample_n`;
@@ -73,10 +76,11 @@ prior_discount = (1 - qb_sensitivity * (1 - qb_factor)) * (1 - ol_sensitivity * 
   `continuity_ratio` is the overlap (out of 5) between this season's and last season's
   top-5-by-snaps O-line group; `OL_MIN_FACTOR = 0.7`. 1.0 (no discount) if either group
   is unknown, logged.
-- **Defense signals always use `prior_discount = 1.0`** — there's no reliable front-
-  seven/secondary continuity data staged yet, so a defense's blend shifts weight only via
-  `n_cur` growing over the season, not via a personnel discount. **Documented gap**: this
-  is a candidate future refinement once such data exists, not solved here.
+- **Defense signals always use `prior_discount = 1.0`** (before `r`) — there's no
+  reliable front-seven/secondary continuity data staged yet, so a defense's blend shifts
+  weight via `n_cur` growing over the season and via `r` (below), not via a personnel
+  discount. **Documented gap**: personnel continuity is a candidate future refinement
+  once such data exists, not solved here.
 - **Known limitation:** this only catches a *year-over-year* starter change. A QB
   benched/replaced mid-*current*-season isn't specially handled — the current-season
   rating still pools all of that season's plays under one number (old and new starter
@@ -89,6 +93,52 @@ prior_discount = (1 - qb_sensitivity * (1 - qb_factor)) * (1 - ol_sensitivity * 
 - `QB_CHANGE_DISCOUNT`/`OL_MIN_FACTOR`/every `k_metric` below are pinned judgment-call
   constants, not tuned to any data — flagged as tunable once Phase 5's grader can measure
   whether they help (`docs/architecture.md`'s `GRADE ==> A_EFF` feedback arrow).
+
+### Prior-blend reliability `r`
+
+Unlike `QB_CHANGE_DISCOUNT`/`OL_MIN_FACTOR`/`k_metric` above, `r` **is** estimated from
+data, not pinned by judgment call — it answers a different question than the QB/OL
+discount: not "did personnel change," but "how much does *this metric* actually carry
+over from one season to the next at all," per side. A metric with a weak year-over-year
+signal shouldn't lean on the prior much even with the same starter and the same O-line.
+
+**Method** (`scripts/estimate_reliability.py` — re-run and compare against the values
+below once each season completes, since a full season's new pairs shifts the pooled
+estimate):
+1. For each season **2018–2025** independently and each metric, solve full-season
+   opponent-adjusted offense/defense ratings via `_solve_ratings()` — the same "plain
+   solve" path production uses for its own prior-season solve (`k_metric` shrinkage
+   included, since a `_solve_ratings()` output is exactly the kind of value that becomes
+   `prior` in the blend above).
+2. For each metric/side, correlate season-N ratings against season-N+1 ratings across
+   teams, for each of the 7 adjacent pairs (`2018→2019` … `2024→2025`) and pooled across
+   all 7.
+3. Clip the pooled r to `[0, 1]` (a metric shouldn't get *negative* trust in the prior).
+4. **Shrink each metric's clipped r toward its own side's mean** (offense metrics toward
+   the mean of all offense r's, defense toward the mean of all defense r's):
+   `r_final = 0.5 * r_raw + 0.5 * r_side_mean`. 7 pairs of 32 teams is a small sample, so
+   a single metric's pooled r is itself a noisy estimate; shrinking toward the side mean
+   damps that noise the same way `k_metric` damps a thin current-season sample.
+5. **Exception:** `epa_per_play_down4`/`success_rate_down4` are excluded from both the
+   mean and the shrinkage, and pinned at exactly `r = 0` (not shrunk toward the side
+   mean like everything else). Their raw pooled r was *negative*
+   (`-0.168`/`-0.211` off, `-0.211`/`-0.321` def) before clipping — 4th-down attempts are
+   too rare a denominator (a handful of plays a game) for any year-over-year signal to
+   survive at all. This is a real finding, not noise: a team's down4 rating this season
+   tells you nothing reliable about next season, so the blend should lean on
+   current-season + league only for these two, never the prior.
+- Two results came in below the review thresholds this run and were accepted as-is,
+  not treated as errors: `red_zone_td_rate`'s raw offense r (0.198) sits just under the
+  0.2 line, and `explosive_rate_rush`'s raw defense r (0.3249) exceeds its own raw
+  offense r (0.3181) by 0.007 — both read as ordinary estimation noise from 7 pairs of
+  32 teams, not a sign either metric is backwards.
+- Both the shrunk `reliability_off`/`reliability_def` (what actually feeds the blend)
+  and the raw `reliability_off_raw`/`reliability_def_raw` (pre-shrinkage, for comparing
+  a future re-estimation against this one) live on each `MetricConfig` entry in
+  `pipeline/analysts/efficiency.py`, alongside `_RELIABILITY_ESTIMATED_FROM_SEASONS`
+  (`"2018-2025"`) and `_RELIABILITY_ESTIMATED_ON` (`"2026-09-17"`).
+- `r` is a fixed constant per metric/side, not a per-team or per-week value — it doesn't
+  vary with `n_cur` the way `w_cur`/`w_prior` do.
 
 Opponent adjustment itself (before this blend ever runs) solves offense and defense
 ratings jointly by iteration for each of current season and prior season separately —

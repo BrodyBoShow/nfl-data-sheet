@@ -402,6 +402,46 @@ def test_stability_drops_only_for_sensitive_metrics_on_qb_change():
     assert rush_changed == pytest.approx(rush_same)
 
 
+def test_reliability_scales_prior_weight_independently_for_offense_and_defense():
+    current = pl.DataFrame([_tw_row("AA", "BB", 1), _tw_row("BB", "AA", 1)])
+    prior = pl.DataFrame([_tw_row("AA", "BB", 1), _tw_row("BB", "AA", 1)])
+    teams = ["AA", "BB"]
+
+    def _stability_for(reliability_off: float, reliability_def: float, side: str) -> float:
+        metric = MetricConfig(
+            "epa_per_play",
+            "epa_sum",
+            "plays",
+            200,
+            0.5,
+            0.5,
+            reliability_off=reliability_off,
+            reliability_def=reliability_def,
+        )
+        rows = _build_metric_signal_rows(
+            metric=metric,
+            current_tw=current,
+            prior_tw=prior,
+            teams=teams,
+            offense_discount={"AA": 1.0, "BB": 1.0},
+            season=2099,
+            week=2,
+            as_of=datetime(2099, 1, 1, tzinfo=UTC),
+            inputs_version="test",
+        )
+        return next(
+            r["stability"] for r in rows if r["team"] == "AA" and r["signal"].endswith(f"_{side}")
+        )
+
+    # Dropping reliability_off to 0 shrinks w_prior (handing that weight to the league
+    # average, never to w_cur -- same rule QB/OL discounts already follow), so offense
+    # stability drops. Defense is untouched since its own reliability stayed at 1.0.
+    assert _stability_for(0.0, 1.0, "off") < _stability_for(1.0, 1.0, "off")
+    # Same check for the defense side, which had no reliability concept at all before
+    # this change (prior_discount was hardcoded to 1.0).
+    assert _stability_for(1.0, 0.0, "def") < _stability_for(1.0, 1.0, "def")
+
+
 # --------------------------------------------------------------------------------------
 # Signal-row assembly
 # --------------------------------------------------------------------------------------
