@@ -52,6 +52,11 @@ Python 3.12, uv, Polars, **nflreadpy** (not nfl_data_py — deprecated), httpx, 
 psycopg 3, pytest, ruff, mypy. Supabase Postgres (free tier), plain SQL migrations in
 `db/migrations/NNNN_name.sql`. Next.js App Router + TypeScript in `/web` (Phase 6+, don't
 scaffold early). GitHub Actions for scheduling, UTC crons, never on `:00`.
+- Never edit a migration file once it's been applied — not even comments. `db/migrate.py`
+  tracks applied migrations by filename only (`schema_migrations.id = path.stem`, no
+  checksum), so it won't detect or warn about drift between the file on disk and what
+  actually ran. Any schema change or correction, however small, goes in a new
+  `NNNN_name.sql` migration.
 
 ## Repo layout
 ```

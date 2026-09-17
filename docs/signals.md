@@ -12,7 +12,7 @@ source columns. Add an entry in the same PR/commit that first writes the signal.
 | season, week | int | |
 | team | text null | |
 | player_id | text null | null for team signals |
-| sector | text | efficiency, usage, matchup, scheme, availability, environment, market |
+| sector | text | efficiency, usage, scheme, availability, environment, market |
 | signal | text | snake_case, e.g. `epa_per_dropback_adj` |
 | value | double precision null | |
 | league_pct | real null | 0–100 |
@@ -37,30 +37,13 @@ Coordinator changes are out of scope unless a verified live source exists. Blend
 shifts toward the current season as weeks accumulate; `stability` reflects the resulting
 confidence (higher = less prior-dependent).
 
-## Matchup history sector
-
-Signals like "player X vs this specific opponent" or "team vs division rival" are drawn
-from the same staged tables as Efficiency (`player_week`, `team_week` from the nflverse
-bulk collector), just filtered/joined by opponent across seasons instead of aggregated
-league-wide. Rules:
-- **Recency-weighted, not flat-averaged.** Older meetings count less; roster/scheme
-  turnover makes a 3-year-old game a weak signal on its own.
-- **Sample sizes are small by nature** (typically 1–2 meetings/season, sometimes zero in
-  a given year for non-division opponents). `sample_n` must count actual meetings used,
-  and `stability` must be low by default for this sector — never let a 1-game sample
-  read as confident just because the value itself looks clean.
-- **`league_pct` may be null** when there isn't enough league-wide matchup data to rank
-  against; leave it null rather than compute a percentile off too few points.
-- The UI must always show `sample_n` next to any matchup-history value (see P6) so a
-  one-game "trend" isn't mistaken for a stable pattern.
-
 ## Registry template
 
 Copy this block per signal when it's implemented.
 
 ```markdown
 ### `<signal_name>`
-- **Sector:** efficiency | usage | matchup | scheme | availability | environment | market
+- **Sector:** efficiency | usage | scheme | availability | environment | market
 - **Scope:** team | player | game (which of team/player_id/game_id are non-null)
 - **Formula:** <exact calculation>
 - **Filters:** <e.g. garbage time excluded, min plays, situation splits>

@@ -65,6 +65,12 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   `load_ftn_charting`, `load_depth_charts`, `load_pfr_advstats` (bulk collector, P2 —
   `load_team_stats` and `load_rosters` were verified but aren't staged; see the
   collector's docstring for why).
+- **Staged tables span two phases' analysts, one collector.** The `player_week`,
+  `team_week`, `ngs`, and `depth` staged tables (db/migrations/0006) feed the Phase 2
+  Efficiency analyst; `snaps`, `ftn`, and `pfr_advstats` feed the Phase 7 Usage/role and
+  Scheme analysts. They're all populated by the same `pipeline/collectors/nflverse_bulk.py`
+  run rather than split across two collectors, since they share one source family and one
+  freshness gate.
 - **Verified shapes (ID spine, as of 2026-09-16):**
   - `load_schedules(seasons=[2025])` → 285 rows × 46 cols. Key columns: `game_id`,
     `season`, `game_type`, `week`, `gameday`, `away_team`/`home_team`,

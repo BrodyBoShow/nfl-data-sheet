@@ -26,7 +26,6 @@ flowchart TB
   subgraph L2["L2 Analysts (cut by sector)"]
     A_EFF[Efficiency]
     A_USE[Usage and role]
-    A_MHIST[Matchup history]
     A_SCH[Scheme]
     A_AVI[Availability impact]
     A_ENV[Environment]
@@ -44,9 +43,9 @@ flowchart TB
   PROJ[(Projection log)]
 
   C_NFLV & C_LIVE & C_ODDS & C_WX & C_AVAIL & C_INTEL --> STAGED
-  STAGED --> A_EFF & A_USE & A_MHIST & A_SCH & A_AVI & A_ENV & A_MKT
+  STAGED --> A_EFF & A_USE & A_SCH & A_AVI & A_ENV & A_MKT
 
-  C_NFLV --> A_EFF & A_USE & A_MHIST & A_SCH & A_AVI & A_ENV
+  C_NFLV --> A_EFF & A_USE & A_SCH & A_AVI & A_ENV
   C_AVAIL --> A_AVI
   C_INTEL --> A_AVI
   C_WX --> A_ENV
@@ -54,7 +53,7 @@ flowchart TB
   C_LIVE --> A_MKT
   A_USE --> A_AVI
 
-  A_EFF & A_USE & A_MHIST & A_SCH & A_AVI & A_ENV & A_MKT --> SIGNALS
+  A_EFF & A_USE & A_SCH & A_AVI & A_ENV & A_MKT --> SIGNALS
   SIGNALS --> SYN
   SIGNALS --> UI
   SYN --> UI
@@ -95,10 +94,12 @@ flowchart TB
   source, one collector per source family.
 
 - **L2 Analysts** read only stored tables (never external sources) and write only to the
-  `signals` table. Cut by sector. **Usage/role** and **Matchup history** run as soon as
-  the nflverse bulk collector exists (Phase 2) — neither needs a new external source, and
-  Availability impact (Phase 3) depends on Usage's target/carry shares, so both are
-  sequenced before it rather than bundled with Scheme/Intel later.
+  `signals` table. Cut by sector. **Usage/role** is built in Phase 7 (with Scheme/Intel),
+  after Availability impact (Phase 3) — so Availability impact's redistribution logic
+  reads raw snap shares (from the nflverse bulk collector's `snaps` table) rather than
+  Usage's target/carry shares when it's first built. Once Usage exists in Phase 7, its
+  more refined shares become available too; whether Availability impact is revisited to
+  consume them is an open question for that phase, not decided here.
 
 - **L3 Synthesis and sheet** reads `signals` and never calls external sources. The web
   app reads only our database.
@@ -128,7 +129,7 @@ daily, **T3** weekly, **OD** on demand.
 
 | Collector | Source(s) | Reliability | Tier | Phase | Stores |
 |---|---|---|---|---|---|
-| nflverse bulk | nflreadpy: pbp, player/team stats, snap counts, NGS, PFR advanced, FTN charting, depth charts, rosters | Open data | T2 | 2 | Aggregates only (player_week, team_week, snaps, ngs, ftn, depth). **Never raw pbp in Postgres.** |
+| nflverse bulk | nflreadpy: pbp, player stats, snap counts, NGS, PFR advanced, FTN charting, depth charts | Open data | T2 | 2 | Aggregates only (player_week, team_week, snaps, ngs, ftn, pfr_advstats, depth). **Never raw pbp in Postgres.** `load_team_stats`/`load_rosters` verified but not staged — see `docs/phases/P2.md` deviations. |
 | Live game | ESPN scoreboard/game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
 | Odds | The Odds API free tier + ESPN embedded lines | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Weather | Open-Meteo (no key) + stadium coords/roof/surface | Open data | T1 | 4 | weather_snapshots (append-only), outdoor only |
@@ -140,11 +141,10 @@ daily, **T3** weekly, **OD** on demand.
 | Analyst | Phase | Signals |
 |---|---|---|
 | Efficiency | 2 | Opponent-adjusted EPA/play, success rate, explosive rate, points/drive, three-and-out rate, red-zone TD rate; pass/rush and down splits; garbage time filtered; prior-blended. |
-| Usage and role | 2 | Snap share, target share, air-yards share, red-zone/goal-line share, carry share, WoW deltas. Feeds Availability impact. |
-| Matchup history | 2 | Player vs. specific opponent historical performance (recency-weighted across meetings), team vs. division/rival trends, home/away-vs-opponent-type splits. Sample sizes are usually small (1–2 meetings/season) — `stability` reflects this and the UI must show `sample_n` alongside the value. |
-| Availability impact | 3 | Target/carry redistribution, replacement quality gap, OL/secondary cluster flags, practice-trend risk. Uses Usage's target/carry shares (Phase 2) rather than raw snap shares. |
+| Availability impact | 3 | Target/carry redistribution, replacement quality gap, OL/secondary cluster flags, practice-trend risk. Uses raw snap shares (from the nflverse bulk collector's `snaps` table) as the redistribution baseline, since Usage/role (Phase 7) isn't built yet at this phase. |
 | Market | 4 | Open vs. current line, movement velocity, implied team totals, key-number crossings. No "sharp money" claims. |
 | Environment | 4 | Wind/precip flags for passing/kicking, dome/outdoor, surface, altitude, rest differential, travel distance, timezone crossings. |
+| Usage and role | 7 | Snap share, target share, air-yards share, red-zone/goal-line share, carry share, WoW deltas. |
 | Scheme | 7 | Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled). |
 
 ### L3 Synthesis and sheet
@@ -172,10 +172,23 @@ minutes.
 
 ## Deviations from the original kickoff brief
 
-- **Usage/role and Matchup history moved from Phase 7 to Phase 2.** Reason: both only
-  need the nflverse bulk collector (already built in Phase 2), no new external source.
-  Availability impact (Phase 3) already depended on Usage's shares and was falling back
-  to raw snap shares in the original ordering — sequencing Usage before it removes that
-  workaround. Matchup history is new (not in the original brief); it's a low-sample,
-  high-value addition to the "extensive per-player/matchup data" goal, so it's grouped
-  with Usage since it draws on the same staged tables.
+- **Usage/role is back in Phase 7, its original slot (2026-09-17).** A prior version of
+  this plan moved it to Phase 2 alongside a new Matchup history sector, reasoning that
+  both only needed the nflverse bulk collector and that sequencing Usage before
+  Availability impact (Phase 3) would let Availability impact consume Usage's
+  target/carry shares directly instead of falling back to raw snap shares. That move was
+  reverted: Phase 2 is Efficiency only. Availability impact (Phase 3) uses raw snap
+  shares (from the nflverse bulk collector's `snaps` table) as its redistribution
+  baseline — the original arrangement — rather than waiting on Usage. Whether Availability
+  impact is revisited to consume Usage's shares once Phase 7 exists is an open question,
+  not decided here.
+- **Matchup history is cut from the plan entirely**, not just moved. It was never in the
+  original `KICKOFF.md` brief — it was proposed during P1/P2 planning as a low-sample,
+  high-value addition drawing on the same staged tables as Efficiency/Usage, but was
+  removed (2026-09-17) rather than built or rehomed to another phase.
+- The nflverse bulk collector (Phase 2) also stages `pfr_advstats` (PFR advanced stats,
+  tag `pfr_advstats`) — not in the original table list, added because the phase's own
+  scope line named "PFR advanced" as a source to fetch. Not consumed by the Efficiency
+  analyst; available for Usage/Scheme (Phase 7) or later refinement. `load_team_stats`
+  and `load_rosters` were live-verified but are not staged — see `docs/phases/P2.md`'s
+  deviations for why.
