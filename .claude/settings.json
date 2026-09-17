@@ -1,9 +1,17 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)"
+    ],
     "deny": [
       "Read(./data/**)",
       "Read(./.cache/**)",
-      "Read(**/.cache/**)"
+      "Read(**/.cache/**)",
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)"
     ]
   },
   "hooks": {

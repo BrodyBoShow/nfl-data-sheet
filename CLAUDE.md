@@ -112,3 +112,10 @@ web/                      # Phase 6+
 - Supabase MCP is read-only here — schema changes go through `db/migrations/` only.
 - Flag anything in `KICKOFF.md` you think is wrong, with the reason, instead of silently
   deviating.
+
+## Git / commit workflow
+- Before every commit, run `git status` and confirm `.env` and anything under `data/` or
+  `.cache/` is not staged. If it is, stop and tell the user instead of committing.
+- Commit at the end of each task the user approves, with a clear message.
+- Never run `git push`, `git reset --hard`, `git rebase`, or anything else that rewrites
+  history. Pushing waits until the user explicitly says so.
