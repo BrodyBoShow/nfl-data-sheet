@@ -31,8 +31,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     job = _JOBS[argv[0]]
-    job.run(season=nfl.get_current_season(), week=nfl.get_current_week())
-    return 0
+    result = job.run(season=nfl.get_current_season(), week=nfl.get_current_week())
+
+    if result.status == "success":
+        rows = f"{result.rows_written:,} rows written"
+        print(f"{result.name}: success, {rows}, {result.duration_s:.1f}s")
+    elif result.status == "skipped_fresh":
+        print(f"{result.name}: skipped_fresh (no source changes)")
+    else:
+        print(f"{result.name}: {result.status} - {result.error}")
+
+    return 0 if result.status in ("success", "skipped_fresh") else 1
 
 
 if __name__ == "__main__":

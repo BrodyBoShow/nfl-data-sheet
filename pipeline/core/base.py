@@ -10,6 +10,7 @@ Phase: P1
 from __future__ import annotations
 
 import sys
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -39,6 +40,19 @@ class RunContext:
     conn: psycopg.Connection
 
 
+@dataclass(frozen=True)
+class RunResult:
+    """What a `Collector`/`Analyst` run did, for callers that want to report on it
+    (e.g. `pipeline/run.py`'s one-line summary) without re-querying `agent_runs`.
+    """
+
+    name: str
+    status: run_log.RunStatus
+    rows_written: int
+    duration_s: float
+    error: str | None = None
+
+
 def _execute(
     *,
     name: str,
@@ -47,8 +61,9 @@ def _execute(
     season_type: str,
     is_ready: Callable[[RunContext], bool],
     do_work: Callable[[RunContext], int],
-) -> None:
+) -> RunResult:
     settings = get_settings()
+    started = time.monotonic()
     with get_connection() as conn:
         run_id = run_log.start_run(conn, name)
         conn.commit()
@@ -65,18 +80,20 @@ def _execute(
             if not is_ready(ctx):
                 run_log.finish_run(conn, run_id, status="skipped_fresh")
                 conn.commit()
-                return
+                return RunResult(name, "skipped_fresh", 0, time.monotonic() - started)
 
             rows_written = do_work(ctx)
             conn.commit()
             run_log.finish_run(conn, run_id, status="success", rows_written=rows_written)
             conn.commit()
+            return RunResult(name, "success", rows_written, time.monotonic() - started)
         except Exception as exc:
             conn.rollback()
             error = f"{type(exc).__name__}: {exc}"
             run_log.finish_run(conn, run_id, status="failed", error=error)
             conn.commit()
             print(f"[{name}] FAILED: {error.splitlines()[0]}", file=sys.stderr)
+            return RunResult(name, "failed", 0, time.monotonic() - started, error=error)
 
 
 class Collector(ABC):
@@ -105,8 +122,8 @@ class Collector(ABC):
     def store(self, ctx: RunContext, validated: Any) -> int:
         """Write to Postgres via ctx.conn. Returns rows_written."""
 
-    def run(self, *, season: int, week: int, season_type: str = "REG") -> None:
-        _execute(
+    def run(self, *, season: int, week: int, season_type: str = "REG") -> RunResult:
+        return _execute(
             name=self.name,
             season=season,
             week=week,
@@ -138,8 +155,8 @@ class Analyst(ABC):
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> int:
         """Upsert df into `signals` via ctx.conn. Returns rows_written."""
 
-    def run(self, *, season: int, week: int, season_type: str = "REG") -> None:
-        _execute(
+    def run(self, *, season: int, week: int, season_type: str = "REG") -> RunResult:
+        return _execute(
             name=self.name,
             season=season,
             week=week,
