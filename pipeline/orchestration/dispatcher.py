@@ -6,20 +6,29 @@ Writes: nothing directly (delegates to each job)
 Tier: T0
 Phase: 1 (skeleton) -- full calendar-aware triggering (docs/architecture.md's Dispatcher
        calendar, e.g. "don't even try the odds collector outside its windows") is Phase 8
-       tuning work. For now every registered collector runs on every ~10 min tick, and
-       each one's own should_run() decides whether there's anything to do -- cheap for
-       the jobs that exist today (one HTTP freshness check apiece). Analysts are gated
-       differently: an analyst only re-runs if at least one collector actually wrote
-       new/changed rows THIS tick (RunResult.rows_written > 0), not via its own
-       inputs_ready() -- a tick where every collector returns skipped_fresh (or a 0-row
-       success, e.g. a freshness-gate false alarm that hash-diffed to no real changes)
-       skips every analyst entirely, so a quiet tick doesn't recompute every signal every
-       ~10 minutes for no reason. Chosen over adding a freshness-marker mechanism to each
-       Analyst because the information is already free from this tick's own collector
-       results and needs no change to the Analyst contract; the tradeoff is that a fully
-       quiet tick writes no agent_runs row at all for any analyst (by design -- nothing
-       was attempted, so there's nothing to log), which the collectors' own
-       skipped_fresh/0-row rows already explain if that's ever in question.
+       tuning work. For now every registered collector runs on every tick, and each
+       one's own should_run() decides whether there's anything to do -- cheap for the
+       jobs that exist today (one HTTP freshness check apiece). The cron aims for
+       roughly every 15 minutes, but GitHub Actions' free-tier scheduled triggers are
+       best-effort on shared runners, not a guarantee (.github/workflows/dispatcher.yml
+       -- observed live: only 1 of an expected ~18 ticks over 3 hours actually fired) --
+       nothing here may assume a tick happened recently, or that ticks are evenly
+       spaced, or even that one happens at all in a given window. should_run()/
+       inputs_ready() are built accordingly: they decide what's due from stored
+       freshness state compared against a live/current value or absolute now, never
+       from how much time or how many ticks have passed since the last run. Analysts
+       are gated differently: an analyst only re-runs if at least one collector
+       actually wrote new/changed rows THIS tick (RunResult.rows_written > 0), not via
+       its own inputs_ready() -- a tick where every collector returns skipped_fresh (or
+       a 0-row success, e.g. a freshness-gate false alarm that hash-diffed to no real
+       changes) skips every analyst entirely, so a quiet tick doesn't recompute every
+       signal for no reason -- regardless of how long it's been since the last one.
+       Chosen over adding a freshness-marker mechanism to each Analyst because the
+       information is already free from this tick's own collector results and needs no
+       change to the Analyst contract; the tradeoff is that a fully quiet tick writes no
+       agent_runs row at all for any analyst (by design -- nothing was attempted, so
+       there's nothing to log), which the collectors' own skipped_fresh/0-row rows
+       already explain if that's ever in question.
 """
 
 from __future__ import annotations
