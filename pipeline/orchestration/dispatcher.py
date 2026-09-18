@@ -30,7 +30,9 @@ from typing import Protocol
 
 import nflreadpy as nfl
 
+from pipeline.analysts.availability_impact import AvailabilityImpactAnalyst
 from pipeline.analysts.efficiency import EfficiencyAnalyst
+from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.core.base import Analyst, Collector, RunResult
@@ -44,13 +46,19 @@ class _RunnableJob(Protocol):
     def run(self, *, season: int, week: int) -> RunResult: ...
 
 
-_COLLECTORS: list[Collector] = [IdSpineCollector(), NflverseBulkCollector()]
-_ANALYSTS: list[Analyst] = [EfficiencyAnalyst()]
+_COLLECTORS: list[Collector] = [
+    IdSpineCollector(),
+    NflverseBulkCollector(),
+    AvailabilityCollector(),
+]
+_ANALYSTS: list[Analyst] = [EfficiencyAnalyst(), AvailabilityImpactAnalyst()]
 
 _FRESHNESS_CHECKS = [
     FreshnessCheck(agent="id_spine", tier="T2"),
     FreshnessCheck(agent="nflverse_bulk", tier="T2"),
     FreshnessCheck(agent="efficiency", tier="T2"),
+    FreshnessCheck(agent="availability", tier="T1"),
+    FreshnessCheck(agent="availability_impact", tier="T1"),
 ]
 
 

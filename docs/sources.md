@@ -218,6 +218,10 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     approximate.
   - The player crosswalk is split across two sources (`load_players` has PFR/PFF/ESPN;
     `load_ff_playerids` adds Sleeper) — the ID spine collector must join both, not just one.
+    `load_ff_playerids()`'s Sleeper coverage specifically lags current-season
+    rookies/UDFAs and some veteran backups (measured live, Phase 3 — see this doc's
+    Availability section) — `id_spine.py` now also fills `sleeper_id` gaps directly from
+    Sleeper's own self-reported `gsis_id` (fill-null-only) as a secondary source.
 
 ## Live game data (ESPN scoreboard / game summary)
 
@@ -255,16 +259,77 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   hand or derived from nflverse `load_teams`/stadium metadata).
 - **Params/shape/limits:** TBD on first verification call.
 
-## Availability (ESPN injuries, Sleeper players, NFL.com injury reports)
+## Availability (ESPN injuries, Sleeper players)
 
-- **Status:** UNVERIFIED
-- **License:** Unofficial (ESPN, NFL.com); Sleeper API terms apply to player dump.
-- **Reliability:** Can break; page-scrape risk for NFL.com.
-- **Freshness:** T1.
-- **Known traps:** Sleeper's full player dump is large — fetch **at most once per day**.
-  This is the sole source of injury/practice-status data in-season since nflverse's feed
-  is dead (see nflverse traps above).
-- **Params/shape/limits:** TBD on first verification call.
+- **Status:** VERIFIED (live-called 2026-09-17). NFL.com injury-report scraping is
+  deliberately out of scope for now — ESPN + Sleeper only; see Known traps.
+- **License:** Unofficial (ESPN, no published terms); Sleeper API terms apply to the
+  player dump.
+- **Reliability:** Can break without notice — neither is an official/documented API.
+- **Freshness:** T1. ESPN is fetched every collector run (dispatcher's Wed/Fri
+  cadence caps the real-world frequency); Sleeper is throttled to ≤1/day via
+  `source_freshness`.
+- **Params/shape/limits:**
+  - **ESPN**: `GET https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/injuries`,
+    no auth, no query params needed. One call returns **all 32 teams'** current
+    injuries in one response (800 entries on the day verified) — no pagination. Shape:
+    `{timestamp, status, season, injuries: [{id, displayName, injuries: [{id,
+    longComment, shortComment, status, date, source{...},
+    type{id,name,description,abbreviation}, details{type,location,detail,side,
+    returnDate,fantasyStatus}, athlete: {firstName,lastName,displayName,links[]
+    (has the athlete id embedded, e.g. `.../id/3051775/...`), headshot (also carries
+    the id, e.g. `.../3051775.png`), position{abbreviation}, team{abbreviation},
+    notes{items:[...]}, status{name}}}]}]}`. No documented rate limit; CDN
+    `Cache-Control: max-age=9`. Untrimmed per-injury payload averages ~11.7KB (mostly
+    `athlete.team.logos`/`.links` bloat) — the collector stores a trimmed ~716B/row
+    subtree instead (see `injuries.raw`).
+  - **Sleeper**: `GET https://api.sleeper.app/v1/players/nfl`, no auth. Full dump,
+    ~14.6MB, 12,228 players (verified count) keyed by Sleeper's own player id. No
+    documented rate limit; CDN-cached (`s-maxage=600`) — the ≤1/day cap is a courtesy
+    we enforce ourselves, not something the API demands. Fields used:
+    `injury_status, injury_body_part, injury_notes, injury_start_date,
+    practice_participation, practice_description, status, team, gsis_id, espn_id`.
+- **Known traps:**
+  - **No structured practice-participation data exists in either source.** ESPN gives a
+    rolling designation (Questionable/Doubtful/Out/Injured Reserve/Active seen live) plus
+    freeform notes text, no per-day (Wed/Thu/Fri) DNP/Limited/Full grid. Sleeper's
+    `practice_participation` field is populated on ~0 of 12,228 current players
+    (measured live: 1 non-null). `practice_trend_risk` (see `docs/signals.md`) is
+    computed from the designation-change sequence instead — the honest substitute, not
+    an estimate of real participation. A real Wed/Thu/Fri source (e.g. NFL.com's
+    official report) would sharpen this; deliberately deferred rather than scraping HTML
+    this phase.
+  - **ESPN and Sleeper cover different populations, not the same one twice.** Measured
+    live: only ~48% of Sleeper's rostered+injured players (402 in scope on the day
+    verified) appear in ESPN's feed at all by name+team. ESPN reads like a current-week
+    practice-report proxy; Sleeper is the only source for most IR/PUP/Reserve players.
+    Both sources are required.
+  - **ESPN uses `WSH` for Washington; nflverse and Sleeper both use `WAS`.** Verified
+    live by diffing ESPN's 32 team abbreviations against
+    `nflreadpy_teams_sample.parquet` — Sleeper's own team values already match nflverse.
+    Normalized via the shared `pipeline/core/team_aliases.py` (not a second copy).
+  - **Neither source carries its own "week."** Both are rolling snapshots — the
+    collector derives `(season, week, season_type)` from the `games` table
+    (`pipeline/core/schedule.py::resolve_season_week`) using ESPN's own `timestamp`
+    field (for ESPN rows) or the fetch time (for Sleeper rows), never a caller-supplied
+    week.
+  - **`player_id_crosswalk.sleeper_id` coverage lags current-season players.** Measured
+    live against the day's Sleeper injury population: 71.6% resolve via
+    `crosswalk.sleeper_id` directly; ~78.3% with two additional read-only fallback joins
+    (Sleeper's own self-reported `gsis_id` against `players.player_id`, and
+    self-reported `espn_id` against `crosswalk.espn_id` — both exact-ID joins). ESPN, by
+    contrast, resolves 99.9% via `crosswalk.espn_id` alone. The gap skews toward
+    `years_exp` 0–2 rookies/UDFAs plus veterans `load_ff_playerids()` hasn't caught up
+    on. A name+team fallback was tested and rejected — it produced an actual collision
+    between two different real players both named "Blake Miller" on the same team, so
+    it's never used. `id_spine.py` now self-heals this incrementally (fill-null-only,
+    from Sleeper's own self-reported `gsis_id` — see its module docstring). Unresolved
+    rows from either source are stored with `player_id` null, never dropped, and resolve
+    retroactively as the crosswalk improves; a residual handful per snapshot has no
+    crosswalk path at all — mostly practice-squad players plus Sleeper's own "Duplicate
+    Player" placeholder rows, a known Sleeper data artifact.
+- **Fixtures (trimmed):** `tests/fixtures/espn_injuries_sample.json`,
+  `tests/fixtures/sleeper_players_sample.json`.
 
 ## Intel / live news (ESPN NFL news feed, team RSS, Sleeper trending)
 

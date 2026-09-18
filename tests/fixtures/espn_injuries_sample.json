@@ -1,0 +1,1155 @@
+{
+  "timestamp": "2026-09-18T00:53:59Z",
+  "status": "success",
+  "season": {
+    "year": 2026,
+    "type": 2,
+    "name": "Regular Season",
+    "displayName": "2026"
+  },
+  "injuries": [
+    {
+      "id": "28",
+      "displayName": "Washington Commanders",
+      "injuries": [
+        {
+          "id": "637794",
+          "longComment": "Lane was an unexpected addition to the Commanders' injury report Wednesday, and now his status for Week 2 genuinely appears to be in question. Unless he logs a full practice Friday, there's a decent chance he'll end up carrying an injury designation into the weekend.",
+          "shortComment": "Lane (groin) was a limited participant at practice Thursday.",
+          "status": "Questionable",
+          "date": "2026-09-17T23:21Z",
+          "athlete": {
+            "firstName": "Jaylin",
+            "lastName": "Lane",
+            "displayName": "Jaylin Lane",
+            "shortName": "J. Lane",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4602667/jaylin-lane",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4602667.png",
+              "alt": "Jaylin Lane"
+            },
+            "position": {
+              "id": "1",
+              "name": "Wide Receiver",
+              "displayName": "Wide Receiver",
+              "abbreviation": "WR",
+              "leaf": true
+            },
+            "team": {
+              "id": "28",
+              "uid": "s:20~l:28~t:28",
+              "slug": "washington-commanders",
+              "name": "Commanders",
+              "abbreviation": "WSH",
+              "displayName": "Washington Commanders"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637794",
+                  "type": "news",
+                  "date": "2026-09-17T23:21Z",
+                  "headline": "Lane (groin) was a limited participant at practice Thursday.",
+                  "text": "Lane was an unexpected addition to the Commanders' injury report Wednesday, and now his status for Week 2 genuinely appears to be in question. Unless he logs a full practice Friday, there's a decent chance he'll end up carrying an injury designation into the weekend.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4602667/injuries/637794?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Groin",
+            "location": "Groin",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        },
+        {
+          "id": "637755",
+          "longComment": "Okonkwo has missed Washington's first two practices ahead of a Week 2 clash with the NFC East rival Cowboys. The offseason acquisition was injured in his Commanders debut against the Eagles. John Bates would take on an expanded role if Okonkwo sits out Sunday against Dallas, with more snaps likely available for Ben Sinnott as well.",
+          "shortComment": "Okonkwo (hamstring) is officially listed as a non-participant at Thursday's practice.",
+          "status": "Questionable",
+          "date": "2026-09-17T20:19Z",
+          "athlete": {
+            "firstName": "Chig",
+            "lastName": "Okonkwo",
+            "displayName": "Chig Okonkwo",
+            "shortName": "C. Okonkwo",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4360635/chig-okonkwo",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4360635.png",
+              "alt": "Chig Okonkwo"
+            },
+            "position": {
+              "id": "7",
+              "name": "Tight End",
+              "displayName": "Tight End",
+              "abbreviation": "TE",
+              "leaf": true
+            },
+            "team": {
+              "id": "28",
+              "uid": "s:20~l:28~t:28",
+              "slug": "washington-commanders",
+              "name": "Commanders",
+              "abbreviation": "WSH",
+              "displayName": "Washington Commanders"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637755",
+                  "type": "news",
+                  "date": "2026-09-17T20:19Z",
+                  "headline": "Okonkwo (hamstring) is officially listed as a non-participant at Thursday's practice.",
+                  "text": "Okonkwo has missed Washington's first two practices ahead of a Week 2 clash with the NFC East rival Cowboys. The offseason acquisition was injured in his Commanders debut against the Eagles. John Bates would take on an expanded role if Okonkwo sits out Sunday against Dallas, with more snaps likely available for Ben Sinnott as well.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4360635/injuries/637755?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Hamstring",
+            "location": "Leg",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        }
+      ]
+    },
+    {
+      "id": "22",
+      "displayName": "Arizona Cardinals",
+      "injuries": [
+        {
+          "id": "-2006019",
+          "longComment": "questionable",
+          "shortComment": "questionable",
+          "status": "Questionable",
+          "date": "2026-09-17T23:27Z",
+          "athlete": {
+            "firstName": "Andrew",
+            "lastName": "Billings",
+            "displayName": "Andrew Billings",
+            "shortName": "A. Billings",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/3051775/andrew-billings",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/3051775.png",
+              "alt": "Andrew Billings"
+            },
+            "position": {
+              "id": "32",
+              "name": "Defensive Tackle",
+              "displayName": "Defensive Tackle",
+              "abbreviation": "DT",
+              "leaf": true
+            },
+            "team": {
+              "id": "22",
+              "uid": "s:20~l:28~t:22",
+              "slug": "arizona-cardinals",
+              "name": "Cardinals",
+              "abbreviation": "ARI",
+              "displayName": "Arizona Cardinals"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "-2006019",
+                  "type": "news",
+                  "date": "2026-09-17T23:27Z",
+                  "headline": "questionable",
+                  "text": "questionable",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/3051775/injuries/-2006019?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Knee",
+            "location": "Leg",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        },
+        {
+          "id": "637727",
+          "longComment": "Williams was limited at practice all last week before sitting out Sunday's win against the Chargers. Until he's able to practice in full, he may continue to have to miss game action.",
+          "shortComment": "Williams (Achilles) was estimated to be a limited participant at practice Wednesday, Darren Urban of the Cardinals' official site reports.",
+          "status": "Questionable",
+          "date": "2026-09-17T00:37Z",
+          "athlete": {
+            "firstName": "Garrett",
+            "lastName": "Williams",
+            "displayName": "Garrett Williams",
+            "shortName": "G. Williams",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4568506/garrett-williams",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4568506.png",
+              "alt": "Garrett Williams"
+            },
+            "position": {
+              "id": "29",
+              "name": "Cornerback",
+              "displayName": "Cornerback",
+              "abbreviation": "CB",
+              "leaf": true
+            },
+            "team": {
+              "id": "22",
+              "uid": "s:20~l:28~t:22",
+              "slug": "arizona-cardinals",
+              "name": "Cardinals",
+              "abbreviation": "ARI",
+              "displayName": "Arizona Cardinals"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637727",
+                  "type": "news",
+                  "date": "2026-09-17T00:37Z",
+                  "headline": "Williams (Achilles) was estimated to be a limited participant at practice Wednesday, Darren Urban of the Cardinals' official site reports.",
+                  "text": "Williams was limited at practice all last week before sitting out Sunday's win against the Chargers. Until he's able to practice in full, he may continue to have to miss game action.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4568506/injuries/637727?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Achilles",
+            "location": "Leg",
+            "detail": "Surgery",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "displayName": "Atlanta Falcons",
+      "injuries": [
+        {
+          "id": "637795",
+          "longComment": "Bowman passed a physical at the end of training camp, got taken off the active/PUP list and logged limited practices ahead of Week 1, but he still had to sit out of Atlanta's loss to Pittsburgh. The starting slot corner's limited participation Thursday might just be a precaution ahead of Sunday's matchup with Carolina, but if he has to miss the game, Sydney Brown should be in line to step forward in his place.",
+          "shortComment": "Bowman (Achilles) was a limited participant in practice Thursday after participating in full a day earlier, Will McFadden of the Falcons' official site reports.",
+          "status": "Questionable",
+          "date": "2026-09-17T23:25Z",
+          "athlete": {
+            "firstName": "Billy",
+            "lastName": "Bowman Jr.",
+            "displayName": "Billy Bowman Jr.",
+            "shortName": "B. Bowman Jr.",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4431194/billy-bowman-jr",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4431194.png",
+              "alt": "Billy Bowman Jr."
+            },
+            "position": {
+              "id": "29",
+              "name": "Cornerback",
+              "displayName": "Cornerback",
+              "abbreviation": "CB",
+              "leaf": true
+            },
+            "team": {
+              "id": "1",
+              "uid": "s:20~l:28~t:1",
+              "slug": "atlanta-falcons",
+              "name": "Falcons",
+              "abbreviation": "ATL",
+              "displayName": "Atlanta Falcons"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637795",
+                  "type": "news",
+                  "date": "2026-09-17T23:25Z",
+                  "headline": "Bowman (Achilles) was a limited participant in practice Thursday after participating in full a day earlier, Will McFadden of the Falcons' official site reports.",
+                  "text": "Bowman passed a physical at the end of training camp, got taken off the active/PUP list and logged limited practices ahead of Week 1, but he still had to sit out of Atlanta's loss to Pittsburgh. The starting slot corner's limited participation Thursday might just be a precaution ahead of Sunday's matchup with Carolina, but if he has to miss the game, Sydney Brown should be in line to step forward in his place.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4431194/injuries/637795?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Achilles",
+            "location": "Leg",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        },
+        {
+          "id": "637792",
+          "longComment": "The cornerback told reporters that he would be available to play Sunday against the Panthers, per D. Orlando Ledbetter of BowTieSports.com. Terrell missed practice Wednesday after briefly exiting last Sunday's loss to Pittsburgh following a shoulder injury. He did return to the game and play on 62 defensive snaps overall.",
+          "shortComment": "Terrell (shoulder) was a full participant in Thursday's practice, Will McFadden of the Falcons' official site reports.",
+          "status": "Active",
+          "date": "2026-09-17T23:15Z",
+          "athlete": {
+            "firstName": "A.J.",
+            "lastName": "Terrell Jr.",
+            "displayName": "A.J. Terrell Jr.",
+            "shortName": "A.J. Terrell Jr.",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4239995/aj-terrell-jr",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4239995.png",
+              "alt": "A.J. Terrell Jr."
+            },
+            "position": {
+              "id": "29",
+              "name": "Cornerback",
+              "displayName": "Cornerback",
+              "abbreviation": "CB",
+              "leaf": true
+            },
+            "team": {
+              "id": "1",
+              "uid": "s:20~l:28~t:1",
+              "slug": "atlanta-falcons",
+              "name": "Falcons",
+              "abbreviation": "ATL",
+              "displayName": "Atlanta Falcons"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637792",
+                  "type": "news",
+                  "date": "2026-09-17T23:15Z",
+                  "headline": "Terrell (shoulder) was a full participant in Thursday's practice, Will McFadden of the Falcons' official site reports.",
+                  "text": "The cornerback told reporters that he would be available to play Sunday against the Panthers, per D. Orlando Ledbetter of BowTieSports.com. Terrell missed practice Wednesday after briefly exiting last Sunday's loss to Pittsburgh following a shoulder injury. He did return to the game and play on 62 defensive snaps overall.",
+                  "source": "RotoWire"
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "0",
+            "name": "INJURY_STATUS_ACTIVE",
+            "description": "active",
+            "abbreviation": "A"
+          }
+        }
+      ]
+    },
+    {
+      "id": "33",
+      "displayName": "Baltimore Ravens",
+      "injuries": [
+        {
+          "id": "637810",
+          "longComment": "Hendrickson was a surprise addition to Baltimore's injury report Wednesday, and now his status for Week 2 is up in the air. He'll probably have to practice in some capacity Friday to have any chance of being active Sunday versus the Saints.",
+          "shortComment": "Hendrickson (finger) did not participate at practice Thursday.",
+          "status": "Questionable",
+          "date": "2026-09-18T00:10Z",
+          "athlete": {
+            "firstName": "Trey",
+            "lastName": "Hendrickson",
+            "displayName": "Trey Hendrickson",
+            "shortName": "T. Hendrickson",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/3052743/trey-hendrickson",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/3052743.png",
+              "alt": "Trey Hendrickson"
+            },
+            "position": {
+              "id": "30",
+              "name": "Linebacker",
+              "displayName": "Linebacker",
+              "abbreviation": "LB",
+              "leaf": true
+            },
+            "team": {
+              "id": "33",
+              "uid": "s:20~l:28~t:33",
+              "slug": "baltimore-ravens",
+              "name": "Ravens",
+              "abbreviation": "BAL",
+              "displayName": "Baltimore Ravens"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637810",
+                  "type": "news",
+                  "date": "2026-09-18T00:10Z",
+                  "headline": "Hendrickson (finger) did not participate at practice Thursday.",
+                  "text": "Hendrickson was a surprise addition to Baltimore's injury report Wednesday, and now his status for Week 2 is up in the air. He'll probably have to practice in some capacity Friday to have any chance of being active Sunday versus the Saints.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/3052743/injuries/637810?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Finger",
+            "location": "Arm",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        },
+        {
+          "id": "-2005865",
+          "longComment": "",
+          "shortComment": "",
+          "status": "Active",
+          "date": "2026-09-17T21:48Z",
+          "athlete": {
+            "firstName": "Keondre",
+            "lastName": "Jackson",
+            "displayName": "Keondre Jackson",
+            "shortName": "K. Jackson",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4878287/keondre-jackson",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4878287.png",
+              "alt": "Keondre Jackson"
+            },
+            "position": {
+              "id": "36",
+              "name": "Safety",
+              "displayName": "Safety",
+              "abbreviation": "S",
+              "leaf": true
+            },
+            "team": {
+              "id": "33",
+              "uid": "s:20~l:28~t:33",
+              "slug": "baltimore-ravens",
+              "name": "Ravens",
+              "abbreviation": "BAL",
+              "displayName": "Baltimore Ravens"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "-2005865",
+                  "type": "news",
+                  "date": "2026-09-17T21:48Z",
+                  "headline": "",
+                  "text": "",
+                  "source": "RotoWire"
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "0",
+            "name": "INJURY_STATUS_ACTIVE",
+            "description": "active",
+            "abbreviation": "A"
+          }
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "displayName": "Buffalo Bills",
+      "injuries": [
+        {
+          "id": "637789",
+          "longComment": "Bell will be inactive for another contest after being a healthy scratch for Sunday's 36-31 win over the Texans. His next opportunity to get on the field will come in Week 3 versus the Chargers.",
+          "shortComment": "Bell (coach's decision) is inactive for Thursday's game versus Detroit.",
+          "status": "Out",
+          "date": "2026-09-17T23:09Z",
+          "athlete": {
+            "firstName": "Skyler",
+            "lastName": "Bell",
+            "displayName": "Skyler Bell",
+            "shortName": "S. Bell",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4683153/skyler-bell",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4683153.png",
+              "alt": "Skyler Bell"
+            },
+            "position": {
+              "id": "1",
+              "name": "Wide Receiver",
+              "displayName": "Wide Receiver",
+              "abbreviation": "WR",
+              "leaf": true
+            },
+            "team": {
+              "id": "2",
+              "uid": "s:20~l:28~t:2",
+              "slug": "buffalo-bills",
+              "name": "Bills",
+              "abbreviation": "BUF",
+              "displayName": "Buffalo Bills"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637789",
+                  "type": "news",
+                  "date": "2026-09-17T23:09Z",
+                  "headline": "Bell (coach's decision) is inactive for Thursday's game versus Detroit.",
+                  "text": "Bell will be inactive for another contest after being a healthy scratch for Sunday's 36-31 win over the Texans. His next opportunity to get on the field will come in Week 3 versus the Chargers.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4683153/injuries/637789?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "4",
+            "name": "INJURY_STATUS_OUT",
+            "description": "out",
+            "abbreviation": "O"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "INACTIVE",
+              "abbreviation": "INACTIVE"
+            },
+            "type": "Coach's Decision",
+            "location": "Other",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-27"
+          }
+        },
+        {
+          "id": "637788",
+          "longComment": "Sanders was sidelined by a knee injury in Week 1, and he came down with an illness earlier in the week following as well, the sum of which will be enough to keep him out of game action in Week 2. In his absence, 2024 third-rounder DeWayne Carter figures to continue to see increased work on the defensive line.",
+          "shortComment": "Sanders (knee/illness) is officially listed as inactive for Thursday's game versus the Lions.",
+          "status": "Out",
+          "date": "2026-09-17T23:09Z",
+          "athlete": {
+            "firstName": "T.J.",
+            "lastName": "Sanders",
+            "displayName": "T.J. Sanders",
+            "shortName": "T.J. Sanders",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4684527/tj-sanders",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4684527.png",
+              "alt": "T.J. Sanders"
+            },
+            "position": {
+              "id": "32",
+              "name": "Defensive Tackle",
+              "displayName": "Defensive Tackle",
+              "abbreviation": "DT",
+              "leaf": true
+            },
+            "team": {
+              "id": "2",
+              "uid": "s:20~l:28~t:2",
+              "slug": "buffalo-bills",
+              "name": "Bills",
+              "abbreviation": "BUF",
+              "displayName": "Buffalo Bills"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637788",
+                  "type": "news",
+                  "date": "2026-09-17T23:09Z",
+                  "headline": "Sanders (knee/illness) is officially listed as inactive for Thursday's game versus the Lions.",
+                  "text": "Sanders was sidelined by a knee injury in Week 1, and he came down with an illness earlier in the week following as well, the sum of which will be enough to keep him out of game action in Week 2. In his absence, 2024 third-rounder DeWayne Carter figures to continue to see increased work on the defensive line.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4684527/injuries/637788?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "4",
+            "name": "INJURY_STATUS_OUT",
+            "description": "out",
+            "abbreviation": "O"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "INACTIVE",
+              "abbreviation": "INACTIVE"
+            },
+            "type": "Knee",
+            "location": "Leg",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-27"
+          }
+        }
+      ]
+    },
+    {
+      "id": "29",
+      "displayName": "Carolina Panthers",
+      "injuries": [
+        {
+          "id": "637797",
+          "longComment": "Brown has now missed back-to-back practices to open the week with a back injury, and he will have one more chance to practice Friday ahead of Sunday's matchup with Atlanta. The defensive lineman secured two solo tackles in the team's Week 1 loss to Chicago, and if he is unavailable Week 2, Aaron Hall and TeRah Edwards would be candidates to draw a start in Brown's place.",
+          "shortComment": "Brown (back) did not participate at the Panthers' practice Thursday, Darin Gantt of the team's official website reports.",
+          "status": "Questionable",
+          "date": "2026-09-17T23:28Z",
+          "athlete": {
+            "firstName": "Bobby",
+            "lastName": "Brown III",
+            "displayName": "Bobby Brown III",
+            "shortName": "B. Brown III",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4372518/bobby-brown-iii",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4372518.png",
+              "alt": "Bobby Brown III"
+            },
+            "position": {
+              "id": "32",
+              "name": "Defensive Tackle",
+              "displayName": "Defensive Tackle",
+              "abbreviation": "DT",
+              "leaf": true
+            },
+            "team": {
+              "id": "29",
+              "uid": "s:20~l:28~t:29",
+              "slug": "carolina-panthers",
+              "name": "Panthers",
+              "abbreviation": "CAR",
+              "displayName": "Carolina Panthers"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637797",
+                  "type": "news",
+                  "date": "2026-09-17T23:28Z",
+                  "headline": "Brown (back) did not participate at the Panthers' practice Thursday, Darin Gantt of the team's official website reports.",
+                  "text": "Brown has now missed back-to-back practices to open the week with a back injury, and he will have one more chance to practice Friday ahead of Sunday's matchup with Atlanta. The defensive lineman secured two solo tackles in the team's Week 1 loss to Chicago, and if he is unavailable Week 2, Aaron Hall and TeRah Edwards would be candidates to draw a start in Brown's place.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4372518/injuries/637797?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Back",
+            "location": "Torso",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        },
+        {
+          "id": "637791",
+          "longComment": "Jones was unavailable for the team's Week 1 loss to the Bears while nursing a back injury, but he was able to return to practice this week. The linebacker will have one more chance to log a full practice before Sunday's matchup with the Falcons.",
+          "shortComment": "Jones (back) was a limited participant at the Panthers' practice Thursday, Darin Gantt of the team's official website reports.",
+          "status": "Questionable",
+          "date": "2026-09-17T23:14Z",
+          "athlete": {
+            "firstName": "Patrick",
+            "lastName": "Jones II",
+            "displayName": "Patrick Jones II",
+            "shortName": "P. Jones II",
+            "links": [
+              {
+                "language": "en-US",
+                "rel": [
+                  "playercard",
+                  "desktop",
+                  "athlete"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/id/4036063/patrick-jones-ii",
+                "text": "Player Card",
+                "shortText": "Player Card",
+                "isExternal": false,
+                "isPremium": false
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4036063.png",
+              "alt": "Patrick Jones II"
+            },
+            "position": {
+              "id": "30",
+              "name": "Linebacker",
+              "displayName": "Linebacker",
+              "abbreviation": "LB",
+              "leaf": true
+            },
+            "team": {
+              "id": "29",
+              "uid": "s:20~l:28~t:29",
+              "slug": "carolina-panthers",
+              "name": "Panthers",
+              "abbreviation": "CAR",
+              "displayName": "Carolina Panthers"
+            },
+            "notes": {
+              "items": [
+                {
+                  "id": "637791",
+                  "type": "news",
+                  "date": "2026-09-17T23:14Z",
+                  "headline": "Jones (back) was a limited participant at the Panthers' practice Thursday, Darin Gantt of the team's official website reports.",
+                  "text": "Jones was unavailable for the team's Week 1 loss to the Bears while nursing a back injury, but he was able to return to practice this week. The linebacker will have one more chance to log a full practice before Sunday's matchup with the Falcons.",
+                  "source": "RotoWire",
+                  "injury": {
+                    "$ref": "http://sports.core.api.espn.pvt/v2/sports/football/leagues/nfl/seasons/2026/athletes/4036063/injuries/637791?lang=en&region=us"
+                  }
+                }
+              ]
+            },
+            "status": {
+              "id": "1",
+              "name": "Active",
+              "type": "active",
+              "abbreviation": "Active"
+            }
+          },
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "fantasyStatus": {
+              "description": "QUESTIONABLE",
+              "abbreviation": "QUESTIONABLE"
+            },
+            "type": "Back",
+            "location": "Torso",
+            "detail": "Not Specified",
+            "side": "Not Specified",
+            "returnDate": "2026-09-20"
+          }
+        }
+      ]
+    },
+    {
+      "id": "99",
+      "displayName": "Test Team",
+      "injuries": [
+        {
+          "id": "-9999999",
+          "longComment": "synthetic test entry with no extractable espn id",
+          "shortComment": "test",
+          "status": "Questionable",
+          "date": "2026-09-17T12:00Z",
+          "source": {
+            "id": "1",
+            "description": "basic/manual",
+            "state": "basic"
+          },
+          "type": {
+            "id": "2",
+            "name": "INJURY_STATUS_QUESTIONABLE",
+            "description": "questionable",
+            "abbreviation": "Q"
+          },
+          "details": {
+            "type": "Knee",
+            "location": "Leg",
+            "detail": "Not Specified",
+            "side": "Not Specified"
+          },
+          "athlete": {
+            "firstName": "Test",
+            "lastName": "Player",
+            "displayName": "Test Player",
+            "links": [
+              {
+                "rel": [
+                  "playercard"
+                ],
+                "href": "https://www.espn.com/nfl/player/_/no-id-here/test-player"
+              }
+            ],
+            "headshot": {
+              "href": "https://a.espncdn.com/i/headshots/nfl/players/full/no-id-here.png"
+            },
+            "position": {
+              "abbreviation": "RB"
+            },
+            "team": {
+              "abbreviation": "KC"
+            },
+            "status": {
+              "name": "Active"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

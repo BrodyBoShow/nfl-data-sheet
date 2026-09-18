@@ -7,7 +7,6 @@ import pytest
 from pipeline.collectors.nflverse_bulk import (
     _NGS_ALL_METRIC_COLS,
     _PFR_ALL_METRIC_COLS,
-    _TEAM_ABBR_ALIASES,
     NflverseBulkCollector,
     _aggregate_team_week,
     _build_depth,
@@ -17,6 +16,7 @@ from pipeline.collectors.nflverse_bulk import (
     _build_player_week,
     _build_snaps,
 )
+from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -267,9 +267,9 @@ def test_garbage_time_q4_and_ot_keep_the_original_band():
     assert row["garbage_time_plays_excluded"] == 2
 
 
-@pytest.mark.parametrize(("old_code", "current_code"), sorted(_TEAM_ABBR_ALIASES.items()))
+@pytest.mark.parametrize(("old_code", "current_code"), sorted(TEAM_ABBR_ALIASES.items()))
 def test_snaps_normalizes_retired_team_codes(old_code, current_code):
-    """Every PFR code in _TEAM_ABBR_ALIASES that differs from nflverse's current
+    """Every code in TEAM_ABBR_ALIASES that differs from nflverse's current
     abbreviation must be normalized on both the team and opponent_team columns."""
     snap_counts = pl.DataFrame(
         {
@@ -295,11 +295,16 @@ def test_snaps_normalizes_retired_team_codes(old_code, current_code):
     assert row["opponent_team"] == current_code
 
 
-def test_team_abbr_aliases_only_covers_retired_codes():
-    """Guards against a code drifting back onto an alias key it no longer needs (e.g. if
-    nflreadpy starts returning the current code for a season this table still aliases)."""
-    assert set(_TEAM_ABBR_ALIASES) == {"OAK", "SD", "STL"}
-    assert _TEAM_ABBR_ALIASES == {"OAK": "LV", "SD": "LAC", "STL": "LA"}
+def test_team_abbr_aliases_covers_expected_codes():
+    """Guards against drift on the shared alias table (pipeline/core/team_aliases.py) --
+    three retired-franchise PFR codes plus ESPN's WSH quirk, not a second copy per
+    collector (see pipeline/collectors/availability.py, which also imports this)."""
+    assert TEAM_ABBR_ALIASES == {
+        "OAK": "LV",
+        "SD": "LAC",
+        "STL": "LA",
+        "WSH": "WAS",
+    }
 
 
 def test_datasets_scoping_limits_fetch_validate_store():

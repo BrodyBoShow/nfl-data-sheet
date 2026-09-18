@@ -1,7 +1,12 @@
 """
 Job: Load canonical games, teams, players, and the provider ID crosswalk into the spine.
+     Also fills in player_id_crosswalk.sleeper_id gaps (fill-null-only, from Sleeper's
+     own self-reported gsis_id) -- still one job, maintaining the crosswalk, not a second
+     one; see docs/sources.md's Availability section for why this lives here rather than
+     in the Availability collector, which only reads the crosswalk.
 Reads: nflreadpy load_schedules/load_teams/load_players/load_ff_playerids;
-       nflverse-data release timestamp.json for the schedules/teams/players tags
+       nflverse-data release timestamp.json for the schedules/teams/players tags;
+       Sleeper players endpoint (crosswalk enrichment only)
 Writes: teams, games, players, player_id_crosswalk, source_freshness
 Tier: T2
 Phase: P1
@@ -22,6 +27,14 @@ from pipeline.core.hashing import hash_row
 
 _TIMESTAMP_URL = "https://github.com/nflverse/nflverse-data/releases/download/{tag}/timestamp.json"
 _TRACKED_TAGS = ("schedules", "teams", "players")
+
+_SLEEPER_URL = "https://api.sleeper.app/v1/players/nfl"
+# Distinct from pipeline/collectors/availability.py's own "sleeper:availability" key --
+# sharing one key would mean whichever collector runs first "claims" the day's fetch and
+# the other silently loses its Sleeper read. Worst case with separate keys: 2 Sleeper
+# fetches/day total across the system, trivial for a free, CDN-cached, unauthenticated
+# endpoint (docs/sources.md).
+_SLEEPER_CROSSWALK_FRESHNESS_KEY = "sleeper:crosswalk_enrich"
 
 # load_teams() is a static "every code ever used" reference table -- verified live
 # (docs/phases/P2.md): 36 rows, not 32, every current code plus these four retired
@@ -102,6 +115,63 @@ def _finalize(row: dict[str, Any], now: Any, hash_fields: list[str]) -> dict[str
     return row
 
 
+def _build_sleeper_crosswalk_updates(
+    sleeper_players: dict[str, Any], current_sleeper_id_by_player: dict[str, str | None]
+) -> list[tuple[str, str]]:
+    """Pure selection logic (no DB access) -- which (player_id, sleeper_id) pairs should
+    be written, fill-null-only. `current_sleeper_id_by_player` maps a candidate gsis_id
+    to whatever player_id_crosswalk.sleeper_id currently holds for that player_id; a
+    gsis_id absent from it means the player isn't in the crosswalk at all (never create a
+    row here, only enrich an existing one). Never overwrites a non-null value --
+    load_ff_playerids() (the crosswalk's normal sleeper_id source) lags current-season
+    rookies/UDFAs and some veteran backups; Sleeper's own dump often already knows their
+    gsis_id directly (measured live, docs/sources.md's Availability section)."""
+    updates: list[tuple[str, str]] = []
+    for sleeper_id, p in sleeper_players.items():
+        gsis_id = (p.get("gsis_id") or "").strip()
+        if not gsis_id:
+            continue
+        if gsis_id not in current_sleeper_id_by_player:
+            continue
+        if current_sleeper_id_by_player[gsis_id] is not None:
+            continue
+        updates.append((gsis_id, sleeper_id))
+    return updates
+
+
+def _fetch_current_sleeper_ids(conn: Any, gsis_ids: list[str]) -> dict[str, str | None]:
+    if not gsis_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT player_id, sleeper_id FROM player_id_crosswalk WHERE player_id = ANY(%s)",
+            (gsis_ids,),
+        )
+        return dict(cur.fetchall())
+
+
+def _enrich_sleeper_crosswalk(conn: Any, sleeper_players: dict[str, Any]) -> int:
+    """Returns the number of crosswalk rows actually updated."""
+    candidate_gsis_ids = sorted(
+        {
+            (p.get("gsis_id") or "").strip()
+            for p in sleeper_players.values()
+            if (p.get("gsis_id") or "").strip()
+        }
+    )
+    current = _fetch_current_sleeper_ids(conn, candidate_gsis_ids)
+    updates = _build_sleeper_crosswalk_updates(sleeper_players, current)
+    if not updates:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            "UPDATE player_id_crosswalk SET sleeper_id = %s "
+            "WHERE player_id = %s AND sleeper_id IS NULL",
+            [(sleeper_id, player_id) for player_id, sleeper_id in updates],
+        )
+    return len(updates)
+
+
 class IdSpineCollector(Collector):
     name = "id_spine"
 
@@ -126,16 +196,25 @@ class IdSpineCollector(Collector):
                 changed = True
         return changed
 
-    def fetch(self, ctx: RunContext) -> dict[str, pl.DataFrame]:
+    def fetch(self, ctx: RunContext) -> dict[str, Any]:
         seasons = self.seasons_override or [ctx.season - 1, ctx.season]
+
+        sleeper_players = None
+        today = ctx.now.date().isoformat()
+        if get_last_value(ctx.conn, _SLEEPER_CROSSWALK_FRESHNESS_KEY) != today:
+            resp = httpx.get(_SLEEPER_URL, timeout=60)
+            resp.raise_for_status()
+            sleeper_players = resp.json()
+
         return {
             "schedules": nfl.load_schedules(seasons=seasons),
             "teams": nfl.load_teams(),
             "players": nfl.load_players(),
             "ff_playerids": nfl.load_ff_playerids(),
+            "sleeper_players": sleeper_players,
         }
 
-    def validate(self, raw: dict[str, pl.DataFrame]) -> dict[str, pl.DataFrame]:
+    def validate(self, raw: dict[str, Any]) -> dict[str, Any]:
         schedules, teams, players, ff_ids = (
             raw["schedules"],
             raw["teams"],
@@ -181,9 +260,19 @@ class IdSpineCollector(Collector):
             .drop("_no_sleeper")
         )
 
-        return {"schedules": schedules, "teams": teams, "players": players, "ff_playerids": ff_ids}
+        sleeper_players = raw.get("sleeper_players")
+        if sleeper_players is not None and not isinstance(sleeper_players, dict):
+            raise ValueError("sleeper_players payload is not a dict")
 
-    def store(self, ctx: RunContext, validated: dict[str, pl.DataFrame]) -> WorkResult:
+        return {
+            "schedules": schedules,
+            "teams": teams,
+            "players": players,
+            "ff_playerids": ff_ids,
+            "sleeper_players": sleeper_players,
+        }
+
+    def store(self, ctx: RunContext, validated: dict[str, Any]) -> WorkResult:
         conn = ctx.conn
         schedules, teams_df, players_df, ff_ids = (
             validated["schedules"],
@@ -281,4 +370,12 @@ class IdSpineCollector(Collector):
         for tag, value in self._live_timestamps.items():
             set_last_value(conn, f"nflverse:{tag}", value)
 
-        return WorkResult(total_written)
+        sleeper_players = validated.get("sleeper_players")
+        sleeper_crosswalk_filled = 0
+        if sleeper_players:
+            sleeper_crosswalk_filled = _enrich_sleeper_crosswalk(conn, sleeper_players)
+            set_last_value(conn, _SLEEPER_CROSSWALK_FRESHNESS_KEY, ctx.now.date().isoformat())
+
+        return WorkResult(
+            total_written, meta={"sleeper_crosswalk_filled": sleeper_crosswalk_filled}
+        )

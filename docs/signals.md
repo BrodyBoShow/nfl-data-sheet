@@ -242,3 +242,85 @@ league-wide to document rather than re-architect around.
 filters, and blend/discount mechanics are identical across every one of these signals
 except for the numerator/denominator/`k_metric`/sensitivities shown; repeating the full
 template 40 times would just restate the same prose forty times.)
+
+### Availability sector (Phase 3)
+
+No prior-blend or opponent-adjustment for this sector — P3.md scopes it to raw,
+point-in-time values from the current week's `injuries`/`snaps`/`depth` tables, not the
+efficiency sector's reliability-tuned blend. `stability`/`league_pct` are left null
+(nothing computed for them this phase, not fabricated). Source:
+`pipeline/analysts/availability_impact.py`. Only emitted for players/teams with a
+currently-flagged (non-`Active`, non-null) `injuries` designation this week.
+
+### `snap_share_at_risk`
+- **Sector:** availability
+- **Scope:** player (`team` null, `game_id` null)
+- **Formula:** the flagged player's own mean `snaps.offense_pct` — current season, weeks
+  strictly before this one; falls back to the prior season's mean if no current-season
+  games exist yet (e.g. week 1). No blending beyond that.
+- **Filters:** player has a currently-flagged designation (not `Active`/null) in
+  `injuries` this week.
+- **Source columns:** `injuries.designation`, `snaps.offense_pct`
+- **Sample size (`sample_n`):** not set (null) — a single mean, not a count-based signal.
+- **Added:** Phase 3, 2026-09-18.
+
+### `snap_share_redistribution_gain`
+- **Sector:** availability
+- **Scope:** player (`team` null, `game_id` null)
+- **Formula:** for a healthy teammate at the same team + `players.position`, `flagged
+  player's snap_share_at_risk × (teammate's own snap share ÷ sum of healthy teammates'
+  snap shares in that group)`. When multiple flagged teammates share a group, their
+  gains to a given healthy player are summed into one row, not written twice.
+- **Filters:** redistribution-eligible positions only (`WR`, `RB`, `TE`) — raw snap
+  share is a redistribution-baseline proxy, not a real target/carry share (P3.md scopes
+  this to raw snap shares until P7's Usage analyst exists).
+- **Source columns:** `injuries.designation`/`.team`, `players.position`,
+  `snaps.offense_pct`
+- **Sample size (`sample_n`):** not set (null).
+- **Added:** Phase 3, 2026-09-18.
+
+### `replacement_depth_rank_delta`
+- **Sector:** availability
+- **Scope:** player (on the backup, `team` null, `game_id` null)
+- **Formula:** `backup's depth.pos_rank − flagged player's depth.pos_rank`, matched on
+  the same `(team, depth.pos_abb)` slot, the lowest-ranked healthy teammate ranked below
+  the flagged player. **Depth-chart order only — this is explicitly NOT a
+  performance-quality or drop-off estimate.** No per-player efficiency data exists yet
+  to ground a real quality metric (that's P7 Usage/roles territory); a larger delta
+  means the replacement is further down the depth chart, nothing more should be
+  inferred from the magnitude.
+- **Filters:** both the flagged player and the candidate backup must have a `depth` row
+  at the same `(team, pos_abb)` slot; no candidate ranked below the flagged player →
+  no signal emitted (not a guess).
+- **Source columns:** `injuries.team`, `depth.pos_abb`/`.pos_rank`/`.player_id`
+- **Sample size (`sample_n`):** not set (null).
+- **Added:** Phase 3, 2026-09-18.
+
+### `ol_cluster_count` / `secondary_cluster_count`
+- **Sector:** availability
+- **Scope:** team (`player_id` null, `game_id` null)
+- **Formula:** count of currently-flagged players on the team whose `players.position`
+  is in the OL set (`C`, `G`, `T`, `OL`) or the secondary set (`CB`, `S`, `DB`, `FS`,
+  `SS`) respectively. A raw count, not a pre-baked boolean/threshold — where a count
+  becomes a "cluster" worth flagging is left to the display/consumer layer.
+- **Filters:** only teams with at least one flagged player in that position group are
+  emitted (no zero-value rows).
+- **Source columns:** `injuries.designation`/`.team`, `players.position`
+- **Sample size (`sample_n`):** not set (null).
+- **Added:** Phase 3, 2026-09-18.
+
+### `practice_trend_risk`
+- **Sector:** availability
+- **Scope:** player (`team` null, `game_id` null)
+- **Formula:** deterministic ordinal over the ordered sequence of this week's
+  `injuries.designation` values for that player (whichever source — ESPN or Sleeper —
+  has more snapshots this week, ESPN winning ties): **+1** per step that escalates
+  (e.g. `Questionable` → `Doubtful`), **−1** per step that de-escalates, **0** for a flat
+  step, a step touching an unrecognized designation string, or only one snapshot so far.
+  **This is not an estimate of real practice participation** — neither ESPN nor Sleeper
+  exposes a structured Wed/Thu/Fri participation grid (`docs/sources.md`'s Availability
+  Known traps); it's the closest honest signal available from what they do provide.
+- **Filters:** player has a currently-flagged designation this week.
+- **Source columns:** `injuries.designation`, `injuries.as_of`, `injuries.source`
+- **Sample size (`sample_n`):** number of snapshots seen this week for that player.
+- **Added:** Phase 3, 2026-09-18.

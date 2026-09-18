@@ -24,6 +24,7 @@ from pipeline.core.base import Collector, RunContext, WorkResult
 from pipeline.core.db import filter_changed, upsert_rows
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
+from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
 
 _log = logging.getLogger(__name__)
 
@@ -151,14 +152,10 @@ _DRIVE_RESULT_KNOWN_ZERO = {
 }
 _DRIVE_RESULT_KNOWN = set(_DRIVE_RESULT_POINTS) | _DRIVE_RESULT_KNOWN_ZERO
 
-# snap_counts/pfr_advstats (both PFR-sourced) still carry retired franchise codes for
-# historical seasons that pbp/player_stats/nextgen_stats already normalize -- verified
-# live (docs/sources.md): 2019 snap_counts/pfr_advstats show 'OAK', 2016 snap_counts
-# shows 'SD', 2015 snap_counts shows 'STL', while pbp/player_stats/nextgen_stats already
-# show the current code for the same seasons/games. Without normalizing here, a team's
-# prior-season join (pipeline/analysts/efficiency.py) would silently miss a relocated
-# franchise's history.
-_TEAM_ABBR_ALIASES: dict[str, str] = {"OAK": "LV", "SD": "LAC", "STL": "LA"}
+# Retired-franchise-code normalization (TEAM_ABBR_ALIASES, pipeline/core/team_aliases.py)
+# -- without it, a team's prior-season join (pipeline/analysts/efficiency.py) would
+# silently miss a relocated franchise's history. See that module for the verified-live
+# detail on which historical seasons/sources still carry the old codes.
 _TEAM_WEEK_SUM_COLS = [
     "epa_sum",
     "pass_epa_sum",
@@ -254,12 +251,12 @@ def _garbage_time_expr() -> pl.Expr:
 
 
 def _normalize_team_abbr(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
-    """Map retired franchise codes (_TEAM_ABBR_ALIASES) to their current abbreviation
-    in every listed column that's actually present."""
+    """Map retired franchise codes (TEAM_ABBR_ALIASES, pipeline/core/team_aliases.py) to
+    their current abbreviation in every listed column that's actually present."""
     present = [c for c in cols if c in df.columns]
     if not present:
         return df
-    return df.with_columns(pl.col(c).replace(_TEAM_ABBR_ALIASES) for c in present)
+    return df.with_columns(pl.col(c).replace(TEAM_ABBR_ALIASES) for c in present)
 
 
 def _warn_on_unknown_drive_results(drives: pl.DataFrame) -> None:

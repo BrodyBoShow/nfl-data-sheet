@@ -15,7 +15,13 @@ from typing import Any, Literal
 import psycopg
 
 RunStatus = Literal[
-    "running", "success", "skipped_fresh", "skipped_no_prior", "partial", "failed"
+    "running",
+    "success",
+    "skipped_fresh",
+    "skipped_no_prior",
+    "skipped_no_injuries",
+    "partial",
+    "failed",
 ]
 
 

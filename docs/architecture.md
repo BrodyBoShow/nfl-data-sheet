@@ -82,7 +82,11 @@ flowchart TB
     and `agent_runs`, triggers only what the calendar (see below) needs. Triggers
     nothing in idle windows.
   - **ID spine**: canonical keys for games, teams, players, and a provider ID crosswalk
-    (gsis ↔ ESPN ↔ Sleeper ↔ PFR). Every table foreign-keys here.
+    (gsis ↔ ESPN ↔ Sleeper ↔ PFR). Every table foreign-keys here. Also fills in
+    `player_id_crosswalk.sleeper_id` gaps (fill-null-only) from Sleeper's own
+    self-reported `gsis_id`, via a small independently-throttled Sleeper fetch — added
+    Phase 3 once the Availability collector's crosswalk-resolution needs surfaced how far
+    `load_ff_playerids()` lags current-season rookies/UDFAs (see `docs/sources.md`).
   - **Auditor**: after each run, checks freshness vs. expectation, row-count anomalies,
     schema drift, null spikes. Alerts via GitHub issue or Discord webhook; exposes
     per-domain staleness status for the UI.
@@ -133,7 +137,7 @@ daily, **T3** weekly, **OD** on demand.
 | Live game | ESPN scoreboard/game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
 | Odds | The Odds API free tier + ESPN embedded lines | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Weather | Open-Meteo (no key) + stadium coords/roof/surface | Open data | T1 | 4 | weather_snapshots (append-only), outdoor only |
-| Availability | ESPN injuries, Sleeper players (≤1/day), NFL.com injury reports | Can break | T1 | 3 | injuries, practice_status, transactions |
+| Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, transactions |
 | Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 7 | news_items (deduped URL+hash), news_tags (rule-based) |
 
 ### L2 Analysts (all write to `signals`)
@@ -141,7 +145,7 @@ daily, **T3** weekly, **OD** on demand.
 | Analyst | Phase | Signals |
 |---|---|---|
 | Efficiency | 2 | Opponent-adjusted EPA/play, success rate, explosive rate, points/drive, three-and-out rate, red-zone TD rate, for both offense and defense; pass/rush and down splits; garbage time filtered; prior-and-league blended (see `docs/signals.md`). |
-| Availability impact | 3 | Target/carry redistribution, replacement quality gap, OL/secondary cluster flags, practice-trend risk. Uses raw snap shares (from the nflverse bulk collector's `snaps` table) as the redistribution baseline, since Usage/role (Phase 7) isn't built yet at this phase. |
+| Availability impact | 3 | Snap-share redistribution, replacement depth-order delta (depth-chart order only, not a quality estimate), OL/secondary cluster counts, practice-trend risk (a designation-change ordinal — neither ESPN nor Sleeper exposes real Wed/Thu/Fri participation data). Uses raw snap shares (from the nflverse bulk collector's `snaps` table) as the redistribution baseline, since Usage/role (Phase 7) isn't built yet at this phase. |
 | Market | 4 | Open vs. current line, movement velocity, implied team totals, key-number crossings. No "sharp money" claims. |
 | Environment | 4 | Wind/precip flags for passing/kicking, dome/outdoor, surface, altitude, rest differential, travel distance, timezone crossings. |
 | Usage and role | 7 | Snap share, target share, air-yards share, red-zone/goal-line share, carry share, WoW deltas. |
@@ -192,3 +196,12 @@ minutes.
   analyst; available for Usage/Scheme (Phase 7) or later refinement. `load_team_stats`
   and `load_rosters` were live-verified but are not staged — see `docs/phases/P2.md`'s
   deviations for why.
+- **Availability's `practice_status` table was dropped from the Phase 3 plan (2026-09-17)**
+  — live verification found neither ESPN's injuries feed nor Sleeper's player dump
+  exposes structured per-day (Wed/Thu/Fri) practice-participation data, so a table named
+  for that concept would have been mostly null. Folded into `injuries` instead: one
+  append-only snapshot row per (player, collector run), from which
+  `practice_trend_risk` is derived as a designation-change ordinal — the honest
+  substitute for real participation data. NFL.com injury-report scraping (the one source
+  that could supply real participation data) stays deliberately out of scope; see
+  `docs/sources.md`'s Availability section.

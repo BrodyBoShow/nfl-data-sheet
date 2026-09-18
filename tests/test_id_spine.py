@@ -3,7 +3,11 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pipeline.collectors.id_spine import _RETIRED_TEAM_CODES, IdSpineCollector
+from pipeline.collectors.id_spine import (
+    _RETIRED_TEAM_CODES,
+    IdSpineCollector,
+    _build_sleeper_crosswalk_updates,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -48,3 +52,32 @@ def test_validate_raises_on_missing_columns():
 
     with pytest.raises(ValueError, match="game_id"):
         IdSpineCollector().validate(raw)
+
+
+# --------------------------------------------------------------------------------------
+# Sleeper crosswalk enrichment (_build_sleeper_crosswalk_updates -- pure, no DB)
+# --------------------------------------------------------------------------------------
+
+
+def test_sleeper_enrichment_fills_null_sleeper_id():
+    sleeper_players = {"999": {"gsis_id": "00-0012345"}}
+    current: dict[str, str | None] = {"00-0012345": None}
+    assert _build_sleeper_crosswalk_updates(sleeper_players, current) == [("00-0012345", "999")]
+
+
+def test_sleeper_enrichment_never_overwrites_existing_sleeper_id():
+    sleeper_players = {"999": {"gsis_id": "00-0012345"}}
+    current: dict[str, str | None] = {"00-0012345": "111"}  # already has a sleeper_id
+    assert _build_sleeper_crosswalk_updates(sleeper_players, current) == []
+
+
+def test_sleeper_enrichment_skips_players_not_in_crosswalk_at_all():
+    sleeper_players = {"999": {"gsis_id": "00-0099999"}}
+    current: dict[str, str | None] = {}  # gsis_id not present -- never create a new row
+    assert _build_sleeper_crosswalk_updates(sleeper_players, current) == []
+
+
+def test_sleeper_enrichment_skips_players_without_a_gsis_id():
+    sleeper_players = {"999": {"gsis_id": None}, "888": {}}
+    current: dict[str, str | None] = {"00-0012345": None}
+    assert _build_sleeper_crosswalk_updates(sleeper_players, current) == []
