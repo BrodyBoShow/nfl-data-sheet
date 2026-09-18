@@ -249,8 +249,41 @@ No prior-blend or opponent-adjustment for this sector — P3.md scopes it to raw
 point-in-time values from the current week's `injuries`/`snaps`/`depth` tables, not the
 efficiency sector's reliability-tuned blend. `stability`/`league_pct` are left null
 (nothing computed for them this phase, not fabricated). Source:
-`pipeline/analysts/availability_impact.py`. Only emitted for players/teams with a
-currently-flagged (non-`Active`, non-null) `injuries` designation this week.
+`pipeline/analysts/availability_impact.py`. Only emitted for players/teams currently
+"flagged" this week — see `availability_category` below for what that means and why it's
+not just "non-`Active`."
+
+**Designation classification** (`_classify_designation`): `injuries.designation` is a
+free-text field that mixes real injury statuses with non-injury unavailability
+shorthand in the same field — verified live 2026-09-18: Sleeper's `NA`/`Sus`/`COV`/`DNR`
+values (exempt list, suspension, COVID, did-not-report) mostly show Sleeper's own roster
+`status` as `Active`, so `status` can't separate them either; the designation string
+itself is the only signal available. Every designation buckets into exactly one of:
+- **`healthy`** — `Active` or no `injuries` row. Not flagged, no signals emitted.
+- **`injury`** — `Questionable`, `Doubtful`, `Out`, `IR`, `Injured Reserve`, `PUP`, **or
+  any unrecognized value** (defaults here, logged, so a new designation string is never
+  silently treated as healthy).
+- **`non_injury_unavailable`** — `NA`, `Sus`, `COV`, `DNR`.
+
+Both `injury` and `non_injury_unavailable` count as "flagged" for
+`snap_share_at_risk`/`snap_share_redistribution_gain`/`ol_cluster_count`/
+`secondary_cluster_count` (a suspended starter's snaps are just as much at risk as an
+injured one's) — only `practice_trend_risk` is restricted to `injury` (a suspension or
+exempt-list stint escalating isn't a practice-participation trend).
+
+### `availability_category`
+- **Sector:** availability
+- **Scope:** player (`team` null, `game_id` null)
+- **Formula:** `_classify_designation`'s bucket, encoded as a small numeric code since
+  `signals.value` is numeric-only: **`1.0` = `injury`**, **`2.0` =
+  `non_injury_unavailable`**. Emitted for every flagged player, one row each — lets a
+  consumer tell "exempt/suspended" apart from "hamstring" without reading
+  `injuries.designation` text directly (L3 reads `signals` only, per CLAUDE.md's layer
+  rules — it can't join back to the staged `injuries` table itself).
+- **Filters:** player is currently flagged (either category) this week.
+- **Source columns:** `injuries.designation`
+- **Sample size (`sample_n`):** not set (null).
+- **Added:** Phase 3, 2026-09-18.
 
 ### `snap_share_at_risk`
 - **Sector:** availability
@@ -258,8 +291,8 @@ currently-flagged (non-`Active`, non-null) `injuries` designation this week.
 - **Formula:** the flagged player's own mean `snaps.offense_pct` — current season, weeks
   strictly before this one; falls back to the prior season's mean if no current-season
   games exist yet (e.g. week 1). No blending beyond that.
-- **Filters:** player has a currently-flagged designation (not `Active`/null) in
-  `injuries` this week.
+- **Filters:** player is currently flagged (either category — see Designation
+  classification above) this week.
 - **Source columns:** `injuries.designation`, `snaps.offense_pct`
 - **Sample size (`sample_n`):** not set (null) — a single mean, not a count-based signal.
 - **Added:** Phase 3, 2026-09-18.
@@ -273,7 +306,7 @@ currently-flagged (non-`Active`, non-null) `injuries` designation this week.
   gains to a given healthy player are summed into one row, not written twice.
 - **Filters:** redistribution-eligible positions only (`WR`, `RB`, `TE`) — raw snap
   share is a redistribution-baseline proxy, not a real target/carry share (P3.md scopes
-  this to raw snap shares until P7's Usage analyst exists).
+  this to raw snap shares until P7's Usage analyst exists). Either flagged category.
 - **Source columns:** `injuries.designation`/`.team`, `players.position`,
   `snaps.offense_pct`
 - **Sample size (`sample_n`):** not set (null).
@@ -291,7 +324,7 @@ currently-flagged (non-`Active`, non-null) `injuries` designation this week.
   inferred from the magnitude.
 - **Filters:** both the flagged player and the candidate backup must have a `depth` row
   at the same `(team, pos_abb)` slot; no candidate ranked below the flagged player →
-  no signal emitted (not a guess).
+  no signal emitted (not a guess). Either flagged category.
 - **Source columns:** `injuries.team`, `depth.pos_abb`/`.pos_rank`/`.player_id`
 - **Sample size (`sample_n`):** not set (null).
 - **Added:** Phase 3, 2026-09-18.
@@ -299,10 +332,10 @@ currently-flagged (non-`Active`, non-null) `injuries` designation this week.
 ### `ol_cluster_count` / `secondary_cluster_count`
 - **Sector:** availability
 - **Scope:** team (`player_id` null, `game_id` null)
-- **Formula:** count of currently-flagged players on the team whose `players.position`
-  is in the OL set (`C`, `G`, `T`, `OL`) or the secondary set (`CB`, `S`, `DB`, `FS`,
-  `SS`) respectively. A raw count, not a pre-baked boolean/threshold — where a count
-  becomes a "cluster" worth flagging is left to the display/consumer layer.
+- **Formula:** count of currently-flagged players (either category) on the team whose
+  `players.position` is in the OL set (`C`, `G`, `T`, `OL`) or the secondary set (`CB`,
+  `S`, `DB`, `FS`, `SS`) respectively. A raw count, not a pre-baked boolean/threshold —
+  where a count becomes a "cluster" worth flagging is left to the display/consumer layer.
 - **Filters:** only teams with at least one flagged player in that position group are
   emitted (no zero-value rows).
 - **Source columns:** `injuries.designation`/`.team`, `players.position`
@@ -313,14 +346,40 @@ currently-flagged (non-`Active`, non-null) `injuries` designation this week.
 - **Sector:** availability
 - **Scope:** player (`team` null, `game_id` null)
 - **Formula:** deterministic ordinal over the ordered sequence of this week's
-  `injuries.designation` values for that player (whichever source — ESPN or Sleeper —
-  has more snapshots this week, ESPN winning ties): **+1** per step that escalates
-  (e.g. `Questionable` → `Doubtful`), **−1** per step that de-escalates, **0** for a flat
-  step, a step touching an unrecognized designation string, or only one snapshot so far.
-  **This is not an estimate of real practice participation** — neither ESPN nor Sleeper
-  exposes a structured Wed/Thu/Fri participation grid (`docs/sources.md`'s Availability
-  Known traps); it's the closest honest signal available from what they do provide.
-- **Filters:** player has a currently-flagged designation this week.
+  `injuries.designation` values for that player, **one observation per distinct
+  calendar day** (same-day snapshots collapse to that day's last observation — verified
+  live 2026-09-18: a same-day rerun produced two snapshots 27 seconds apart, which is
+  not an independent trend data point). Uses whichever source — ESPN or Sleeper — has
+  more distinct days this week, ESPN winning ties: **+1** per day-over-day step that
+  escalates (e.g. `Questionable` → `Doubtful`), **−1** per step that de-escalates, **0**
+  for a flat step or one touching an unrecognized designation string.
+  **Requires at least 2 distinct days of data — a player with only one day's
+  observation gets no row at all**, not a `0` (a single day's snapshot can't produce a
+  trend, and a `0` meaning "no data yet" would be indistinguishable from one meaning
+  "confirmed flat" if emitted anyway). **This is not an estimate of real practice
+  participation** — neither ESPN nor Sleeper exposes a structured Wed/Thu/Fri
+  participation grid (`docs/sources.md`'s Availability Known traps); it's the closest
+  honest signal available from what they do provide.
+- **Filters:** player is currently flagged **and in the `injury` category specifically**
+  this week (see Designation classification above — a suspension/exempt-list stint
+  isn't a practice-participation trend, so `non_injury_unavailable` players never get
+  this signal).
 - **Source columns:** `injuries.designation`, `injuries.as_of`, `injuries.source`
-- **Sample size (`sample_n`):** number of snapshots seen this week for that player.
-- **Added:** Phase 3, 2026-09-18.
+- **Sample size (`sample_n`):** number of distinct calendar days with data this week for
+  that player (not raw snapshot count — same-day reruns don't inflate it).
+- **Added:** Phase 3, 2026-09-18. **Revised:** 2026-09-18 (distinct-day dedup + `sample_n
+  >= 2` gate, injury-only scope — see this phase's session notes for the live data that
+  prompted it: 151/347 rows were single-snapshot 0s indistinguishable from "stable").
+
+### Stale-signal cleanup
+
+`AvailabilityImpactAnalyst.write_signals` deletes every signal name it can write
+(`sector = 'availability' AND season/week = this run's AND signal = ANY(<its own known
+names>)`) before reinserting — see `pipeline/core/db.py`'s `delete_rows` docstring. This
+run's output is authoritative for its scope; a signal a prior run wrote that this run's
+(possibly narrower) logic no longer produces does not survive. Without this, e.g. the
+151 single-snapshot `practice_trend_risk` rows from before the `sample_n >= 2` gate
+would have persisted forever, since `upsert_rows` only ever inserts/updates rows it's
+given. This is a general pattern any analyst can reuse — `EfficiencyAnalyst.write_signals`
+doesn't do this yet and has the same latent gap; adopting the same `delete_rows` call
+there is a reasonable follow-up, not done as part of this phase.

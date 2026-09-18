@@ -1,5 +1,6 @@
 """
-Job: Own the single Supabase Postgres connection factory and a generic upsert helper.
+Job: Own the single Supabase Postgres connection factory and generic upsert/delete
+     helpers.
 Reads: SUPABASE_DB_URL
 Writes: nothing itself — callers execute their own statements against the connection
 Tier: n/a
@@ -58,6 +59,31 @@ def upsert_rows(
     with conn.cursor() as cur:
         cur.executemany(query, rows)
     return len(rows)
+
+
+def delete_rows(
+    conn: psycopg.Connection,
+    table: str,
+    where: str,
+    params: Iterable[Any],
+) -> int:
+    """`DELETE FROM {table} WHERE {where}`, with `params` bound positionally against
+    `where`'s `%s` placeholders. `table`/`where` are always internal constants supplied
+    by our own analyst/collector code, never external input — safe to interpolate
+    directly. Returns rows deleted.
+
+    Exists for the general "signals an analyst stops emitting must not persist forever"
+    problem: `upsert_rows` only inserts/updates the rows it's given, it never removes a
+    row a prior run wrote that this run's logic no longer produces (a signal whose
+    emission criteria narrowed, a player who's no longer eligible, a team that no longer
+    exists). A `write_signals` that wants a run's output to be authoritative for its
+    scope calls this first, scoped to what that analyst itself could have written (its
+    own `sector` + the `season`/`week` it just computed + its own known signal names),
+    then upserts the fresh set — see `pipeline/analysts/availability_impact.py`.
+    """
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {table} WHERE {where}", tuple(params))
+        return cur.rowcount
 
 
 def _chunks(rows: list[dict[str, Any]], size: int) -> Iterable[list[dict[str, Any]]]:

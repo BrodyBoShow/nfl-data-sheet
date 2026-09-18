@@ -1,7 +1,8 @@
 """
 Job: Compute injury-driven availability-impact signals -- snap-share redistribution,
-     replacement depth-order delta, OL/secondary cluster counts, and practice-trend risk
-     -- for players and teams with reported injuries this week.
+     replacement depth-order delta, OL/secondary cluster counts, practice-trend risk, and
+     an availability_category label -- for players and teams currently flagged unavailable
+     (injured or otherwise) this week.
 Reads: injuries, snaps (staged), depth (staged), players, teams
 Writes: signals (sector='availability')
 Tier: T1
@@ -10,14 +11,17 @@ Phase: P3
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import polars as pl
 import psycopg
 
 from pipeline.core.base import Analyst, RunContext, WorkResult
-from pipeline.core.db import upsert_rows
+from pipeline.core.db import delete_rows, upsert_rows
 from pipeline.core.freshness import get_last_value
+
+_log = logging.getLogger(__name__)
 
 # players.position values (nflreadpy convention) -- not depth.pos_abb's side-specific
 # slots (LT/RT/...), since not every injured player has a depth-chart entry but every
@@ -26,7 +30,28 @@ _OL_POSITIONS = {"C", "G", "T", "OL"}
 _SECONDARY_POSITIONS = {"CB", "S", "DB", "FS", "SS"}
 _REDISTRIBUTION_POSITIONS = {"WR", "RB", "TE"}
 
-_HEALTHY_DESIGNATIONS = {None, "Active"}
+# injuries.designation mixes real injury statuses with non-injury unavailability
+# shorthand in the same free-text field -- verified live (docs/sources.md): Sleeper's
+# NA/Sus/COV/DNR values (exempt list, suspension, COVID, did-not-report) mostly show
+# Sleeper's own roster `status` as "Active", so `status` can't be used to separate them
+# either -- the designation string itself is the only signal. Both flagged categories
+# count as "unavailable" for redistribution/cluster purposes (a suspended starter's
+# snaps are just as much at risk as an injured one's); only 'injury' feeds
+# practice_trend_risk, since a suspension escalating isn't a practice-participation trend.
+_CATEGORY_HEALTHY = "healthy"
+_CATEGORY_INJURY = "injury"
+_CATEGORY_NON_INJURY_UNAVAILABLE = "non_injury_unavailable"
+
+_HEALTHY_DESIGNATION_VALUES = {"Active"}
+_INJURY_DESIGNATIONS = {"Questionable", "Doubtful", "Out", "IR", "Injured Reserve", "PUP"}
+_NON_INJURY_UNAVAILABLE_DESIGNATIONS = {"NA", "Sus", "COV", "DNR"}
+
+# signals.value is numeric-only -- availability_category encodes the bucket as a small
+# float code rather than adding a text column, documented here and in docs/signals.md.
+_AVAILABILITY_CATEGORY_CODE = {
+    _CATEGORY_INJURY: 1.0,
+    _CATEGORY_NON_INJURY_UNAVAILABLE: 2.0,
+}
 
 # Ordinal severity for practice_trend_risk -- an unrecognized designation string (a new
 # value neither source's vocabulary has produced before) contributes no direction, not a
@@ -42,6 +67,21 @@ _DESIGNATION_SEVERITY: dict[str, int] = {
 }
 
 _INPUTS_VERSION_TAGS = ("snap_counts", "depth_charts")
+
+# Every signal name this analyst can ever write -- write_signals deletes exactly this set
+# (scoped to sector/season/week) before reinserting, so a signal whose emission criteria
+# narrow (e.g. practice_trend_risk's new sample_n>=2 gate) doesn't leave stale rows behind.
+_SIGNAL_NAMES = frozenset(
+    {
+        "snap_share_at_risk",
+        "snap_share_redistribution_gain",
+        "replacement_depth_rank_delta",
+        "ol_cluster_count",
+        "secondary_cluster_count",
+        "practice_trend_risk",
+        "availability_category",
+    }
+)
 
 _SIGNAL_SCHEMA: dict[str, Any] = {
     "game_id": pl.Utf8,
@@ -64,6 +104,38 @@ _SIGNAL_COLS = list(_SIGNAL_SCHEMA)
 # --------------------------------------------------------------------------------------
 # Pure computation helpers (no DB access -- unit-tested against synthetic data)
 # --------------------------------------------------------------------------------------
+
+
+def _classify_designation(designation: str | None) -> str:
+    """Buckets a raw designation string into 'healthy', 'injury', or
+    'non_injury_unavailable'. Unrecognized values default to 'injury' (logged) -- err
+    toward flagging, never silently treat an unrecognized value as healthy."""
+    if designation is None or designation in _HEALTHY_DESIGNATION_VALUES:
+        return _CATEGORY_HEALTHY
+    if designation in _NON_INJURY_UNAVAILABLE_DESIGNATIONS:
+        return _CATEGORY_NON_INJURY_UNAVAILABLE
+    if designation not in _INJURY_DESIGNATIONS:
+        _log.warning(
+            "availability_impact: unrecognized designation %r -- defaulting to "
+            "'injury' (err toward flagging, never silently healthy)",
+            designation,
+        )
+    return _CATEGORY_INJURY
+
+
+def _compute_availability_category(flagged: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per flagged player, encoding their _classify_designation bucket as a
+    small numeric code (see _AVAILABILITY_CATEGORY_CODE) so the sheet can tell "exempt/
+    suspended" apart from "injured" without reading injuries.designation directly -- L3
+    only reads signals, never a staged table like injuries (CLAUDE.md's layer rules)."""
+    return [
+        {
+            "player_id": r["player_id"],
+            "signal": "availability_category",
+            "value": _AVAILABILITY_CATEGORY_CODE[r["category"]],
+        }
+        for r in flagged
+    ]
 
 
 def _build_redistribution_roster(
@@ -232,17 +304,22 @@ def _build_trend_sequences(
     rows: list[tuple[str, str, str | None, Any]],
 ) -> dict[str, list[str]]:
     """rows: (player_id, source, designation, as_of), ordered by player_id, source,
-    as_of ASC. Picks whichever source has more snapshots for a player this week (ESPN
-    wins ties, since its designation vocabulary is more structured), and returns that
-    source's chronological designation sequence."""
-    by_player_source: dict[tuple[str, str], list[str]] = {}
-    for player_id, source, designation, _as_of in rows:
+    as_of ASC. Collapses same-calendar-day snapshots to that day's LAST observation --
+    two runs a few minutes (or seconds) apart are not independent trend data points,
+    only distinct days are (verified live: a same-day rerun produced two snapshots 27s
+    apart). Then picks whichever source has more distinct-day observations for a player
+    this week (ESPN wins ties, since its designation vocabulary is more structured), and
+    returns that source's chronological one-observation-per-day designation sequence."""
+    by_player_source_day: dict[tuple[str, str], dict[Any, str]] = {}
+    for player_id, source, designation, as_of in rows:
         if designation is None:
             continue
-        by_player_source.setdefault((player_id, source), []).append(designation)
+        day = as_of.date() if hasattr(as_of, "date") else as_of
+        by_player_source_day.setdefault((player_id, source), {})[day] = designation
 
     by_player: dict[str, dict[str, list[str]]] = {}
-    for (player_id, source), seq in by_player_source.items():
+    for (player_id, source), by_day in by_player_source_day.items():
+        seq = [by_day[d] for d in sorted(by_day)]
         by_player.setdefault(player_id, {})[source] = seq
 
     sequences: dict[str, list[str]] = {}
@@ -254,13 +331,20 @@ def _build_trend_sequences(
 
 
 def _compute_trend_risk(sequences: dict[str, list[str]]) -> list[dict[str, Any]]:
-    """+1 per step that worsens, -1 per step that improves, 0 if flat, an unrecognized
-    designation, or only one snapshot. sample_n = number of snapshots seen. The honest
-    substitute for a real Wed/Thu/Fri participation grid, which neither ESPN nor Sleeper
-    provides (docs/sources.md) -- an observed-designation trend, not an estimate of
-    actual practice participation."""
+    """+1 per step that worsens, -1 per step that improves, 0 if flat or a step touching
+    an unrecognized designation. Requires at least 2 distinct-day observations --
+    verified live that a single day (however many times it was polled that day) always
+    scores 0, which is indistinguishable from "confirmed flat" if emitted; a player with
+    only one day's data gets no signal at all instead. sample_n = number of distinct days
+    used. The honest substitute for a real Wed/Thu/Fri participation grid, which neither
+    ESPN nor Sleeper provides (docs/sources.md) -- an observed-designation trend, not an
+    estimate of actual practice participation. `sequences` should already be scoped to
+    the 'injury' category (see _classify_designation) -- a suspension or exempt-list
+    stint isn't a practice-participation trend."""
     rows = []
     for player_id, seq in sequences.items():
+        if len(seq) < 2:
+            continue
         score = 0
         for prev, curr in zip(seq, seq[1:], strict=False):
             prev_sev = _DESIGNATION_SEVERITY.get(prev)
@@ -322,6 +406,7 @@ def _build_signals_frame(
     depth_delta_rows: list[dict[str, Any]],
     cluster_rows: list[dict[str, Any]],
     trend_rows: list[dict[str, Any]],
+    category_rows: list[dict[str, Any]],
     season: int,
     week: int,
     as_of: Any,
@@ -333,11 +418,11 @@ def _build_signals_frame(
     from only the first `infer_schema_length` rows and raises a ComputeError on append
     the moment a later row doesn't match (e.g. cluster_rows' counts arriving after many
     redistribution/depth rows, or the first non-null `sample_n` arriving after many
-    all-null ones from the other three signal types) -- an explicit schema casts every
-    row to the declared dtype at construction instead, so a genuine mismatch fails
-    loudly right there rather than partway through building the frame."""
+    all-null ones from the other signal types) -- an explicit schema casts every row to
+    the declared dtype at construction instead, so a genuine mismatch fails loudly right
+    there rather than partway through building the frame."""
     rows: list[dict[str, Any]] = []
-    for r in redistribution_rows + depth_delta_rows + trend_rows:
+    for r in redistribution_rows + depth_delta_rows + trend_rows + category_rows:
         rows.append(
             _signal_row(
                 player_id=r["player_id"],
@@ -487,7 +572,9 @@ class AvailabilityImpactAnalyst(Analyst):
     def compute(self, ctx: RunContext) -> pl.DataFrame:
         conn = ctx.conn
         current_injuries = _fetch_current_injuries(conn, ctx.season, ctx.week)
-        flagged = [r for r in current_injuries if r["designation"] not in _HEALTHY_DESIGNATIONS]
+        for r in current_injuries:
+            r["category"] = _classify_designation(r["designation"])
+        flagged = [r for r in current_injuries if r["category"] != _CATEGORY_HEALTHY]
 
         teams_with_flagged = sorted({r["team"] for r in flagged if r["team"]})
         player_positions = _fetch_players_by_team(conn, teams_with_flagged)
@@ -504,16 +591,22 @@ class AvailabilityImpactAnalyst(Analyst):
         flagged_positions = _build_flagged_positions(flagged, player_positions)
         cluster_rows = _compute_cluster_counts(flagged_positions)
 
-        flagged_ids = {r["player_id"] for r in flagged}
+        # practice_trend_risk only makes sense for the 'injury' bucket -- a suspension
+        # or exempt-list stint escalating/de-escalating isn't a practice-participation
+        # trend (see _classify_designation).
+        injury_ids = {r["player_id"] for r in flagged if r["category"] == _CATEGORY_INJURY}
         trend_rows = _compute_trend_risk(
-            {pid: seq for pid, seq in sequences.items() if pid in flagged_ids}
+            {pid: seq for pid, seq in sequences.items() if pid in injury_ids}
         )
+
+        category_rows = _compute_availability_category(flagged)
 
         return _build_signals_frame(
             redistribution_rows=redistribution_rows,
             depth_delta_rows=depth_delta_rows,
             cluster_rows=cluster_rows,
             trend_rows=trend_rows,
+            category_rows=category_rows,
             season=ctx.season,
             week=ctx.week,
             as_of=ctx.now,
@@ -521,9 +614,23 @@ class AvailabilityImpactAnalyst(Analyst):
         )
 
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
+        # This run's output is authoritative for (sector, season, week) -- delete every
+        # signal name this analyst can write in that scope first, since upsert_rows only
+        # inserts/updates the rows it's given and never removes a row a prior run wrote
+        # that this run's logic no longer produces (a practice_trend_risk row that now
+        # fails the sample_n>=2 gate, a player whose designation flipped back to
+        # healthy). Without this, stale rows persist forever -- see pipeline/core/db.py's
+        # delete_rows docstring for why this is written as reusable, not ad hoc here.
+        deleted = delete_rows(
+            ctx.conn,
+            "signals",
+            "sector = %s AND season = %s AND week = %s AND signal = ANY(%s)",
+            ("availability", ctx.season, ctx.week, sorted(_SIGNAL_NAMES)),
+        )
+
         rows = df.to_dicts()
         if not rows:
-            return WorkResult(0)
+            return WorkResult(0, meta={"stale_signals_deleted": deleted})
         conflict_cols = [
             "season",
             "week",
@@ -538,4 +645,4 @@ class AvailabilityImpactAnalyst(Analyst):
         rows_written = upsert_rows(
             ctx.conn, "signals", rows, conflict_cols=conflict_cols, update_cols=update_cols
         )
-        return WorkResult(rows_written)
+        return WorkResult(rows_written, meta={"stale_signals_deleted": deleted})

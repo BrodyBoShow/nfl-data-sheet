@@ -299,6 +299,16 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     an estimate of real participation. A real Wed/Thu/Fri source (e.g. NFL.com's
     official report) would sharpen this; deliberately deferred rather than scraping HTML
     this phase.
+  - **Sleeper's `injury_status` mixes real injuries with non-injury unavailability in
+    the same free-text field.** Measured live 2026-09-18: values seen include `NA`,
+    `Sus` (suspension), `COV` (COVID), `DNR` (did-not-report) — e.g. a player on the
+    Commissioner Exempt list showed `NA`, not a real injury. Sleeper's own roster
+    `status` field doesn't reliably separate these either — cross-tabbed live, `Sus`/
+    `NA`/`COV`/`DNR` mostly show `status: Active`, same as real injuries. The analyst
+    (`pipeline/analysts/availability_impact.py::_classify_designation`) buckets
+    `designation` strings into `injury`/`non_injury_unavailable`/`healthy` instead —
+    see `docs/signals.md`'s `availability_category` entry — an unrecognized value
+    defaults to `injury` (logged), never silently healthy.
   - **ESPN and Sleeper cover different populations, not the same one twice.** Measured
     live: only ~48% of Sleeper's rostered+injured players (402 in scope on the day
     verified) appear in ESPN's feed at all by name+team. ESPN reads like a current-week
