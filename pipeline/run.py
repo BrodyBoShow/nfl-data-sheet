@@ -13,7 +13,9 @@ import sys
 
 import nflreadpy as nfl
 
+from pipeline.analysts.availability_impact import AvailabilityImpactAnalyst
 from pipeline.analysts.efficiency import EfficiencyAnalyst
+from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.core.base import Analyst, Collector
@@ -22,6 +24,8 @@ _JOBS: dict[str, Collector | Analyst] = {
     "id_spine": IdSpineCollector(),
     "nflverse_bulk": NflverseBulkCollector(),
     "efficiency": EfficiencyAnalyst(),
+    "availability": AvailabilityCollector(),
+    "availability_impact": AvailabilityImpactAnalyst(),
 }
 
 _USAGE = (
@@ -113,12 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     if result.status == "success":
         rows = f"{result.rows_written:,} rows written"
         print(f"{result.name}: success, {rows}, {result.duration_s:.1f}s")
-    elif result.status in ("skipped_fresh", "skipped_no_prior"):
+    elif result.status in ("skipped_fresh", "skipped_no_prior", "skipped_no_injuries"):
         print(f"{result.name}: {result.status}")
     else:
         print(f"{result.name}: {result.status} - {result.error}")
 
-    return 0 if result.status in ("success", "skipped_fresh", "skipped_no_prior") else 1
+    ok_statuses = ("success", "skipped_fresh", "skipped_no_prior", "skipped_no_injuries")
+    return 0 if result.status in ok_statuses else 1
 
 
 if __name__ == "__main__":
