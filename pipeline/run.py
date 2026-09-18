@@ -18,6 +18,7 @@ from pipeline.analysts.efficiency import EfficiencyAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
+from pipeline.collectors.odds import OddsCollector
 from pipeline.core.base import Analyst, Collector
 
 _JOBS: dict[str, Collector | Analyst] = {
@@ -26,6 +27,7 @@ _JOBS: dict[str, Collector | Analyst] = {
     "efficiency": EfficiencyAnalyst(),
     "availability": AvailabilityCollector(),
     "availability_impact": AvailabilityImpactAnalyst(),
+    "odds": OddsCollector(),
 }
 
 _USAGE = (

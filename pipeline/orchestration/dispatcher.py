@@ -44,6 +44,7 @@ from pipeline.analysts.efficiency import EfficiencyAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
+from pipeline.collectors.odds import OddsCollector
 from pipeline.core.base import Analyst, Collector, RunResult
 from pipeline.orchestration.auditor import FreshnessCheck, audit_and_alert
 
@@ -59,6 +60,7 @@ _COLLECTORS: list[Collector] = [
     IdSpineCollector(),
     NflverseBulkCollector(),
     AvailabilityCollector(),
+    OddsCollector(),
 ]
 _ANALYSTS: list[Analyst] = [EfficiencyAnalyst(), AvailabilityImpactAnalyst()]
 
@@ -68,6 +70,15 @@ _FRESHNESS_CHECKS = [
     FreshnessCheck(agent="efficiency", tier="T2"),
     FreshnessCheck(agent="availability", tier="T1"),
     FreshnessCheck(agent="availability_impact", tier="T1"),
+    # odds deliberately has no FreshnessCheck here -- check_freshness/_TIER_MAX_AGE
+    # assumes a roughly regular per-tier cadence (T1 = flag past 6h since last success),
+    # but odds_schedule.py's targets are legitimately >6h apart by design (e.g.
+    # mon_pre_mnf to the next tue_opener, or tue_opener to sat_market_movement) -- a
+    # plain tier-based check here would false-alarm on every quiet stretch between
+    # scheduled windows, not just a real break. It gets its own schedule-aware check
+    # instead (auditor.check_odds_targets, wired below via audit_and_alert's
+    # odds_season/odds_week), which alerts only on a target whose own deadline passed
+    # uncaptured or a week short of its expected capture count.
 ]
 
 
@@ -92,7 +103,7 @@ def main() -> int:
 
     _run_tick(_COLLECTORS, _ANALYSTS, season=season, week=week)
 
-    healthy = audit_and_alert(_FRESHNESS_CHECKS)
+    healthy = audit_and_alert(_FRESHNESS_CHECKS, odds_season=season, odds_week=week)
     return 0 if healthy else 1
 
 

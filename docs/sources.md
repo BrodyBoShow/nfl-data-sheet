@@ -235,18 +235,51 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
 
 ## Odds (The Odds API + ESPN embedded lines)
 
-- **Status:** UNVERIFIED
+- **Status:** VERIFIED (live-called 2026-09-18, `/v4/sports/americanfootball_nfl/odds/`
+  only — ESPN embedded lines still unverified, see below).
 - **License:** The Odds API free tier terms apply.
 - **Reliability:** Credit-limited.
 - **Freshness:** T1.
+- **Params/shape/limits:**
+  - `GET https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds/` with query
+    params `apiKey`, `regions=us`, `markets=h2h,spreads,totals`, `oddsFormat=american`.
+  - Response: a JSON array of event objects (verified live: 29 events for one call), each
+    `{id, sport_key, sport_title, commence_time, home_team, away_team, bookmakers}`.
+    `commence_time` is ISO 8601 UTC. `id` is The Odds API's own opaque event id — **not**
+    the nflverse `game_id` and not stable to compare against it directly.
+  - `bookmakers[]`: `{key, title, last_update, markets}`. Verified live, 8 `us`-region
+    books present: `betmgm`, `betonlineag`, `betrivers`, `betus`, `bovada`, `draftkings`,
+    `fanduel`, `lowvig`.
+  - `markets[]`: `{key, last_update, outcomes}`, `key` one of `h2h`/`spreads`/`totals`.
+    **Not every bookmaker carries all 3 requested markets for every game** — verified
+    live, one game's `betmgm` entry had only `h2h`+`totals`, no `spreads`. Code must treat
+    any market as optionally absent per bookmaker, never assume all 3.
+  - `outcomes[]`: `h2h` → `{name: <team name>, price}` (moneyline, American odds, no
+    `point`). `spreads` → `{name: <team name>, price, point}`. `totals` → `{name:
+    "Over"|"Under", price, point}`.
+  - **Team names are the full nickname string** (`"Atlanta Falcons"`, `"Carolina
+    Panthers"`), not an abbreviation — resolve via `teams.team_name` (exact match,
+    `WHERE is_active`) before storing, never guess an abbreviation from the string.
+  - **The endpoint returns all upcoming (not-yet-started) games, not scoped to "this
+    week"** — the verified call's 29 events spanned commence times from
+    2026-09-20T17:00Z through 2026-09-29T00:15Z, i.e. two weeks' worth. A collector must
+    filter/match to the week it cares about itself (via `commence_time` + team names
+    against `games`, or `pipeline/core/schedule.py`'s `resolve_season_week` the same way
+    the Availability collector resolves season/week for a source with no week of its
+    own) rather than trusting the response to already be week-scoped. A game that has
+    already kicked off drops out of the response entirely.
 - **Known traps:**
   - Free tier: 500 credits/month. Cost per call = markets × regions. h2h + spreads +
-    totals in `us` region = 3 credits/call. Budget ≈ 120 credits/month across the season
-    (see calendar in `docs/architecture.md`).
+    totals in `us` region = 3 credits/call — **confirmed live**: response headers on the
+    verification call read `x-requests-last: 3`, `x-requests-used: 3`,
+    `x-requests-remaining: 497` (month started fresh at 500). Use `x-requests-last` from
+    each response as that call's actual cost rather than assuming a constant 3, in case
+    the account/plan or requested params ever change. Budget ≈ 120 credits/month across
+    the season (see calendar in `docs/architecture.md`).
   - Historical endpoints cost 10× a normal call — never use for backfill. Use nflverse
     schedule closing lines for historical backtests instead.
-  - ESPN embedded lines used as a free fill-in source, not a replacement.
-- **Params/shape/limits:** TBD on first verification call.
+  - ESPN embedded lines used as a free fill-in source, not a replacement — **not yet
+    verified**, TBD on first call to that endpoint.
 
 ## Weather (Open-Meteo)
 

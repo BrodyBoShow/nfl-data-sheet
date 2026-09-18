@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from pipeline.orchestration.auditor import FreshnessCheck, check_freshness
+from pipeline.orchestration.auditor import FreshnessCheck, check_freshness, check_odds_targets
 
 
 class _FakeCursor:
@@ -61,3 +61,85 @@ def test_check_freshness_flags_never_run():
         [FreshnessCheck(agent="ghost_agent", tier="T1")],
     )
     assert results[0].status == "never_run"
+
+
+# --------------------------------------------------------------------------------------
+# check_odds_targets
+# --------------------------------------------------------------------------------------
+
+
+class _FakeTargetsCursor:
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+
+    def execute(self, query: str, params: tuple = ()) -> None:
+        pass
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows
+
+    def __enter__(self) -> "_FakeTargetsCursor":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakeTargetsConn:
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+
+    def cursor(self) -> _FakeTargetsCursor:
+        return _FakeTargetsCursor(self._rows)
+
+
+_NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+
+
+def test_no_due_targets_returns_no_alert():
+    conn = _FakeTargetsConn([])
+    assert check_odds_targets(conn, 2026, 3, _NOW) == []  # type: ignore[arg-type]
+
+
+def test_all_due_targets_captured_returns_no_alert():
+    conn = _FakeTargetsConn(
+        [("tue_opener", "captured", None), ("sat_market_movement", "captured", None)]
+    )
+    assert check_odds_targets(conn, 2026, 3, _NOW) == []  # type: ignore[arg-type]
+
+
+def test_deadline_passed_uncaptured_target_alerts():
+    conn = _FakeTargetsConn(
+        [
+            ("tue_opener", "captured", None),
+            ("sat_market_movement", "missed", "deadline_passed"),
+        ]
+    )
+    alerts = check_odds_targets(conn, 2026, 3, _NOW)  # type: ignore[arg-type]
+    assert len(alerts) == 1
+    assert "1/2 due targets captured" in alerts[0]
+    assert "never captured: sat_market_movement" in alerts[0]
+
+
+def test_superseded_or_capped_miss_is_reported_separately_from_never_captured():
+    conn = _FakeTargetsConn(
+        [
+            ("tue_opener", "captured", None),
+            ("sat_market_movement", "missed", "superseded"),
+            ("sun_early", "missed", "weekly_cap"),
+        ]
+    )
+    alerts = check_odds_targets(conn, 2026, 3, _NOW)  # type: ignore[arg-type]
+    assert len(alerts) == 1
+    assert "1/3 due targets captured" in alerts[0]
+    assert "never captured" not in alerts[0]
+    assert "missed to catch-up/budget: sat_market_movement, sun_early" in alerts[0]
+
+
+def test_pending_past_its_own_deadline_counts_as_uncaptured():
+    # a target the dispatcher never ticked for since its deadline passed -- still
+    # 'pending' in the table, no should_run() ever flipped it to 'missed'
+    conn = _FakeTargetsConn([("tue_opener", "pending", None)])
+    alerts = check_odds_targets(conn, 2026, 3, _NOW)  # type: ignore[arg-type]
+    assert len(alerts) == 1
+    assert "0/1 due targets captured" in alerts[0]

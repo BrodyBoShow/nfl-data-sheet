@@ -69,6 +69,55 @@ def check_freshness(
     return results
 
 
+def check_odds_targets(
+    conn: psycopg.Connection, season: int, week: int, now: datetime
+) -> list[str]:
+    """Odds-specific staleness check, in place of a generic FreshnessCheck (dispatcher.py
+    explains why one doesn't fit: odds_schedule.py's targets are legitimately >6h apart
+    by design, so a plain elapsed-time-since-last-success check would false-alarm every
+    quiet stretch between scheduled windows, not just a real break).
+
+    Scoped to targets whose window has already fully closed (deadline <= now) so a quiet
+    stretch before a not-yet-due target (e.g. Wednesday, waiting on Saturday's target)
+    never trips this. Returns at most one alert message: an uncaptured target with no
+    explained reason ('deadline_passed', or still 'pending' because the dispatcher never
+    ticked at all since its deadline passed) is the clear "something's actually broken"
+    signal; a target absorbed by catch-up collapsing or a budget cap
+    ('superseded'/'weekly_cap'/'monthly_cap') is the scheduler working as designed, not a
+    failure by itself, but still surfaced in the same message for visibility. Empty list
+    when every due target was captured -- the common, healthy case."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT target_id, status, missed_reason FROM odds_snapshot_targets "
+            "WHERE season = %s AND week = %s AND deadline <= %s",
+            (season, week, now),
+        )
+        due = cur.fetchall()
+
+    if not due:
+        return []
+
+    captured = [target_id for target_id, status, _ in due if status == "captured"]
+    uncaptured = [(target_id, reason) for target_id, status, reason in due if status != "captured"]
+    if not uncaptured:
+        return []
+
+    explained_reasons = {"superseded", "weekly_cap", "monthly_cap"}
+    never_captured = sorted(t for t, reason in uncaptured if reason not in explained_reasons)
+    absorbed = sorted(t for t, reason in uncaptured if reason in explained_reasons)
+
+    detail = []
+    if never_captured:
+        detail.append(f"never captured: {', '.join(never_captured)}")
+    if absorbed:
+        detail.append(f"missed to catch-up/budget: {', '.join(absorbed)}")
+
+    return [
+        f"odds: {len(captured)}/{len(due)} due targets captured this week "
+        f"(season {season} week {week}) -- {'; '.join(detail)}"
+    ]
+
+
 def check_row_count(conn: psycopg.Connection, table: str, min_rows: int) -> bool:
     """True if `table` has at least `min_rows` rows. `table` is always an internal constant."""
     with conn.cursor() as cur:
@@ -110,18 +159,31 @@ def send_alert(message: str) -> None:
         print(f"[auditor] ALERT: {message}")
 
 
-def audit_and_alert(checks: list[FreshnessCheck]) -> bool:
-    """Run freshness checks and alert on anything stale or never run.
+def audit_and_alert(
+    checks: list[FreshnessCheck],
+    *,
+    odds_season: int | None = None,
+    odds_week: int | None = None,
+) -> bool:
+    """Run freshness checks and alert on anything stale or never run, plus the
+    odds-specific schedule check (see check_odds_targets) when `odds_season`/
+    `odds_week` are given -- odds has no entry in `checks` itself, since a generic
+    elapsed-time check doesn't fit its deliberately sparse, calendar-gated cadence.
 
     Returns True if everything is healthy (for the dispatcher's exit code).
     """
     healthy = True
+    now = datetime.now(UTC)
     with get_connection() as conn:
-        for result in check_freshness(conn, checks):
+        for result in check_freshness(conn, checks, now=now):
             if result.status != "fresh":
                 healthy = False
                 send_alert(
                     f"{result.agent} ({result.tier}) is {result.status} -- "
                     f"last success: {result.last_success_at}"
                 )
+        if odds_season is not None and odds_week is not None:
+            for message in check_odds_targets(conn, odds_season, odds_week, now):
+                healthy = False
+                send_alert(message)
     return healthy

@@ -13,6 +13,7 @@ Phase: P3
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import psycopg
 
@@ -20,6 +21,9 @@ import psycopg
 # days before that week's first game). A timestamp up to two days before the next
 # upcoming game still belongs to that game's week, not the prior one.
 _LOOKAHEAD_DAYS = 2
+
+# games.gameday is nflverse's ET calendar-day convention -- see _to_gameday below.
+_ET = ZoneInfo("America/New_York")
 
 _GameRow = tuple[date, int, int, str]  # (gameday, season, week, season_type)
 
@@ -57,8 +61,22 @@ def _pick_week(games: list[_GameRow], at: date) -> tuple[int, int, str] | None:
     return None
 
 
+def to_gameday(at: datetime | date) -> date:
+    """games.gameday is nflverse's ET calendar-day convention -- a tz-aware `at` must
+    convert to ET before truncating to a date, or a prime-time kickoff at/after ~8pm ET
+    (already the next UTC calendar day) silently resolves against the wrong week's
+    window. Verified live: the 2026 week 2 MNF game's commence time is
+    2026-09-21T20:15 ET, i.e. 2026-09-22T00:15Z -- taking .date() on the raw UTC value
+    reads 2026-09-22, which fell outside week 2's window and picked week 3 instead.
+
+    Public (not module-private) because pipeline/collectors/odds.py's _match_game_id
+    needs the identical conversion when matching an odds event's commence_time against
+    games.gameday directly -- one place to get this right, not two copies to drift."""
+    return at.astimezone(_ET).date() if isinstance(at, datetime) else at
+
+
 def resolve_season_week(conn: psycopg.Connection, at: datetime | date) -> tuple[int, int, str]:
-    at_date = at.date() if isinstance(at, datetime) else at
+    at_date = to_gameday(at)
 
     with conn.cursor() as cur:
         cur.execute(
