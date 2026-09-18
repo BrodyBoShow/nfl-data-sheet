@@ -373,13 +373,22 @@ exempt-list stint escalating isn't a practice-participation trend).
 
 ### Stale-signal cleanup
 
-`AvailabilityImpactAnalyst.write_signals` deletes every signal name it can write
-(`sector = 'availability' AND season/week = this run's AND signal = ANY(<its own known
-names>)`) before reinserting — see `pipeline/core/db.py`'s `delete_rows` docstring. This
-run's output is authoritative for its scope; a signal a prior run wrote that this run's
-(possibly narrower) logic no longer produces does not survive. Without this, e.g. the
-151 single-snapshot `practice_trend_risk` rows from before the `sample_n >= 2` gate
-would have persisted forever, since `upsert_rows` only ever inserts/updates rows it's
-given. This is a general pattern any analyst can reuse — `EfficiencyAnalyst.write_signals`
-doesn't do this yet and has the same latent gap; adopting the same `delete_rows` call
-there is a reasonable follow-up, not done as part of this phase.
+`Analyst.run()` itself (`pipeline/core/base.py`) deletes every signal name an analyst
+can write (`sector = <analyst's own> AND season/week = this run's AND signal =
+ANY(<analyst's own signal_names>)`) before calling `write_signals` — not something each
+analyst implements itself. Every `Analyst` subclass declares `sector: str` and
+`signal_names: frozenset[str]` as class attributes; the base class's
+`_delete_stale_signals` uses them to scope the delete so it can never reach another
+analyst's rows (different `sector`) or an unrelated signal name (not in that analyst's
+own `signal_names`) — see `pipeline/core/base.py`'s docstrings and
+`tests/test_analyst_registry.py`, which asserts every registered analyst's `sector` is
+distinct and their `signal_names` sets are pairwise disjoint, checked against the
+dispatcher's actual registry so a newly-added analyst (market, environment, usage,
+scheme, ...) is covered automatically. Both `EfficiencyAnalyst` (`signal_names` derived
+from `_METRIC_CONFIG`, not hardcoded) and `AvailabilityImpactAnalyst` get this for free;
+a future analyst gets it too just by declaring the two class attributes — no
+`write_signals` implementation needs to know this happens. This run's output is
+authoritative for its scope; a signal a prior run wrote that this run's (possibly
+narrower) logic no longer produces does not survive. This is what caught and removed
+the 151 single-snapshot `practice_trend_risk` rows from before the `sample_n >= 2` gate
+existed — `upsert_rows` alone only ever inserts/updates the rows it's given.

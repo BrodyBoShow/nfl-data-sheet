@@ -18,7 +18,7 @@ import polars as pl
 import psycopg
 
 from pipeline.core.base import Analyst, RunContext, WorkResult
-from pipeline.core.db import delete_rows, upsert_rows
+from pipeline.core.db import upsert_rows
 from pipeline.core.freshness import get_last_value
 
 _log = logging.getLogger(__name__)
@@ -68,9 +68,10 @@ _DESIGNATION_SEVERITY: dict[str, int] = {
 
 _INPUTS_VERSION_TAGS = ("snap_counts", "depth_charts")
 
-# Every signal name this analyst can ever write -- write_signals deletes exactly this set
-# (scoped to sector/season/week) before reinserting, so a signal whose emission criteria
-# narrow (e.g. practice_trend_risk's new sample_n>=2 gate) doesn't leave stale rows behind.
+# Every signal name this analyst can ever write -- assigned to the class attribute
+# Analyst.signal_names below, which the base class uses to delete exactly this set
+# (scoped to sector/season/week) before each write, so a signal whose emission criteria
+# narrow (e.g. practice_trend_risk's sample_n>=2 gate) doesn't leave stale rows behind.
 _SIGNAL_NAMES = frozenset(
     {
         "snap_share_at_risk",
@@ -558,6 +559,8 @@ def _build_inputs_version(conn: psycopg.Connection) -> str:
 
 class AvailabilityImpactAnalyst(Analyst):
     name = "availability_impact"
+    sector = "availability"
+    signal_names = _SIGNAL_NAMES
 
     def inputs_ready(self, ctx: RunContext) -> bool | str:
         with ctx.conn.cursor() as cur:
@@ -614,23 +617,12 @@ class AvailabilityImpactAnalyst(Analyst):
         )
 
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
-        # This run's output is authoritative for (sector, season, week) -- delete every
-        # signal name this analyst can write in that scope first, since upsert_rows only
-        # inserts/updates the rows it's given and never removes a row a prior run wrote
-        # that this run's logic no longer produces (a practice_trend_risk row that now
-        # fails the sample_n>=2 gate, a player whose designation flipped back to
-        # healthy). Without this, stale rows persist forever -- see pipeline/core/db.py's
-        # delete_rows docstring for why this is written as reusable, not ad hoc here.
-        deleted = delete_rows(
-            ctx.conn,
-            "signals",
-            "sector = %s AND season = %s AND week = %s AND signal = ANY(%s)",
-            ("availability", ctx.season, ctx.week, sorted(_SIGNAL_NAMES)),
-        )
-
+        # Stale-row cleanup for this analyst's own (sector, signal_names) scope already
+        # happened in Analyst.run() -- see pipeline/core/base.py's
+        # _delete_stale_signals. This just upserts the current run's output.
         rows = df.to_dicts()
         if not rows:
-            return WorkResult(0, meta={"stale_signals_deleted": deleted})
+            return WorkResult(0)
         conflict_cols = [
             "season",
             "week",
@@ -645,4 +637,4 @@ class AvailabilityImpactAnalyst(Analyst):
         rows_written = upsert_rows(
             ctx.conn, "signals", rows, conflict_cols=conflict_cols, update_cols=update_cols
         )
-        return WorkResult(rows_written, meta={"stale_signals_deleted": deleted})
+        return WorkResult(rows_written)

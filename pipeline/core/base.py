@@ -22,7 +22,7 @@ import psycopg
 
 from . import logging as run_log
 from .config import Settings, get_settings
-from .db import get_connection
+from .db import delete_rows, get_connection
 
 
 @dataclass(frozen=True)
@@ -176,10 +176,14 @@ class Analyst(ABC):
 
     One analyst per sector (see docs/architecture.md's L2 table). Contract:
     inputs_ready(ctx) -> bool → compute(ctx) -> polars.DataFrame →
-    write_signals(ctx, df) -> WorkResult.
+    write_signals(ctx, df) -> WorkResult. `sector` and `signal_names` are declared by
+    every subclass (not just informal convention) so `run()` can delete this analyst's
+    own stale rows before each write -- see `_delete_stale_signals`.
     """
 
     name: str
+    sector: str
+    signal_names: frozenset[str]
 
     @abstractmethod
     def inputs_ready(self, ctx: RunContext) -> bool | str:
@@ -192,16 +196,45 @@ class Analyst(ABC):
 
     @abstractmethod
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
-        """Upsert df into `signals` via ctx.conn. Returns WorkResult(rows_written, meta)."""
+        """Upsert df into `signals` via ctx.conn. Returns WorkResult(rows_written, meta).
+        Stale-row cleanup for this analyst's own (sector, signal_names) scope already
+        happened in run() before this is called (see _delete_stale_signals) --
+        implementations only need to handle the upsert itself."""
+
+    def _delete_stale_signals(self, ctx: RunContext) -> int:
+        """Deletes every `signals` row this analyst could have written for
+        (ctx.season, ctx.week) that this run's write_signals is about to replace.
+        Scoped to `sector` + `signal_names`, so it can never reach another analyst's
+        rows (a different sector) or a different signal name -- even a hypothetical
+        future analyst sharing this one's sector would be untouched, since its own
+        signal names wouldn't be in this analyst's `signal_names` set. Without this,
+        `upsert_rows` alone only ever inserts/updates the rows it's given -- a row a
+        prior run wrote that this run's (possibly narrower) logic no longer produces
+        would persist forever. Every Analyst gets this automatically via run(); no
+        subclass needs to call it or reimplement it (see pipeline/core/db.py's
+        delete_rows docstring for the general rationale)."""
+        return delete_rows(
+            ctx.conn,
+            "signals",
+            "sector = %s AND season = %s AND week = %s AND signal = ANY(%s)",
+            (self.sector, ctx.season, ctx.week, sorted(self.signal_names)),
+        )
 
     def run(
         self, *, season: int, week: int, season_type: str = "REG", force: bool = False
     ) -> RunResult:
+        def do_work(ctx: RunContext) -> WorkResult:
+            df = self.compute(ctx)
+            deleted = self._delete_stale_signals(ctx)
+            result = self.write_signals(ctx, df)
+            meta = {**result.meta, "stale_signals_deleted": deleted}
+            return WorkResult(result.rows_written, meta)
+
         return _execute(
             name=self.name,
             season=season,
             week=week,
             season_type=season_type,
             is_ready=(lambda ctx: True) if force else self.inputs_ready,
-            do_work=lambda ctx: self.write_signals(ctx, self.compute(ctx)),
+            do_work=do_work,
         )

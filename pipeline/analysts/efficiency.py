@@ -253,6 +253,16 @@ _SIGNAL_SCHEMA: dict[str, Any] = {
 }
 _SIGNAL_COLS = list(_SIGNAL_SCHEMA)
 
+# Every signal name this analyst can ever write -- derived from _METRIC_CONFIG rather
+# than hardcoded, so it can't drift from _build_metric_signal_rows's own
+# f"{metric.name}_{side}" naming. Assigned to the Analyst.signal_names class attribute
+# below, which the base class uses to delete exactly this set (scoped to
+# sector/season/week) before each write -- see pipeline/core/base.py's
+# _delete_stale_signals.
+_SIGNAL_NAMES = frozenset(
+    f"{metric.name}_{side}" for metric in _METRIC_CONFIG for side in ("off", "def")
+)
+
 
 # --------------------------------------------------------------------------------------
 # Point-in-time filtering (no leakage, backfill- and postseason-ready)
@@ -777,6 +787,8 @@ def _build_inputs_version(conn: psycopg.Connection) -> str:
 
 class EfficiencyAnalyst(Analyst):
     name = "efficiency"
+    sector = "efficiency"
+    signal_names = _SIGNAL_NAMES
 
     # Stashed by compute() for write_signals() to hand to WorkResult.meta -- compute()
     # always runs immediately before write_signals() within one Analyst.run() call (see
