@@ -294,21 +294,81 @@ def _signal_row(
     as_of: Any,
     inputs_version: str,
 ) -> dict[str, Any]:
+    """Casts every field to its _SIGNAL_SCHEMA dtype explicitly -- e.g. `value` is
+    always a Python float here even though `_compute_cluster_counts` counts are whole
+    numbers, and `sample_n` is always an int or exactly None, never left for Polars to
+    infer from whichever rows happen to come first when six different producers' output
+    gets concatenated (see _build_signals_frame)."""
     return {
         "game_id": None,
-        "season": season,
-        "week": week,
+        "season": int(season),
+        "week": int(week),
         "team": team,
         "player_id": player_id,
         "sector": "availability",
         "signal": signal,
-        "value": value,
+        "value": float(value),
         "league_pct": None,
-        "sample_n": sample_n,
+        "sample_n": int(sample_n) if sample_n is not None else None,
         "stability": None,
         "as_of": as_of,
         "inputs_version": inputs_version,
     }
+
+
+def _build_signals_frame(
+    *,
+    redistribution_rows: list[dict[str, Any]],
+    depth_delta_rows: list[dict[str, Any]],
+    cluster_rows: list[dict[str, Any]],
+    trend_rows: list[dict[str, Any]],
+    season: int,
+    week: int,
+    as_of: Any,
+    inputs_version: str,
+) -> pl.DataFrame:
+    """Combines every signal-producing helper's output into one signals-shaped frame.
+    Constructed with the full _SIGNAL_SCHEMA (name -> dtype), not just column names --
+    Polars' row-oriented list-of-dicts constructor otherwise infers each column's dtype
+    from only the first `infer_schema_length` rows and raises a ComputeError on append
+    the moment a later row doesn't match (e.g. cluster_rows' counts arriving after many
+    redistribution/depth rows, or the first non-null `sample_n` arriving after many
+    all-null ones from the other three signal types) -- an explicit schema casts every
+    row to the declared dtype at construction instead, so a genuine mismatch fails
+    loudly right there rather than partway through building the frame."""
+    rows: list[dict[str, Any]] = []
+    for r in redistribution_rows + depth_delta_rows + trend_rows:
+        rows.append(
+            _signal_row(
+                player_id=r["player_id"],
+                team=None,
+                signal=r["signal"],
+                value=r["value"],
+                sample_n=r.get("sample_n"),
+                season=season,
+                week=week,
+                as_of=as_of,
+                inputs_version=inputs_version,
+            )
+        )
+    for r in cluster_rows:
+        rows.append(
+            _signal_row(
+                player_id=None,
+                team=r["team"],
+                signal=r["signal"],
+                value=r["value"],
+                sample_n=None,
+                season=season,
+                week=week,
+                as_of=as_of,
+                inputs_version=inputs_version,
+            )
+        )
+
+    if rows:
+        return pl.DataFrame(rows, schema=_SIGNAL_SCHEMA)
+    return pl.DataFrame(schema=_SIGNAL_SCHEMA)
 
 
 # --------------------------------------------------------------------------------------
@@ -449,42 +509,16 @@ class AvailabilityImpactAnalyst(Analyst):
             {pid: seq for pid, seq in sequences.items() if pid in flagged_ids}
         )
 
-        as_of = ctx.now
-        inputs_version = _build_inputs_version(conn)
-
-        rows: list[dict[str, Any]] = []
-        for r in redistribution_rows + depth_delta_rows + trend_rows:
-            rows.append(
-                _signal_row(
-                    player_id=r["player_id"],
-                    team=None,
-                    signal=r["signal"],
-                    value=r["value"],
-                    sample_n=r.get("sample_n"),
-                    season=ctx.season,
-                    week=ctx.week,
-                    as_of=as_of,
-                    inputs_version=inputs_version,
-                )
-            )
-        for r in cluster_rows:
-            rows.append(
-                _signal_row(
-                    player_id=None,
-                    team=r["team"],
-                    signal=r["signal"],
-                    value=r["value"],
-                    sample_n=None,
-                    season=ctx.season,
-                    week=ctx.week,
-                    as_of=as_of,
-                    inputs_version=inputs_version,
-                )
-            )
-
-        if rows:
-            return pl.DataFrame(rows, schema=_SIGNAL_COLS)
-        return pl.DataFrame(schema=_SIGNAL_SCHEMA)
+        return _build_signals_frame(
+            redistribution_rows=redistribution_rows,
+            depth_delta_rows=depth_delta_rows,
+            cluster_rows=cluster_rows,
+            trend_rows=trend_rows,
+            season=ctx.season,
+            week=ctx.week,
+            as_of=ctx.now,
+            inputs_version=_build_inputs_version(conn),
+        )
 
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
         rows = df.to_dicts()

@@ -1,7 +1,11 @@
+from datetime import UTC, datetime
+
 from pipeline.analysts.availability_impact import (
+    _SIGNAL_SCHEMA,
     _build_depth_groups,
     _build_flagged_positions,
     _build_redistribution_roster,
+    _build_signals_frame,
     _build_trend_sequences,
     _compute_cluster_counts,
     _compute_depth_rank_delta,
@@ -186,3 +190,72 @@ def test_compute_trend_risk_unrecognized_designation_contributes_no_direction():
     rows = _compute_trend_risk({"p1": ["Questionable", "SomeNewStatus", "Doubtful"]})
     # SomeNewStatus can't be scored against either neighbor -- only recognized steps count
     assert rows[0]["value"] == 0.0
+
+
+# --------------------------------------------------------------------------------------
+# _build_signals_frame -- regression test for the live failure: combining all six
+# signal types into one frame with pl.DataFrame(rows, schema=_SIGNAL_COLS) (column
+# names only) let Polars infer per-column dtypes from the first rows and then raise a
+# ComputeError once a later row's type didn't match (e.g. an int cluster count arriving
+# after float-valued rows, or the first non-null sample_n arriving after many
+# all-null ones). The per-function tests above never combined outputs, so none of them
+# caught it.
+# --------------------------------------------------------------------------------------
+
+
+def test_build_signals_frame_combines_all_six_signal_types_with_correct_dtypes():
+    redistribution_rows = [
+        {"player_id": "wr1", "signal": "snap_share_at_risk", "value": 0.6},
+        {"player_id": "wr2", "signal": "snap_share_redistribution_gain", "value": 0.45},
+    ]
+    depth_delta_rows = [
+        {"player_id": "lt2", "signal": "replacement_depth_rank_delta", "value": 1.0},
+    ]
+    cluster_rows = [
+        {"team": "KC", "signal": "ol_cluster_count", "value": 2.0},
+        {"team": "KC", "signal": "secondary_cluster_count", "value": 1.0},
+    ]
+    trend_rows = [
+        {"player_id": "wr1", "signal": "practice_trend_risk", "value": 2.0, "sample_n": 3},
+    ]
+
+    df = _build_signals_frame(
+        redistribution_rows=redistribution_rows,
+        depth_delta_rows=depth_delta_rows,
+        cluster_rows=cluster_rows,
+        trend_rows=trend_rows,
+        season=2026,
+        week=3,
+        as_of=datetime(2026, 9, 19, tzinfo=UTC),
+        inputs_version="snap_counts@x,depth_charts@y",
+    )
+
+    assert df.height == 6
+    for col, dtype in _SIGNAL_SCHEMA.items():
+        assert df.schema[col] == dtype, f"{col}: expected {dtype}, got {df.schema[col]}"
+
+    signals_present = set(df["signal"].to_list())
+    assert signals_present == {
+        "snap_share_at_risk",
+        "snap_share_redistribution_gain",
+        "replacement_depth_rank_delta",
+        "ol_cluster_count",
+        "secondary_cluster_count",
+        "practice_trend_risk",
+    }
+
+
+def test_build_signals_frame_empty_input_returns_empty_frame_with_correct_schema():
+    df = _build_signals_frame(
+        redistribution_rows=[],
+        depth_delta_rows=[],
+        cluster_rows=[],
+        trend_rows=[],
+        season=2026,
+        week=3,
+        as_of=datetime(2026, 9, 19, tzinfo=UTC),
+        inputs_version="snap_counts@x,depth_charts@y",
+    )
+    assert df.height == 0
+    for col, dtype in _SIGNAL_SCHEMA.items():
+        assert df.schema[col] == dtype
