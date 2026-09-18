@@ -2,10 +2,16 @@ name: dispatcher
 
 "on":
   schedule:
-    # Every ~10 min, never on :00 (CLAUDE.md convention). Phase 1 skeleton: this always
-    # runs every registered collector/analyst; each one's own should_run()/inputs_ready()
-    # decides whether there's anything to do. Full calendar-aware triggering is Phase 8.
-    - cron: "3,13,23,33,43,53 * * * *"
+    # Every ~15 min at odd offsets, never on :00 (CLAUDE.md convention). GitHub Actions'
+    # free-tier scheduled triggers are best-effort on shared runners, not a guarantee --
+    # observed live: over ~3 hours at a 10-min cron, only 1 scheduled run actually fired.
+    # A tighter cron doesn't fix that; it just queues more requests GitHub is equally
+    # free to drop. The dispatcher and every collector/analyst's should_run()/
+    # inputs_ready() are built to tolerate this already -- they decide what's due from
+    # stored freshness state (source_freshness markers, agent_runs.finished_at) compared
+    # against the live/current value or absolute now, never from how much time or how
+    # many ticks have passed since the last run. Never make that assumption here either.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 jobs:
