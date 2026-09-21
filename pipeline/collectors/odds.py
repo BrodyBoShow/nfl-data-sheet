@@ -215,6 +215,12 @@ class OddsCollector(Collector):
         target = self._due_target
         assert target is not None, "fetch() called without a due target -- should_run() runs first"
 
+        if not ctx.settings.odds_api_key:
+            # Fails loudly into agent_runs.error instead of letting httpx send apiKey=""
+            # and surface The Odds API's opaque 401 body -- a missing secret should read
+            # as exactly that, not as an upstream auth mystery.
+            raise RuntimeError("ODDS_API_KEY not set")
+
         resp = httpx.get(
             _ODDS_URL,
             params={

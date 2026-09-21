@@ -1,6 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
-from pipeline.orchestration.auditor import FreshnessCheck, check_freshness, check_odds_targets
+from pipeline.orchestration.auditor import (
+    FreshnessCheck,
+    _clear_alert,
+    _send_if_new,
+    check_freshness,
+    check_odds_targets,
+)
 
 
 class _FakeCursor:
@@ -143,3 +149,97 @@ def test_pending_past_its_own_deadline_counts_as_uncaptured():
     alerts = check_odds_targets(conn, 2026, 3, _NOW)  # type: ignore[arg-type]
     assert len(alerts) == 1
     assert "0/1 due targets captured" in alerts[0]
+
+
+# --------------------------------------------------------------------------------------
+# alert dedup (_send_if_new / _clear_alert) -- backed by an in-memory auditor_alerts
+# --------------------------------------------------------------------------------------
+
+
+class _FakeAlertCursor:
+    def __init__(self, store: dict[str, str]) -> None:
+        self._store = store
+        self._result: tuple | None = None
+
+    def execute(self, query: str, params: tuple = ()) -> None:
+        if query.startswith("SELECT"):
+            (alert_key,) = params
+            message = self._store.get(alert_key)
+            self._result = (message,) if message is not None else None
+        elif query.startswith("INSERT"):
+            alert_key, message, _now = params
+            self._store[alert_key] = message
+        elif query.startswith("DELETE"):
+            (alert_key,) = params
+            self._store.pop(alert_key, None)
+
+    def fetchone(self):
+        return self._result
+
+    def __enter__(self) -> "_FakeAlertCursor":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakeAlertConn:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def cursor(self) -> _FakeAlertCursor:
+        return _FakeAlertCursor(self.store)
+
+
+def _stub_send_alert(monkeypatch) -> list[str]:
+    """Replaces the real send_alert (Discord webhook / print) with a recorder, so these
+    dedup tests never depend on -- or fire -- a real DISCORD_WEBHOOK_URL."""
+    import pipeline.orchestration.auditor as auditor_mod
+
+    sent: list[str] = []
+    monkeypatch.setattr(auditor_mod, "send_alert", sent.append)
+    return sent
+
+
+def test_send_if_new_sends_and_records_a_first_time_alert(monkeypatch):
+    sent = _stub_send_alert(monkeypatch)
+    conn = _FakeAlertConn()
+
+    result = _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    assert result is True
+    assert sent == ["0/1 due targets captured"]
+    assert conn.store["odds:2026:3"] == "0/1 due targets captured"
+
+
+def test_send_if_new_suppresses_an_identical_repeat(monkeypatch):
+    sent = _stub_send_alert(monkeypatch)
+    conn = _FakeAlertConn()
+    _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    sent_again = _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    assert sent_again is False
+    assert sent == ["0/1 due targets captured"]  # only the first call actually alerted
+
+
+def test_send_if_new_resends_when_the_message_changes(monkeypatch):
+    _stub_send_alert(monkeypatch)
+    conn = _FakeAlertConn()
+    _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    sent = _send_if_new(conn, "odds:2026:3", "1/2 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    assert sent is True
+    assert conn.store["odds:2026:3"] == "1/2 due targets captured"
+
+
+def test_clear_alert_lets_an_identical_message_resend_later(monkeypatch):
+    _stub_send_alert(monkeypatch)
+    conn = _FakeAlertConn()
+    _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    _clear_alert(conn, "odds:2026:3")  # type: ignore[arg-type]
+    sent = _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
+
+    assert sent is True

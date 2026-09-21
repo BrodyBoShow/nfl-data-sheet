@@ -33,6 +33,7 @@ Phase: 1 (skeleton) -- full calendar-aware triggering (docs/architecture.md's Di
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Sequence
 from typing import Protocol
@@ -88,23 +89,40 @@ def _run_tick(
     *,
     season: int,
     week: int,
-) -> None:
+) -> list[RunResult]:
     """Run every collector, then every analyst -- but only if at least one collector
-    wrote new/changed rows this tick (see module docstring for why)."""
-    collector_results = [c.run(season=season, week=week) for c in collectors]
-    if any(result.rows_written > 0 for result in collector_results):
-        for analyst in analysts:
-            analyst.run(season=season, week=week)
+    wrote new/changed rows this tick (see module docstring for why). Returns every
+    RunResult from this tick (collectors always, analysts only if they ran), so the
+    caller can tell whether any job actually failed."""
+    results = [c.run(season=season, week=week) for c in collectors]
+    if any(result.rows_written > 0 for result in results):
+        results += [a.run(season=season, week=week) for a in analysts]
+    return results
+
+
+def _set_github_output(name: str, value: str) -> None:
+    """No-op outside GitHub Actions. Lets the workflow's later steps (e.g. filing an
+    issue) key off an auditor alert without that also flipping this step's own exit
+    code -- see the module docstring and audit_and_alert's docstring for why auditor
+    findings must stay separate from job failures."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"{name}={value}\n")
 
 
 def main() -> int:
     season = nfl.get_current_season()
     week = nfl.get_current_week()
 
-    _run_tick(_COLLECTORS, _ANALYSTS, season=season, week=week)
+    results = _run_tick(_COLLECTORS, _ANALYSTS, season=season, week=week)
+    any_failed = any(result.status == "failed" for result in results)
 
-    healthy = audit_and_alert(_FRESHNESS_CHECKS, odds_season=season, odds_week=week)
-    return 0 if healthy else 1
+    alerted = audit_and_alert(_FRESHNESS_CHECKS, odds_season=season, odds_week=week)
+    _set_github_output("alerted", "true" if alerted else "false")
+
+    return 1 if any_failed else 0
 
 
 if __name__ == "__main__":

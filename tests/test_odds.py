@@ -8,6 +8,7 @@ from pipeline.collectors.odds import (
     _extract_normalized_fields,
     _match_game_id,
 )
+from pipeline.collectors.odds_schedule import Target
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -224,3 +225,35 @@ def test_match_game_id_queries_by_et_gameday_not_raw_utc_date():
 
     gameday_param = conn.cur.last_params[0]
     assert gameday_param == date(2026, 9, 21)
+
+
+# --------------------------------------------------------------------------------------
+# fetch() -- must fail clearly, not send an empty apiKey to The Odds API
+# --------------------------------------------------------------------------------------
+
+
+class _FakeSettings:
+    def __init__(self, odds_api_key: str | None) -> None:
+        self.odds_api_key = odds_api_key
+
+
+class _FakeFetchCtx:
+    """Duck-types RunContext's one attribute fetch() reads -- ctx.settings.odds_api_key."""
+
+    def __init__(self, odds_api_key: str | None) -> None:
+        self.settings = _FakeSettings(odds_api_key)
+
+
+def test_fetch_raises_clear_error_when_api_key_missing():
+    collector = OddsCollector()
+    collector._due_target = Target(
+        "sun_early",
+        datetime(2026, 9, 20, 12, tzinfo=UTC),
+        datetime(2026, 9, 20, 16, tzinfo=UTC),
+    )
+
+    try:
+        collector.fetch(_FakeFetchCtx(odds_api_key=None))  # type: ignore[arg-type]
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert str(exc) == "ODDS_API_KEY not set"

@@ -36,13 +36,27 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: uv run python -m pipeline.orchestration.dispatcher
 
-      - name: File an issue on auditor failure
-        if: steps.dispatcher.outcome == 'failure'
+      # Runs on either signal, which the dispatcher step keeps distinct on purpose (see
+      # pipeline/orchestration/dispatcher.py/auditor.py): a hard failure (a collector or
+      # analyst actually raised) fails the step outright, while an auditor alert (a
+      # stale table, a missed odds target) is reported via the `alerted` step output
+      # without failing the step -- so a persistent-but-known warning doesn't paint
+      # every run red. `if:` needs failure() explicitly for the first branch: GitHub
+      # skips every later step after a failure unless the step's own `if:` says
+      # otherwise.
+      - name: File an issue on dispatcher failure or auditor alert
+        if: (failure() && steps.dispatcher.outcome == 'failure') || steps.dispatcher.outputs.alerted == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue create \
-            --title "Dispatcher run flagged unhealthy ($(date -u +%Y-%m-%dT%H:%MZ))" \
-            --body "The dispatcher's auditor check failed. See the workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ "${{ steps.dispatcher.outcome }}" = "failure" ]; then
+            title="Dispatcher run failed ($(date -u +%Y-%m-%dT%H:%MZ))"
+            body="A collector or analyst run failed. See the workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            title="Auditor alert ($(date -u +%Y-%m-%dT%H:%MZ))"
+            body="The auditor flagged a new issue (see Discord/logs for the message). Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          gh issue create --title "$title" --body "$body"

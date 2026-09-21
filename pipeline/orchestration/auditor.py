@@ -1,7 +1,8 @@
 """
 Job: Check freshness/row-count/null-rate anomalies across pipeline outputs and alert.
-Reads: agent_runs, plus whichever table each check targets
-Writes: nothing (alerts are external: Discord webhook, or a printed line as a stub)
+Reads: agent_runs, auditor_alerts, plus whichever table each check targets
+Writes: auditor_alerts (dedup state); alerts themselves are external (Discord webhook,
+        or a printed line as a stub)
 Tier: T0
 Phase: 1 (skeleton) -- schema-drift detection and the UI-facing staleness feed are not
        built yet; this covers freshness, row-count floors, and null-rate ceilings, the
@@ -148,15 +149,54 @@ def send_alert(message: str) -> None:
     """Discord webhook if configured, otherwise a printed stub.
 
     GitHub-issue alerting (docs/architecture.md's other option) is left to the dispatcher
-    workflow itself (`gh issue create` on a non-zero exit), not to this module -- it
-    would otherwise need its own GitHub token wired in just to duplicate what the
-    workflow can do in one line.
+    workflow itself (`gh issue create`), not to this module -- it would otherwise need
+    its own GitHub token wired in just to duplicate what the workflow can do in one line.
     """
     settings = get_settings()
     if settings.discord_webhook_url:
         httpx.post(settings.discord_webhook_url, json={"content": message}, timeout=10)
     else:
         print(f"[auditor] ALERT: {message}")
+
+
+def _load_alert_message(conn: psycopg.Connection, alert_key: str) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT message FROM auditor_alerts WHERE alert_key = %s", (alert_key,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def _record_alert(conn: psycopg.Connection, alert_key: str, message: str, now: datetime) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO auditor_alerts (alert_key, message, last_sent_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (alert_key) DO UPDATE SET message = EXCLUDED.message, "
+            "last_sent_at = EXCLUDED.last_sent_at",
+            (alert_key, message, now),
+        )
+
+
+def _clear_alert(conn: psycopg.Connection, alert_key: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM auditor_alerts WHERE alert_key = %s", (alert_key,))
+
+
+def _send_if_new(conn: psycopg.Connection, alert_key: str, message: str, now: datetime) -> bool:
+    """Sends `message` under `alert_key` only if it differs from the last message sent
+    under that same key -- an unchanged condition (e.g. the same stale table, the same
+    uncaptured odds target) stays silent on every later tick instead of re-alerting every
+    ~15 minutes until someone fixes it. A key with no live alert this tick is cleared
+    (see `_clear_alert` callers below) so a later recurrence, even with identical
+    wording, alerts again rather than staying suppressed by a stale row from last time.
+
+    Returns True if a new alert was actually sent (Discord/print), for the caller to
+    track whether anything newly fired this run.
+    """
+    if _load_alert_message(conn, alert_key) == message:
+        return False
+    send_alert(message)
+    _record_alert(conn, alert_key, message, now)
+    return True
 
 
 def audit_and_alert(
@@ -170,20 +210,33 @@ def audit_and_alert(
     `odds_week` are given -- odds has no entry in `checks` itself, since a generic
     elapsed-time check doesn't fit its deliberately sparse, calendar-gated cadence.
 
-    Returns True if everything is healthy (for the dispatcher's exit code).
+    Alerts are deduped per check (see `_send_if_new`) so a persistent condition posts
+    once, not on every dispatcher tick. Returns True if a *new* alert was sent this run
+    (for the dispatcher to decide whether to also file a GitHub issue) -- this is
+    deliberately NOT "everything is healthy": auditor findings are alerts, not run
+    failures, and must never affect the dispatcher's exit code (see dispatcher.py).
     """
-    healthy = True
+    alerted = False
     now = datetime.now(UTC)
     with get_connection() as conn:
         for result in check_freshness(conn, checks, now=now):
-            if result.status != "fresh":
-                healthy = False
-                send_alert(
-                    f"{result.agent} ({result.tier}) is {result.status} -- "
-                    f"last success: {result.last_success_at}"
-                )
+            alert_key = f"freshness:{result.agent}"
+            if result.status == "fresh":
+                _clear_alert(conn, alert_key)
+                continue
+            message = (
+                f"{result.agent} ({result.tier}) is {result.status} -- "
+                f"last success: {result.last_success_at}"
+            )
+            alerted = _send_if_new(conn, alert_key, message, now) or alerted
+
         if odds_season is not None and odds_week is not None:
-            for message in check_odds_targets(conn, odds_season, odds_week, now):
-                healthy = False
-                send_alert(message)
-    return healthy
+            alert_key = f"odds:{odds_season}:{odds_week}"
+            messages = check_odds_targets(conn, odds_season, odds_week, now)
+            if not messages:
+                _clear_alert(conn, alert_key)
+            else:
+                # check_odds_targets returns at most one message (see its docstring).
+                alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
+        conn.commit()
+    return alerted
