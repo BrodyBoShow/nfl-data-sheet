@@ -26,6 +26,7 @@ from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 from pipeline.core.injury_changelog import (
     build_cleared_row,
+    build_presence_rows,
     decide_injury_row,
     detect_cleared,
     is_source_outage,
@@ -487,23 +488,10 @@ class AvailabilityCollector(Collector):
                 to_write.append(cleared_row)
                 counts["cleared"] += 1
 
-            presence_rows = []
-            for sid, miss_count in updated_counts.items():
-                # A miss doesn't move last_seen_at -- only an actual sighting does.
-                # miss_count == 0 always means present_this_poll here, so ctx.now is
-                # exactly right; a surviving miss keeps the prior last_seen_at.
-                if miss_count == 0:
-                    last_seen_at = ctx.now
-                else:
-                    last_seen_at = presence_state[sid]["last_seen_at"]
-                presence_rows.append(
-                    {
-                        "source": source,
-                        "source_player_id": sid,
-                        "consecutive_misses": miss_count,
-                        "last_seen_at": last_seen_at,
-                    }
-                )
+            presence_rows = [
+                {**row, "source": source}
+                for row in build_presence_rows(updated_counts, presence_state, ctx.now)
+            ]
             if presence_rows:
                 upsert_rows(
                     conn,

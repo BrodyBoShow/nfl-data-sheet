@@ -209,6 +209,42 @@ def replay_history(
     return kept, cleared
 
 
+def build_presence_rows(
+    updated_counts: dict[str, int],
+    presence_state: dict[str, dict[str, Any]],
+    now: datetime,
+) -> list[dict[str, Any]]:
+    """Turns detect_cleared's updated_counts into injury_presence upsert rows for ONE
+    source (caller adds the `source` column). presence_state: that source's current
+    injury_presence rows (see availability.py's _fetch_presence_state), keyed by
+    source_player_id.
+
+    updated_counts can contain an id that's missing from presence_state -- e.g. a player
+    already active in `injuries` from before injury_presence existed (the first run after
+    the table was added), or any id whose first-ever miss is THIS poll. Such an id has no
+    prior sighting to carry forward, so its miss starts the clock at `now` instead of
+    raising KeyError.
+
+    miss_count == 0 always means the id was present this poll, so `now` is exactly right;
+    a surviving miss keeps the prior last_seen_at when presence_state has one, or falls
+    back to `now` when this is the id's first tracked miss."""
+    rows: list[dict[str, Any]] = []
+    for source_player_id, miss_count in updated_counts.items():
+        if miss_count == 0:
+            last_seen_at = now
+        else:
+            prior = presence_state.get(source_player_id)
+            last_seen_at = prior["last_seen_at"] if prior is not None else now
+        rows.append(
+            {
+                "source_player_id": source_player_id,
+                "consecutive_misses": miss_count,
+                "last_seen_at": last_seen_at,
+            }
+        )
+    return rows
+
+
 def is_source_outage(active_count: int, seen_count: int, threshold: float = 0.5) -> bool:
     """True iff this poll's feed for a source is suspiciously small relative to that
     source's currently-active roster -- e.g. an ESPN outage or a truncated response.

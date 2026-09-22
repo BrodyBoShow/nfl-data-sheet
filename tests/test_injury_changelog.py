@@ -3,6 +3,7 @@ from typing import Any
 
 from pipeline.core.injury_changelog import (
     build_cleared_row,
+    build_presence_rows,
     decide_injury_row,
     detect_cleared,
     is_source_outage,
@@ -137,6 +138,44 @@ def test_build_cleared_row_nulls_tracked_fields_and_carries_team():
     assert row["team"] == "KC"
     assert row["raw"]["last_known_designation"] == "Questionable"
     assert row["as_of"] == as_of
+
+
+# --------------------------------------------------------------------------------------
+# build_presence_rows
+# --------------------------------------------------------------------------------------
+
+
+def test_build_presence_rows_first_run_missing_from_presence_state_does_not_raise():
+    # injury_presence is empty (e.g. the table was just added, or this source has never
+    # been tracked before) but the player is already active in `injuries` and misses
+    # this poll -- detect_cleared still puts them in updated_counts (their first tracked
+    # miss), even though _fetch_presence_state has no row for them at all. Regression
+    # test for the KeyError this caused: 'presence_state[sid]["last_seen_at"]' with no
+    # default, on a Sleeper source_player_id absent from presence_state's dict.
+    now = datetime(2026, 9, 22, tzinfo=UTC)
+    active = {"11394": {"team": "KC"}}
+    to_clear, updated_counts = detect_cleared(active, present_this_poll=set(), prior_counts={})
+    assert to_clear == []
+    assert updated_counts == {"11394": 1}
+
+    rows = build_presence_rows(updated_counts, presence_state={}, now=now)
+    assert rows == [{"source_player_id": "11394", "consecutive_misses": 1, "last_seen_at": now}]
+
+
+def test_build_presence_rows_present_this_poll_uses_now():
+    now = datetime(2026, 9, 22, tzinfo=UTC)
+    rows = build_presence_rows({"111": 0}, presence_state={}, now=now)
+    assert rows == [{"source_player_id": "111", "consecutive_misses": 0, "last_seen_at": now}]
+
+
+def test_build_presence_rows_surviving_miss_carries_forward_prior_last_seen_at():
+    now = datetime(2026, 9, 22, tzinfo=UTC)
+    prior_seen = datetime(2026, 9, 20, tzinfo=UTC)
+    presence_state = {"222": {"consecutive_misses": 1, "last_seen_at": prior_seen}}
+    rows = build_presence_rows({"222": 2}, presence_state, now=now)
+    assert rows == [
+        {"source_player_id": "222", "consecutive_misses": 2, "last_seen_at": prior_seen}
+    ]
 
 
 # --------------------------------------------------------------------------------------
