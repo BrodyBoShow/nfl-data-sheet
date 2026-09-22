@@ -4,6 +4,7 @@ from pipeline.orchestration.auditor import (
     FreshnessCheck,
     _clear_alert,
     _send_if_new,
+    check_availability_outage,
     check_freshness,
     check_odds_targets,
 )
@@ -149,6 +150,68 @@ def test_pending_past_its_own_deadline_counts_as_uncaptured():
     alerts = check_odds_targets(conn, 2026, 3, _NOW)  # type: ignore[arg-type]
     assert len(alerts) == 1
     assert "0/1 due targets captured" in alerts[0]
+
+
+# --------------------------------------------------------------------------------------
+# check_availability_outage -- reads the most recent availability run's meta for the
+# outage_guard entry pipeline/collectors/availability.py records instead of writing
+# cleared rows when a source's poll returns well under its known active roster.
+# --------------------------------------------------------------------------------------
+
+
+class _FakeOutageCursor:
+    def __init__(self, meta: dict | None) -> None:
+        self._meta = meta
+
+    def execute(self, query: str, params: tuple = ()) -> None:
+        pass
+
+    def fetchone(self):
+        return (self._meta,) if self._meta is not None else None
+
+    def __enter__(self) -> "_FakeOutageCursor":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakeOutageConn:
+    def __init__(self, meta: dict | None) -> None:
+        self._meta = meta
+
+    def cursor(self) -> _FakeOutageCursor:
+        return _FakeOutageCursor(self._meta)
+
+
+def test_no_availability_runs_yet_returns_no_alert():
+    conn = _FakeOutageConn(None)
+    assert check_availability_outage(conn) == {}  # type: ignore[arg-type]
+
+
+def test_healthy_run_with_no_outage_guard_returns_no_alert():
+    conn = _FakeOutageConn({"first_seen": 3, "changed": 1})
+    assert check_availability_outage(conn) == {}  # type: ignore[arg-type]
+
+
+def test_tripped_outage_guard_alerts_for_that_source():
+    conn = _FakeOutageConn({"outage_guard": {"espn": {"active": 800, "seen": 310}}})
+    alerts = check_availability_outage(conn)  # type: ignore[arg-type]
+    assert set(alerts) == {"espn"}
+    assert "310/800" in alerts["espn"]
+
+
+def test_tripped_outage_guard_alerts_per_source_independently():
+    conn = _FakeOutageConn(
+        {
+            "outage_guard": {
+                "espn": {"active": 800, "seen": 310},
+                "sleeper": {"active": 50, "seen": 5},
+            }
+        }
+    )
+    alerts = check_availability_outage(conn)  # type: ignore[arg-type]
+    assert set(alerts) == {"espn", "sleeper"}
 
 
 # --------------------------------------------------------------------------------------

@@ -137,7 +137,7 @@ daily, **T3** weekly, **OD** on demand.
 | Live game | ESPN scoreboard/game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
 | Odds | The Odds API free tier + ESPN embedded lines | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Weather | Open-Meteo (no key) + stadium coords/roof/surface | Open data | T1 | 4 | weather_snapshots (append-only), outdoor only |
-| Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, transactions |
+| Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, injury_presence |
 | Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 7 | news_items (deduped URL+hash), news_tags (rule-based) |
 
 ### L2 Analysts (all write to `signals`)

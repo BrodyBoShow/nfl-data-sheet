@@ -1,12 +1,10 @@
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from pipeline.collectors.availability import (
     AvailabilityCollector,
-    _diff_transactions,
     _extract_espn_source_player_id,
     _resolve_player_ids,
 )
@@ -171,48 +169,9 @@ def test_resolve_unresolvable_row_stays_none_not_dropped():
     assert resolved[("sleeper", "666")] is None
 
 
-# --------------------------------------------------------------------------------------
-# _diff_transactions (pure, synthetic data -- no DB)
-# --------------------------------------------------------------------------------------
-
-
-def _new_row(**overrides):
-    row = {
-        "player_id": "p1",
-        "source": "espn",
-        "source_player_id": "111",
-        "season": 2026,
-        "week": 3,
-        "team": "KC",
-        "designation": "Questionable",
-        "as_of": datetime(2026, 9, 19, tzinfo=UTC),
-    }
-    row.update(overrides)
-    return row
-
-
-def test_diff_detects_team_change():
-    prior = {("espn", "111"): {"team": "SF", "designation": "Questionable"}}
-    out = _diff_transactions(prior, [_new_row()])
-    assert len(out) == 1
-    assert out[0]["transaction_type"] == "team_change"
-    assert out[0]["from_value"] == "SF"
-    assert out[0]["to_value"] == "KC"
-
-
-def test_diff_detects_designation_change():
-    prior = {("espn", "111"): {"team": "KC", "designation": "Out"}}
-    out = _diff_transactions(prior, [_new_row()])
-    assert len(out) == 1
-    assert out[0]["transaction_type"] == "designation_change"
-    assert out[0]["from_value"] == "Out"
-    assert out[0]["to_value"] == "Questionable"
-
-
-def test_diff_no_change_emits_nothing():
-    prior = {("espn", "111"): {"team": "KC", "designation": "Questionable"}}
-    assert _diff_transactions(prior, [_new_row()]) == []
-
-
-def test_diff_first_sighting_emits_nothing():
-    assert _diff_transactions({}, [_new_row()]) == []
+# Change-log write decisions (decide_injury_row/detect_cleared/build_cleared_row/
+# is_source_outage) moved to pipeline/core/injury_changelog.py -- see
+# tests/test_injury_changelog.py. This collector's store() only wires that shared logic
+# to the DB (fetch last state per source, decide, write) -- not independently tested at
+# the store() level, matching how the rest of this file tests pure pieces individually
+# rather than the whole store() round trip.

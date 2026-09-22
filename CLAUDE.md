@@ -122,6 +122,8 @@ web/                      # Phase 6+
   table first if it isn't, don't let code and docs diverge.
 
 ## Working rules
+- Never spawn subagents or background agents unless explicitly asked. Do exploration and
+  planning in the main session.
 - Plan before code; wait for go-ahead on each phase.
 - One phase per session. Update the phase file's status and any changed `docs/` at the
   end of each phase.

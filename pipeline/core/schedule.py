@@ -28,6 +28,14 @@ _ET = ZoneInfo("America/New_York")
 _GameRow = tuple[date, int, int, str]  # (gameday, season, week, season_type)
 
 
+def _window_from_gamedays(gamedays: list[date]) -> tuple[date, date]:
+    """The shared window formula: [first_game - _LOOKAHEAD_DAYS, last_game]. One place
+    both _pick_week (keyed by an arbitrary timestamp, scanning every week at once) and
+    week_window (keyed by a specific (season, week, season_type)) compute this, so the
+    window definition can't drift between the two call directions."""
+    return min(gamedays) - timedelta(days=_LOOKAHEAD_DAYS), max(gamedays)
+
+
 def _pick_week(games: list[_GameRow], at: date) -> tuple[int, int, str] | None:
     """Pure selection logic, no DB access -- groups games into weeks, gives each week a
     window [first_game - _LOOKAHEAD_DAYS, last_game], and picks the week whose window
@@ -42,7 +50,7 @@ def _pick_week(games: list[_GameRow], at: date) -> tuple[int, int, str] | None:
         gamedays_by_week.setdefault((season, week, season_type), []).append(gameday)
 
     windows = [
-        (key, min(gamedays) - timedelta(days=_LOOKAHEAD_DAYS), max(gamedays))
+        (key, *_window_from_gamedays(gamedays))
         for key, gamedays in gamedays_by_week.items()
     ]
 
@@ -88,3 +96,31 @@ def resolve_season_week(conn: psycopg.Connection, at: datetime | date) -> tuple[
     if result is None:
         raise ValueError(f"no games found to resolve season/week for {at}")
     return result
+
+
+def et_day_bounds(day: date) -> tuple[datetime, datetime]:
+    """The [start, end) UTC-instant bounds of one ET calendar day, as tz-aware datetimes
+    -- for a caller that needs to bound a timestamptz column by an ET calendar date (e.g.
+    week_window's start/end) without duplicating the _ET zoneinfo literal."""
+    start = datetime.combine(day, datetime.min.time(), tzinfo=_ET)
+    return start, start + timedelta(days=1)
+
+
+def week_window(
+    conn: psycopg.Connection, season: int, week: int, season_type: str
+) -> tuple[date, date]:
+    """The ET calendar-day window [first_game - _LOOKAHEAD_DAYS, last_game] for a given
+    (season, week, season_type) -- the same window _pick_week uses to decide which week a
+    timestamp falls in, but keyed by the week itself rather than by a timestamp. Lets a
+    reader bound "this week's poll days" or "state as of this week's end" without
+    re-deriving the window by scanning every week the way resolve_season_week does."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT gameday FROM games WHERE season = %s AND week = %s "
+            "AND season_type = %s AND gameday IS NOT NULL",
+            (season, week, season_type),
+        )
+        gamedays: list[date] = [row[0] for row in cur.fetchall()]
+    if not gamedays:
+        raise ValueError(f"no games found for {season} week {week} {season_type}")
+    return _window_from_gamedays(gamedays)

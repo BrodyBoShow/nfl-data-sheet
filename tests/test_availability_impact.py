@@ -5,17 +5,20 @@ from pipeline.analysts.availability_impact import (
     _CATEGORY_INJURY,
     _CATEGORY_NON_INJURY_UNAVAILABLE,
     _SIGNAL_SCHEMA,
+    _any_flagged,
     _build_depth_groups,
     _build_flagged_positions,
     _build_redistribution_roster,
     _build_signals_frame,
     _build_trend_sequences,
     _classify_designation,
+    _combine_seed_and_window_rows,
     _compute_availability_category,
     _compute_cluster_counts,
     _compute_depth_rank_delta,
     _compute_redistribution,
     _compute_trend_risk,
+    _resolve_current_state,
 )
 
 # --------------------------------------------------------------------------------------
@@ -41,6 +44,62 @@ def test_classify_designation_non_injury_unavailable_values():
 def test_classify_designation_unrecognized_value_defaults_to_injury():
     # err toward flagging -- never silently treat an unrecognized designation as healthy
     assert _classify_designation("SomeBrandNewStatus") == _CATEGORY_INJURY
+
+
+# --------------------------------------------------------------------------------------
+# _resolve_current_state -- cross-source resolution. An ESPN clearance must never
+# override an active Sleeper designation: ESPN's injury report is a weekly-report proxy
+# that drops IR/PUP/Reserve players once they're old news, while Sleeper keeps carrying
+# them (verified in P3: ~210 Sleeper-only flagged players, mostly IR/PUP/Reserve).
+# --------------------------------------------------------------------------------------
+
+
+def test_resolve_current_state_espn_only_flagged():
+    sources = {"espn": {"team": "KC", "designation": "Questionable"}}
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] == "Questionable"
+
+
+def test_resolve_current_state_sleeper_only_flagged():
+    sources = {"sleeper": {"team": "DAL", "designation": "IR"}}
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] == "IR"
+
+
+def test_resolve_current_state_espn_cleared_sleeper_still_flagged_stays_flagged():
+    # the exact bug: an ESPN clearance must not override an active Sleeper designation
+    sources = {
+        "espn": {"team": "DAL", "designation": None},
+        "sleeper": {"team": "DAL", "designation": "IR"},
+    }
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] == "IR"
+    assert r["team"] == "DAL"
+
+
+def test_resolve_current_state_both_flagged_prefers_espn_designation():
+    sources = {
+        "espn": {"team": "KC", "designation": "Doubtful"},
+        "sleeper": {"team": "KC", "designation": "Out"},
+    }
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] == "Doubtful"
+
+
+def test_resolve_current_state_healthy_only_when_every_source_agrees():
+    sources = {
+        "espn": {"team": "KC", "designation": None},
+        "sleeper": {"team": "KC", "designation": "Active"},
+    }
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] is None
+    assert _classify_designation(r["designation"]) == _CATEGORY_HEALTHY
+
+
+def test_resolve_current_state_single_source_cleared_is_healthy():
+    sources = {"espn": {"team": "KC", "designation": None}}
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] is None
 
 
 def test_compute_availability_category_encodes_both_flagged_buckets():
@@ -196,33 +255,128 @@ def test_compute_cluster_counts_skips_non_ol_secondary_positions():
 # --------------------------------------------------------------------------------------
 
 
-def test_build_trend_sequences_prefers_source_with_more_distinct_days():
+def test_build_trend_sequences_falls_back_to_more_distinct_days_with_no_driving_source():
+    # driving_source_by_player has no entry for p1 -- falls back to the old tie-break
+    # (longer sequence wins). Only reachable for a player _resolve_current_state never
+    # saw; see test_build_trend_sequences_uses_the_resolved_current_states_driving_source
+    # for the real, common path.
     rows = [
-        ("p1", "espn", "Questionable", datetime(2026, 9, 16, 12, tzinfo=UTC)),
-        ("p1", "espn", "Doubtful", datetime(2026, 9, 17, 12, tzinfo=UTC)),
-        ("p1", "sleeper", "Out", datetime(2026, 9, 16, 12, tzinfo=UTC)),
+        ("p1", "espn", "Questionable", False, datetime(2026, 9, 16, 12, tzinfo=UTC)),
+        ("p1", "espn", "Doubtful", False, datetime(2026, 9, 17, 12, tzinfo=UTC)),
+        ("p1", "sleeper", "Out", False, datetime(2026, 9, 16, 12, tzinfo=UTC)),
     ]
-    sequences = _build_trend_sequences(rows)
+    poll_days = {"espn": [date(2026, 9, 16), date(2026, 9, 17)], "sleeper": [date(2026, 9, 16)]}
+    sequences = _build_trend_sequences(rows, poll_days, {"p1": None})
     assert sequences["p1"] == ["Questionable", "Doubtful"]
 
 
-def test_build_trend_sequences_collapses_same_day_snapshots_to_the_last_one():
-    # two runs 27 seconds apart on the same day -- verified live, not a real trend point
+def test_build_trend_sequences_collapses_same_day_changes_to_the_last_one():
+    # two changes 27 seconds apart on the same day -- verified live, not a real trend point
     rows = [
-        ("p1", "espn", "Questionable", datetime(2026, 9, 18, 4, 13, 2, tzinfo=UTC)),
-        ("p1", "espn", "Doubtful", datetime(2026, 9, 18, 4, 13, 29, tzinfo=UTC)),
+        ("p1", "espn", "Questionable", False, datetime(2026, 9, 18, 4, 13, 2, tzinfo=UTC)),
+        ("p1", "espn", "Doubtful", False, datetime(2026, 9, 18, 4, 13, 29, tzinfo=UTC)),
     ]
-    sequences = _build_trend_sequences(rows)
-    assert sequences["p1"] == ["Doubtful"]  # one entry, the later same-day observation
+    poll_days = {"espn": [date(2026, 9, 18)], "sleeper": []}
+    sequences = _build_trend_sequences(rows, poll_days, {"p1": "espn"})
+    assert sequences["p1"] == ["Doubtful"]  # one entry, the later same-day change
 
 
 def test_build_trend_sequences_accepts_plain_dates_too():
     rows = [
-        ("p1", "espn", "Questionable", date(2026, 9, 16)),
-        ("p1", "espn", "Doubtful", date(2026, 9, 17)),
+        ("p1", "espn", "Questionable", False, date(2026, 9, 16)),
+        ("p1", "espn", "Doubtful", False, date(2026, 9, 17)),
     ]
-    sequences = _build_trend_sequences(rows)
+    poll_days = {"espn": [date(2026, 9, 16), date(2026, 9, 17)], "sleeper": []}
+    sequences = _build_trend_sequences(rows, poll_days, {"p1": "espn"})
     assert sequences["p1"] == ["Questionable", "Doubtful"]
+
+
+def test_build_trend_sequences_forward_fills_across_poll_days_with_no_change():
+    # only one row all week (first appearance) -- must still fill every poll day, not
+    # just the one day it was written, or a stable player would never reach the >=2
+    # distinct-day gate _compute_trend_risk requires.
+    rows = [("p1", "espn", "Questionable", False, datetime(2026, 9, 16, 12, tzinfo=UTC))]
+    poll_days = {"espn": [date(2026, 9, 16), date(2026, 9, 17), date(2026, 9, 18)], "sleeper": []}
+    sequences = _build_trend_sequences(rows, poll_days, {"p1": "espn"})
+    assert sequences["p1"] == ["Questionable", "Questionable", "Questionable"]
+
+
+def test_build_trend_sequences_is_cleared_row_registers_as_active_deescalation():
+    rows = [
+        ("p1", "espn", "Questionable", False, datetime(2026, 9, 16, 12, tzinfo=UTC)),
+        ("p1", "espn", None, True, datetime(2026, 9, 17, 12, tzinfo=UTC)),
+    ]
+    poll_days = {"espn": [date(2026, 9, 16), date(2026, 9, 17)], "sleeper": []}
+    sequences = _build_trend_sequences(rows, poll_days, {"p1": "espn"})
+    assert sequences["p1"] == ["Questionable", "Active"]
+    rows_out = _compute_trend_risk({"p1": sequences["p1"]})
+    assert rows_out[0]["value"] == -1.0  # Questionable -> Active is a de-escalation
+
+
+def test_build_trend_sequences_no_poll_days_for_source_emits_no_sequence():
+    rows = [("p1", "sleeper", "Out", False, datetime(2026, 9, 16, 12, tzinfo=UTC))]
+    sequences = _build_trend_sequences(rows, {"espn": [], "sleeper": []}, {"p1": "sleeper"})
+    assert "p1" not in sequences
+
+
+def test_build_trend_sequences_uses_the_resolved_current_states_driving_source():
+    # The cross-source bug, in the trend instead of the category: ESPN clears the player
+    # (IR -> Active, a de-escalation taken alone) while Sleeper still has them on IR the
+    # whole time (flat). _resolve_current_state resolved this player as still flagged via
+    # Sleeper (an ESPN clearance never overrides an active Sleeper designation) -- the
+    # trend sequence must follow that same source, not "whichever has more poll days"
+    # (which would pick ESPN here, 2 days vs Sleeper's 2 -- tie, but even untied this must
+    # never override the driving source).
+    rows = [
+        ("p1", "espn", "IR", False, datetime(2026, 9, 16, 12, tzinfo=UTC)),
+        ("p1", "espn", None, True, datetime(2026, 9, 17, 12, tzinfo=UTC)),
+        ("p1", "sleeper", "IR", False, datetime(2026, 9, 16, 12, tzinfo=UTC)),
+        ("p1", "sleeper", "IR", False, datetime(2026, 9, 17, 12, tzinfo=UTC)),
+    ]
+    poll_days = {
+        "espn": [date(2026, 9, 16), date(2026, 9, 17)],
+        "sleeper": [date(2026, 9, 16), date(2026, 9, 17)],
+    }
+    sequences = _build_trend_sequences(rows, poll_days, {"p1": "sleeper"})
+    assert sequences["p1"] == ["IR", "IR"]  # Sleeper's flat sequence, not ESPN's de-escalation
+    trend_rows = _compute_trend_risk({"p1": sequences["p1"]})
+    assert trend_rows[0]["value"] == 0.0  # flat -- "still on IR", not "improving"
+
+
+# --------------------------------------------------------------------------------------
+# _combine_seed_and_window_rows / _any_flagged -- the season/week carryover fix: a
+# change-log row is stamped with the week the change happened, not every week the player
+# remains in that state, so a player whose last change predates the target week must
+# still show up via a seed row, not vanish for lack of a week-stamped row.
+# --------------------------------------------------------------------------------------
+
+
+def test_combine_seed_and_window_rows_merges_and_sorts():
+    seed = [("p1", "espn", "Questionable", False, datetime(2026, 9, 10, tzinfo=UTC))]
+    window = [("p1", "espn", "Doubtful", False, datetime(2026, 9, 17, tzinfo=UTC))]
+    combined = _combine_seed_and_window_rows(seed, window)
+    assert combined == [
+        ("p1", "espn", "Questionable", False, datetime(2026, 9, 10, tzinfo=UTC)),
+        ("p1", "espn", "Doubtful", False, datetime(2026, 9, 17, tzinfo=UTC)),
+    ]
+
+
+def test_two_week_carryover_player_still_flagged_and_in_trend_sequence():
+    # Last change was in week 2 (Questionable); no row at all in week 3. Both
+    # inputs_ready's flagged check and the trend sequence must still see them going into
+    # week 3, forward-filled from the week-2 seed across week 3's poll days.
+    week2_change = ("p1", "espn", "Questionable", False, datetime(2026, 9, 10, 12, tzinfo=UTC))
+
+    current_injuries = [{"player_id": "p1", "team": "KC", "designation": "Questionable"}]
+    assert _any_flagged(current_injuries) is True  # counts for inputs_ready
+
+    week3_poll_days = {"espn": [date(2026, 9, 17), date(2026, 9, 18)], "sleeper": []}
+    combined = _combine_seed_and_window_rows(seed_rows=[week2_change], window_rows=[])
+    sequences = _build_trend_sequences(combined, week3_poll_days, {"p1": "espn"})
+    assert sequences["p1"] == ["Questionable", "Questionable"]  # flat, not empty
+    trend_rows = _compute_trend_risk({"p1": sequences["p1"]})
+    assert trend_rows[0]["value"] == 0.0
+    assert trend_rows[0]["sample_n"] == 2
 
 
 def test_compute_trend_risk_scores_escalation_as_positive():

@@ -119,6 +119,34 @@ def check_odds_targets(
     ]
 
 
+def check_availability_outage(conn: psycopg.Connection) -> dict[str, str]:
+    """Reads the most recent availability collector run's meta for an outage_guard entry
+    -- pipeline/collectors/availability.py skips disappearance detection and records this
+    there instead of writing cleared rows when a source's poll returns well under its
+    known active roster (pipeline/core/injury_changelog.py's is_source_outage), since an
+    outage or truncated response marking the whole roster cleared would otherwise
+    silently re-add everyone as "new" first_seen rows on the next good poll.
+
+    Returns {source: message} for every source currently tripped; empty dict (no run yet,
+    or a healthy run) is the common case."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT meta FROM agent_runs WHERE agent = 'availability' AND status = 'success' "
+            "ORDER BY started_at DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+    if row is None or not row[0]:
+        return {}
+    outage_guard = row[0].get("outage_guard") or {}
+    return {
+        source: (
+            f"availability: {source} outage guard tripped -- saw {info['seen']}/"
+            f"{info['active']} of the known active roster this poll, skipped clearance"
+        )
+        for source, info in outage_guard.items()
+    }
+
+
 def check_row_count(conn: psycopg.Connection, table: str, min_rows: int) -> bool:
     """True if `table` has at least `min_rows` rows. `table` is always an internal constant."""
     with conn.cursor() as cur:
@@ -238,5 +266,13 @@ def audit_and_alert(
             else:
                 # check_odds_targets returns at most one message (see its docstring).
                 alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
+
+        outages = check_availability_outage(conn)
+        for source in ("espn", "sleeper"):
+            alert_key = f"availability_outage:{source}"
+            if source not in outages:
+                _clear_alert(conn, alert_key)
+                continue
+            alerted = _send_if_new(conn, alert_key, outages[source], now) or alerted
         conn.commit()
     return alerted

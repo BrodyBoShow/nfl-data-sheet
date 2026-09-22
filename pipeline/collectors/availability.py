@@ -1,9 +1,11 @@
 """
 Job: Fetch player injury/roster-designation status from ESPN and Sleeper, resolve to
-     canonical player_id via the ID crosswalk (read-only), and log snapshot + change rows.
+     canonical player_id via the ID crosswalk (read-only), and write a change-log row
+     only on first appearance, a tracked-field change, or a source clearing a player
+     after two consecutive missed polls (see pipeline/core/injury_changelog.py).
 Reads: ESPN injuries endpoint, Sleeper players endpoint, player_id_crosswalk, players,
-       teams, games (for season/week resolution)
-Writes: injuries, transactions
+       teams, games (for season/week resolution), injury_presence (own prior state)
+Writes: injuries, injury_presence
 Tier: T1
 Phase: P3
 """
@@ -19,9 +21,15 @@ import httpx
 import psycopg
 
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import delete_rows, filter_changed, upsert_rows
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
+from pipeline.core.injury_changelog import (
+    build_cleared_row,
+    decide_injury_row,
+    detect_cleared,
+    is_source_outage,
+)
 from pipeline.core.schedule import resolve_season_week
 from pipeline.core.team_aliases import normalize_team_abbr
 
@@ -52,21 +60,9 @@ _INJURIES_COLS = [
     "notes",
     "raw",
     "as_of",
+    "is_cleared",
 ]
 _INJURIES_PK = ["source", "source_player_id", "as_of"]
-
-_TRANSACTIONS_COLS = [
-    "player_id",
-    "source",
-    "source_player_id",
-    "season",
-    "week",
-    "transaction_type",
-    "from_value",
-    "to_value",
-    "detected_at",
-]
-_TRANSACTIONS_PK = ["source", "source_player_id", "transaction_type", "detected_at"]
 
 
 def _parse_espn_timestamp(value: str) -> datetime:
@@ -225,50 +221,6 @@ def _resolve_player_ids(
     return resolved
 
 
-def _diff_transactions(
-    prior_by_key: dict[tuple[str, str], dict[str, Any]],
-    new_rows: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Emits team_change/designation_change rows where a new row's team/designation
-    differs from the most recent prior snapshot for that (source, source_player_id).
-    No prior row for that key -> no transaction (first sighting, not a change)."""
-    out: list[dict[str, Any]] = []
-    for row in new_rows:
-        key = (row["source"], row["source_player_id"])
-        prior = prior_by_key.get(key)
-        if prior is None:
-            continue
-        if prior.get("team") != row["team"]:
-            out.append(
-                {
-                    "player_id": row["player_id"],
-                    "source": row["source"],
-                    "source_player_id": row["source_player_id"],
-                    "season": row["season"],
-                    "week": row["week"],
-                    "transaction_type": "team_change",
-                    "from_value": prior.get("team"),
-                    "to_value": row["team"],
-                    "detected_at": row["as_of"],
-                }
-            )
-        if prior.get("designation") != row["designation"]:
-            out.append(
-                {
-                    "player_id": row["player_id"],
-                    "source": row["source"],
-                    "source_player_id": row["source_player_id"],
-                    "season": row["season"],
-                    "week": row["week"],
-                    "transaction_type": "designation_change",
-                    "from_value": prior.get("designation"),
-                    "to_value": row["designation"],
-                    "detected_at": row["as_of"],
-                }
-            )
-    return out
-
-
 def _finalize(row: dict[str, Any], now: datetime, hash_fields: list[str]) -> dict[str, Any]:
     row = dict(row)
     row["content_hash"] = hash_row({k: row.get(k) for k in hash_fields})
@@ -308,26 +260,58 @@ def _fetch_players_by_gsis_id(conn: psycopg.Connection, gsis_ids: list[str]) -> 
         return {row[0]: row[0] for row in cur.fetchall()}
 
 
-def _fetch_prior_injuries(
-    conn: psycopg.Connection, keys: list[tuple[str, str]]
-) -> dict[tuple[str, str], dict[str, Any]]:
-    if not keys:
-        return {}
-    values_sql = ", ".join("(%s, %s)" for _ in keys)
-    flat_params = [v for key in keys for v in key]
+def _fetch_presence_state(
+    conn: psycopg.Connection, source: str
+) -> dict[str, dict[str, Any]]:
+    """{source_player_id: {consecutive_misses, last_seen_at}} currently tracked for ONE
+    source in injury_presence. consecutive_misses feeds detect_cleared's prior_counts;
+    last_seen_at is carried forward unchanged for any id that's still missing this poll
+    (a miss doesn't move it -- only an actual sighting does). Absent from the dict means
+    never tracked (0 misses, no prior sighting to carry forward)."""
     with conn.cursor() as cur:
         cur.execute(
-            f"""
-            SELECT DISTINCT ON (source, source_player_id)
-                source, source_player_id, team, designation
-            FROM injuries
-            WHERE (source, source_player_id) IN (VALUES {values_sql})
-            ORDER BY source, source_player_id, as_of DESC
-            """,
-            flat_params,
+            "SELECT source_player_id, consecutive_misses, last_seen_at "
+            "FROM injury_presence WHERE source = %s",
+            (source,),
         )
         rows = cur.fetchall()
-    return {(r[0], r[1]): {"team": r[2], "designation": r[3]} for r in rows}
+    return {
+        r[0]: {"consecutive_misses": r[1], "last_seen_at": r[2]}
+        for r in rows
+    }
+
+
+def _fetch_last_state_by_source(
+    conn: psycopg.Connection, source: str
+) -> dict[str, dict[str, Any]]:
+    """Latest stored row per source_player_id for ONE source -- unscoped by season/week
+    (a player's last change may predate the current week; season/week is a write-time
+    label, not a validity window -- see docs/phases/P3.md). Serves both the change/no-op
+    decision (via decide_injury_row) and, restricted by the caller to is_cleared=false
+    entries, the "who was last known active" set detect_cleared needs."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT ON (source_player_id)
+                source_player_id, player_id, team, designation, body_part, notes, is_cleared
+            FROM injuries
+            WHERE source = %s
+            ORDER BY source_player_id, as_of DESC
+            """,
+            (source,),
+        )
+        rows = cur.fetchall()
+    return {
+        r[0]: {
+            "player_id": r[1],
+            "team": r[2],
+            "designation": r[3],
+            "body_part": r[4],
+            "notes": r[5],
+            "is_cleared": r[6],
+        }
+        for r in rows
+    }
 
 
 class AvailabilityCollector(Collector):
@@ -437,16 +421,111 @@ class AvailabilityCollector(Collector):
                 }
             )
 
-        prior_by_key = _fetch_prior_injuries(
-            conn, [(r["source"], r["source_player_id"]) for r in finalized]
-        )
-        transaction_rows = _diff_transactions(prior_by_key, finalized)
+        to_write: list[dict[str, Any]] = []
+        counts = {"first_seen": 0, "changed": 0, "cleared": 0, "skipped_unchanged": 0}
+        outage_guard: dict[str, dict[str, int]] = {}
+
+        for source in ("espn", "sleeper"):
+            if source == "sleeper" and not sleeper_fetched:
+                # Sleeper wasn't polled this run -- an empty present_this_poll here must
+                # never be read as "everyone on Sleeper disappeared".
+                continue
+
+            source_rows = [r for r in finalized if r["source"] == source]
+            last_state = _fetch_last_state_by_source(conn, source)
+
+            present_this_poll: set[str] = set()
+            for row in source_rows:
+                source_player_id = row["source_player_id"]
+                present_this_poll.add(source_player_id)
+                decision = decide_injury_row(last_state.get(source_player_id), row)
+                if decision is None:
+                    counts["skipped_unchanged"] += 1
+                    continue
+                counts[decision] += 1
+                to_write.append({**row, "is_cleared": False})
+
+            active_from_db = {
+                sid: state for sid, state in last_state.items() if not state["is_cleared"]
+            }
+            if is_source_outage(len(active_from_db), len(present_this_poll)):
+                # A truncated/outage response must never mark the whole active roster
+                # cleared -- that would silently re-add everyone as "new" first_seen rows
+                # on the next good poll. Skip clearance for this source this run; the
+                # auditor alerts on agent_runs.meta['outage_guard'].
+                outage_guard[source] = {
+                    "active": len(active_from_db),
+                    "seen": len(present_this_poll),
+                }
+                continue
+
+            season, week, season_type = (
+                (espn_season, espn_week, espn_season_type)
+                if source == "espn"
+                else (sleeper_season, sleeper_week, sleeper_season_type)
+            )
+            presence_state = _fetch_presence_state(conn, source)
+            prior_counts = {
+                sid: state["consecutive_misses"] for sid, state in presence_state.items()
+            }
+            to_clear, updated_counts = detect_cleared(
+                active_from_db, present_this_poll, prior_counts
+            )
+            for source_player_id in to_clear:
+                prior_state = active_from_db[source_player_id]
+                cleared_row = build_cleared_row(
+                    prior_state,
+                    source=source,
+                    source_player_id=source_player_id,
+                    player_id=prior_state["player_id"],
+                    season=season,
+                    week=week,
+                    season_type=season_type,
+                    as_of=ctx.now,
+                )
+                cleared_row["raw"] = json.dumps(cleared_row["raw"], sort_keys=True)
+                to_write.append(cleared_row)
+                counts["cleared"] += 1
+
+            presence_rows = []
+            for sid, miss_count in updated_counts.items():
+                # A miss doesn't move last_seen_at -- only an actual sighting does.
+                # miss_count == 0 always means present_this_poll here, so ctx.now is
+                # exactly right; a surviving miss keeps the prior last_seen_at.
+                if miss_count == 0:
+                    last_seen_at = ctx.now
+                else:
+                    last_seen_at = presence_state[sid]["last_seen_at"]
+                presence_rows.append(
+                    {
+                        "source": source,
+                        "source_player_id": sid,
+                        "consecutive_misses": miss_count,
+                        "last_seen_at": last_seen_at,
+                    }
+                )
+            if presence_rows:
+                upsert_rows(
+                    conn,
+                    "injury_presence",
+                    presence_rows,
+                    conflict_cols=["source", "source_player_id"],
+                    update_cols=["last_seen_at", "consecutive_misses"],
+                )
+            if to_clear:
+                delete_rows(
+                    conn,
+                    "injury_presence",
+                    "source = %s AND source_player_id = ANY(%s)",
+                    (source, to_clear),
+                )
 
         injuries_hash_fields = [c for c in _INJURIES_COLS if c not in _INJURIES_PK]
-        injuries_rows = [_finalize(r, ctx.now, injuries_hash_fields) for r in finalized]
+        injuries_rows = [_finalize(r, ctx.now, injuries_hash_fields) for r in to_write]
         # A pass-through here since as_of is unique per run -- every row is "new" by PK,
         # so this never actually drops anything, but it's kept for the same reason every
-        # other collector runs writes through it: a uniform store() shape.
+        # other collector runs writes through it: a uniform store() shape. The real dedup
+        # now happens above, in decide_injury_row, before rows are even built.
         injuries_rows = filter_changed(conn, "injuries", _INJURIES_PK, injuries_rows)
         written = upsert_rows(
             conn,
@@ -456,26 +535,17 @@ class AvailabilityCollector(Collector):
             update_cols=injuries_hash_fields + ["content_hash", "updated_at"],
         )
 
-        tx_hash_fields = [c for c in _TRANSACTIONS_COLS if c not in _TRANSACTIONS_PK]
-        tx_rows = [_finalize(r, ctx.now, tx_hash_fields) for r in transaction_rows]
-        tx_rows = filter_changed(conn, "transactions", _TRANSACTIONS_PK, tx_rows)
-        written += upsert_rows(
-            conn,
-            "transactions",
-            tx_rows,
-            conflict_cols=_TRANSACTIONS_PK,
-            update_cols=tx_hash_fields + ["content_hash", "updated_at"],
-        )
-
         if sleeper_fetched:
             set_last_value(conn, _SLEEPER_FRESHNESS_KEY, ctx.now.date().isoformat())
 
-        return WorkResult(
-            written,
-            meta={
-                "unresolved_espn": unresolved_espn,
-                "unresolved_sleeper": unresolved_sleeper,
-                "espn_id_extraction_failed": validated["espn_id_extraction_failed"],
-                "sleeper_fetched": sleeper_fetched,
-            },
-        )
+        meta: dict[str, Any] = {
+            "unresolved_espn": unresolved_espn,
+            "unresolved_sleeper": unresolved_sleeper,
+            "espn_id_extraction_failed": validated["espn_id_extraction_failed"],
+            "sleeper_fetched": sleeper_fetched,
+            **counts,
+        }
+        if outage_guard:
+            meta["outage_guard"] = outage_guard
+
+        return WorkResult(written, meta=meta)

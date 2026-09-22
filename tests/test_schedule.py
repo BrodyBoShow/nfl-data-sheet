@@ -1,6 +1,8 @@
 from datetime import UTC, date, datetime
 
-from pipeline.core.schedule import _pick_week, to_gameday
+import pytest
+
+from pipeline.core.schedule import _pick_week, to_gameday, week_window
 
 # Three synthetic weeks: week 1 games Thu 9/4 - Mon 9/8, week 2 Thu 9/11 - Mon 9/15,
 # week 3 Thu 9/18 - Mon 9/22 (2025 season, arbitrary but internally consistent).
@@ -81,3 +83,46 @@ def test_thursday_night_commence_time_resolves_correctly():
     # GB@ATL week 3 TNF: kickoff 2026-09-24T20:15 ET == 2026-09-25T00:15Z.
     commence_time = datetime(2026, 9, 25, 0, 15, tzinfo=UTC)
     assert _pick_week(_2026_PRIME_TIME_GAMES, to_gameday(commence_time)) == (2026, 3, "REG")
+
+
+# --------------------------------------------------------------------------------------
+# week_window -- same [first_game - lookahead, last_game] formula as _pick_week's
+# windows, but keyed by (season, week, season_type) instead of by timestamp.
+# --------------------------------------------------------------------------------------
+
+
+class _FakeWeekCursor:
+    def __init__(self, gamedays: list[date]) -> None:
+        self._gamedays = gamedays
+        self.last_params: tuple = ()
+
+    def execute(self, query: str, params: tuple = ()) -> None:
+        self.last_params = params
+
+    def fetchall(self):
+        return [(g,) for g in self._gamedays]
+
+    def __enter__(self) -> "_FakeWeekCursor":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakeWeekConn:
+    def __init__(self, gamedays: list[date]) -> None:
+        self.cur = _FakeWeekCursor(gamedays)
+
+    def cursor(self) -> _FakeWeekCursor:
+        return self.cur
+
+
+def test_week_window_matches_the_lookahead_formula():
+    conn = _FakeWeekConn([date(2026, 9, 24), date(2026, 9, 27), date(2026, 9, 28)])
+    assert week_window(conn, 2026, 3, "REG") == (date(2026, 9, 22), date(2026, 9, 28))  # type: ignore[arg-type]
+
+
+def test_week_window_raises_when_no_games_found():
+    conn = _FakeWeekConn([])
+    with pytest.raises(ValueError, match="no games found"):
+        week_window(conn, 2026, 99, "REG")  # type: ignore[arg-type]

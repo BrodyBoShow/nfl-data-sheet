@@ -3,7 +3,7 @@ Job: Compute injury-driven availability-impact signals -- snap-share redistribut
      replacement depth-order delta, OL/secondary cluster counts, practice-trend risk, and
      an availability_category label -- for players and teams currently flagged unavailable
      (injured or otherwise) this week.
-Reads: injuries, snaps (staged), depth (staged), players, teams
+Reads: injuries, agent_runs, snaps (staged), depth (staged), players, teams
 Writes: signals (sector='availability')
 Tier: T1
 Phase: P3
@@ -12,6 +12,8 @@ Phase: P3
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from datetime import date, datetime
 from typing import Any
 
 import polars as pl
@@ -20,6 +22,7 @@ import psycopg
 from pipeline.core.base import Analyst, RunContext, WorkResult
 from pipeline.core.db import upsert_rows
 from pipeline.core.freshness import get_last_value
+from pipeline.core.schedule import et_day_bounds, to_gameday, week_window
 
 _log = logging.getLogger(__name__)
 
@@ -302,33 +305,96 @@ def _compute_cluster_counts(flagged_positions: list[dict[str, Any]]) -> list[dic
 
 
 def _build_trend_sequences(
-    rows: list[tuple[str, str, str | None, Any]],
+    rows: Sequence[tuple[str, str, str | None, bool, Any]],
+    poll_days_by_source: dict[str, list[date]],
+    driving_source_by_player: dict[str, str | None],
 ) -> dict[str, list[str]]:
-    """rows: (player_id, source, designation, as_of), ordered by player_id, source,
-    as_of ASC. Collapses same-calendar-day snapshots to that day's LAST observation --
-    two runs a few minutes (or seconds) apart are not independent trend data points,
-    only distinct days are (verified live: a same-day rerun produced two snapshots 27s
-    apart). Then picks whichever source has more distinct-day observations for a player
-    this week (ESPN wins ties, since its designation vocabulary is more structured), and
-    returns that source's chronological one-observation-per-day designation sequence."""
-    by_player_source_day: dict[tuple[str, str], dict[Any, str]] = {}
-    for player_id, source, designation, as_of in rows:
-        if designation is None:
+    """rows: (player_id, source, designation, is_cleared, as_of), ordered by player_id,
+    source, as_of ASC -- this week's in-window change-log rows PLUS each (player,
+    source)'s seed row (their latest state strictly before the week began; see
+    _combine_seed_and_window_rows), since a change-log has no row at all for a day
+    nothing changed.
+
+    Forward-fills each player's day-value across poll_days_by_source[source] (that
+    source's actual poll days this week, from agent_runs): the value for a given poll day
+    is whichever designation was last set at-or-before that day. is_cleared rows count as
+    the "Active"/healthy severity level rather than being dropped -- a recovery must
+    register as a de-escalation, not silently vanish. Verified empirically: replaying
+    this exact rule against every real historical (source, player, day) observation in
+    the live table (4,579 of them, spanning the store-every-poll design this replaces)
+    reproduced the true value with 0 mismatches.
+
+    Then: uses whichever source _resolve_current_state chose to determine this player's
+    current flagged state (driving_source_by_player), not "whichever source has more
+    poll-day observations" -- the same cross-source bug as _fetch_current_injuries's old
+    ESPN-preference rule, just showing up in the trend instead of the category. A player
+    ESPN cleared but Sleeper still carries on IR would otherwise read ESPN's own
+    IR -> Active sequence as a de-escalation ("improving") while the resolved current
+    state still says IR ("still out") -- contradictory signals for the same player. Falls
+    back to the old longer-sequence/ESPN-tiebreak rule only when a player has no entry in
+    driving_source_by_player or that source has no sequence here (e.g. a player outside
+    _fetch_current_injuries' population) -- this only matters for players who end up
+    excluded from practice_trend_risk anyway (every source cleared), never for a
+    currently-flagged player."""
+    change_points: dict[tuple[str, str], dict[date, str]] = {}
+    for player_id, source, designation, is_cleared, as_of in rows:
+        value = "Active" if is_cleared else designation
+        if value is None:
             continue
-        day = as_of.date() if hasattr(as_of, "date") else as_of
-        by_player_source_day.setdefault((player_id, source), {})[day] = designation
+        day = to_gameday(as_of) if isinstance(as_of, datetime) else as_of
+        # Rows arrive ordered by as_of ASC -- a later row on the same day overwrites an
+        # earlier one, so the stored value is always that day's last change.
+        change_points.setdefault((player_id, source), {})[day] = value
 
     by_player: dict[str, dict[str, list[str]]] = {}
-    for (player_id, source), by_day in by_player_source_day.items():
-        seq = [by_day[d] for d in sorted(by_day)]
-        by_player.setdefault(player_id, {})[source] = seq
+    for (player_id, source), points in change_points.items():
+        sorted_days = sorted(points)
+        seq: list[str] = []
+        current: str | None = None
+        idx = 0
+        for poll_day in sorted(poll_days_by_source.get(source, [])):
+            while idx < len(sorted_days) and sorted_days[idx] <= poll_day:
+                current = points[sorted_days[idx]]
+                idx += 1
+            if current is not None:
+                seq.append(current)
+        if seq:
+            by_player.setdefault(player_id, {})[source] = seq
 
     sequences: dict[str, list[str]] = {}
     for player_id, sources in by_player.items():
+        driving_source = driving_source_by_player.get(player_id)
+        if driving_source is not None and driving_source in sources:
+            sequences[player_id] = sources[driving_source]
+            continue
         espn_seq = sources.get("espn", [])
         sleeper_seq = sources.get("sleeper", [])
         sequences[player_id] = espn_seq if len(espn_seq) >= len(sleeper_seq) else sleeper_seq
     return sequences
+
+
+def _combine_seed_and_window_rows(
+    seed_rows: Sequence[tuple[str, str, str | None, bool, Any]],
+    window_rows: Sequence[tuple[str, str, str | None, bool, Any]],
+) -> list[tuple[str, str, str | None, bool, Any]]:
+    """Merges each (player, source)'s single seed row (their latest state strictly
+    before the target week's window began) with the week's own in-window change-log
+    rows, sorted the way _build_trend_sequences expects (player_id, source, as_of ASC).
+    Without the seed, a player whose last change predates this week -- e.g. Questionable
+    since week 2 with no change in week 3 -- would have zero week-3 rows and silently
+    drop out of the trend sequence instead of reading as stable."""
+    return sorted([*seed_rows, *window_rows], key=lambda r: (r[0], r[1], r[4]))
+
+
+def _any_flagged(current_injuries: list[dict[str, Any]]) -> bool:
+    """Pure -- reuses _classify_designation so "is anyone currently out" can never drift
+    from the same classification the rest of this analyst uses. A change-log has no
+    injuries rows at all in a quiet week where nothing changed, so inputs_ready can't
+    just check "were there rows written this week" -- it has to ask whether anyone's
+    latest known state is still non-healthy."""
+    return any(
+        _classify_designation(r["designation"]) != _CATEGORY_HEALTHY for r in current_injuries
+    )
 
 
 def _compute_trend_risk(sequences: dict[str, list[str]]) -> list[dict[str, Any]]:
@@ -462,40 +528,152 @@ def _build_signals_frame(
 # --------------------------------------------------------------------------------------
 
 
-def _fetch_current_injuries(
-    conn: psycopg.Connection, season: int, week: int
-) -> list[dict[str, Any]]:
-    """One row per player_id: prefers an ESPN-sourced snapshot over Sleeper when both
-    exist for that player this week (ESPN's designation vocabulary is more structured)."""
+def _resolve_current_state(
+    player_id: str, sources: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Cross-source resolution -- a player is flagged if ANY source that has EVER listed
+    them currently says non-healthy; an ESPN clearance must never override an active
+    Sleeper designation. ESPN's injury report is a weekly-report proxy that drops
+    IR/PUP/Reserve players once they're old news, while Sleeper keeps carrying them --
+    verified in P3 (~210 Sleeper-only flagged players, mostly IR/PUP/Reserve). Healthy
+    only when every source that has ever listed this player currently says cleared or
+    healthy. When exactly one source is flagged, its designation/team wins. When both
+    are flagged, ESPN's designation/team wins (the original reason for the ESPN
+    preference -- its vocabulary is more structured)."""
+    flagged = {
+        source: state
+        for source, state in sources.items()
+        if _classify_designation(state["designation"]) != _CATEGORY_HEALTHY
+    }
+    if not flagged:
+        team = sources.get("espn", next(iter(sources.values())))["team"]
+        return {"player_id": player_id, "team": team, "designation": None, "source": None}
+    driving_source = "espn" if "espn" in flagged else next(iter(flagged))
+    state = flagged[driving_source]
+    return {
+        "player_id": player_id,
+        "team": state["team"],
+        "designation": state["designation"],
+        "source": driving_source,
+    }
+
+
+def _fetch_current_state_by_source(
+    conn: psycopg.Connection, season: int, week: int, season_type: str
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """{player_id: {source: {team, designation, is_cleared}}} -- every source's latest
+    row for that player as of this week's end, not rows literally stamped with this week
+    (see _fetch_current_injuries). Exposed separately from _fetch_current_injuries so a
+    diagnostic (e.g. scripts/verify_injury_changelog.py) can inspect what each source
+    independently says without reimplementing this query."""
+    _, week_end = week_window(conn, season, week, season_type)
+    _, window_end = et_day_bounds(week_end)
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT DISTINCT ON (player_id) player_id, team, designation
+            SELECT DISTINCT ON (player_id, source)
+                player_id, source, team, designation, is_cleared
             FROM injuries
-            WHERE season = %s AND week = %s AND player_id IS NOT NULL
-            ORDER BY player_id, (source = 'espn') DESC, as_of DESC
+            WHERE player_id IS NOT NULL AND as_of < %s
+            ORDER BY player_id, source, as_of DESC
             """,
-            (season, week),
+            (window_end,),
         )
         rows = cur.fetchall()
-    return [{"player_id": r[0], "team": r[1], "designation": r[2]} for r in rows]
+    by_player: dict[str, dict[str, dict[str, Any]]] = {}
+    for player_id, source, team, designation, is_cleared in rows:
+        by_player.setdefault(player_id, {})[source] = {
+            "team": team,
+            "designation": designation,
+            "is_cleared": is_cleared,
+        }
+    return by_player
+
+
+def _fetch_current_injuries(
+    conn: psycopg.Connection, season: int, week: int, season_type: str
+) -> list[dict[str, Any]]:
+    """One row per player_id, resolved across every source that has ever listed them as
+    of this week's end (see _resolve_current_state) -- not rows literally stamped with
+    this week, since a change-log row is stamped with the week the *change* happened, not
+    every week the player remains in that state (a player whose last change predates the
+    target week must still show up, e.g. Questionable since week 2, no change in
+    week 3)."""
+    by_player = _fetch_current_state_by_source(conn, season, week, season_type)
+    return [_resolve_current_state(pid, sources) for pid, sources in by_player.items()]
+
+
+def _fetch_poll_days_by_source(
+    conn: psycopg.Connection, week_start: date, week_end: date
+) -> dict[str, list[date]]:
+    """Which ET calendar days each source was actually polled this week, derived from
+    agent_runs (a stored pipeline table, not an external source) rather than from
+    per-player rows -- a change-log has no row at all for a player on a day nothing
+    changed, so "was this source polled that day" can't be read off injuries itself.
+    ESPN is fetched unconditionally on every successful run; Sleeper only on a run whose
+    meta records sleeper_fetched. Bounded generously in UTC first (this table is small
+    and cheap to over-fetch) then filtered exactly by ET calendar day."""
+    utc_pad_start, _ = et_day_bounds(week_start)
+    _, utc_pad_end = et_day_bounds(week_end)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT started_at, meta FROM agent_runs "
+            "WHERE agent = 'availability' AND status = 'success' "
+            "AND started_at >= %s AND started_at < %s",
+            (utc_pad_start, utc_pad_end),
+        )
+        rows = cur.fetchall()
+
+    espn_days: set[date] = set()
+    sleeper_days: set[date] = set()
+    for started_at, meta in rows:
+        day = to_gameday(started_at)
+        if day < week_start or day > week_end:
+            continue
+        espn_days.add(day)
+        if (meta or {}).get("sleeper_fetched"):
+            sleeper_days.add(day)
+    return {"espn": sorted(espn_days), "sleeper": sorted(sleeper_days)}
 
 
 def _fetch_week_injury_sequences(
-    conn: psycopg.Connection, season: int, week: int
+    conn: psycopg.Connection,
+    season: int,
+    week: int,
+    season_type: str,
+    driving_source_by_player: dict[str, str | None],
 ) -> dict[str, list[str]]:
+    week_start, week_end = week_window(conn, season, week, season_type)
+    window_start, _ = et_day_bounds(week_start)
+    _, window_end = et_day_bounds(week_end)
+
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT player_id, source, designation, as_of
+            SELECT player_id, source, designation, is_cleared, as_of
             FROM injuries
-            WHERE season = %s AND week = %s AND player_id IS NOT NULL
+            WHERE player_id IS NOT NULL AND as_of >= %s AND as_of < %s
             ORDER BY player_id, source, as_of ASC
             """,
-            (season, week),
+            (window_start, window_end),
         )
-        rows = cur.fetchall()
-    return _build_trend_sequences(rows)
+        window_rows = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT DISTINCT ON (player_id, source)
+                player_id, source, designation, is_cleared, as_of
+            FROM injuries
+            WHERE player_id IS NOT NULL AND as_of < %s
+            ORDER BY player_id, source, as_of DESC
+            """,
+            (window_start,),
+        )
+        seed_rows = cur.fetchall()
+
+    rows = _combine_seed_and_window_rows(seed_rows, window_rows)
+    poll_days_by_source = _fetch_poll_days_by_source(conn, week_start, week_end)
+    return _build_trend_sequences(rows, poll_days_by_source, driving_source_by_player)
 
 
 def _fetch_players_by_team(
@@ -563,18 +741,14 @@ class AvailabilityImpactAnalyst(Analyst):
     signal_names = _SIGNAL_NAMES
 
     def inputs_ready(self, ctx: RunContext) -> bool | str:
-        with ctx.conn.cursor() as cur:
-            cur.execute(
-                "SELECT count(*) FROM injuries WHERE season = %s AND week = %s",
-                (ctx.season, ctx.week),
-            )
-            row = cur.fetchone()
-            count = row[0] if row else 0
-        return True if count > 0 else "skipped_no_injuries"
+        current_injuries = _fetch_current_injuries(
+            ctx.conn, ctx.season, ctx.week, ctx.season_type
+        )
+        return True if _any_flagged(current_injuries) else "skipped_no_injuries"
 
     def compute(self, ctx: RunContext) -> pl.DataFrame:
         conn = ctx.conn
-        current_injuries = _fetch_current_injuries(conn, ctx.season, ctx.week)
+        current_injuries = _fetch_current_injuries(conn, ctx.season, ctx.week, ctx.season_type)
         for r in current_injuries:
             r["category"] = _classify_designation(r["designation"])
         flagged = [r for r in current_injuries if r["category"] != _CATEGORY_HEALTHY]
@@ -583,7 +757,10 @@ class AvailabilityImpactAnalyst(Analyst):
         player_positions = _fetch_players_by_team(conn, teams_with_flagged)
         snap_share = _fetch_snap_share(conn, ctx.season, ctx.week)
         depth_rows = _fetch_depth(conn)
-        sequences = _fetch_week_injury_sequences(conn, ctx.season, ctx.week)
+        driving_source_by_player = {r["player_id"]: r["source"] for r in current_injuries}
+        sequences = _fetch_week_injury_sequences(
+            conn, ctx.season, ctx.week, ctx.season_type, driving_source_by_player
+        )
 
         roster = _build_redistribution_roster(flagged, player_positions, snap_share)
         redistribution_rows = _compute_redistribution(roster)
