@@ -124,7 +124,7 @@ def pitches_for(client: httpx.Client, osm_type: str, osm_id: int) -> tuple[str, 
     sel = f"{osm_type}({osm_id})->.s;"
     inside = overpass(
         client,
-        f'[out:json][timeout:60];{sel}.s map_to_area->.a;'
+        f"[out:json][timeout:60];{sel}.s map_to_area->.a;"
         f'way(area.a)["leisure"="pitch"];out tags geom;',
     )
     if inside:
@@ -266,27 +266,41 @@ def main() -> None:
     OUT_PATH.parent.mkdir(exist_ok=True)
     OUT_PATH.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    hdr = f"{'id':6} {'osm stadium':34} {'way_id':>11} {'lat':>10} {'lon':>11} {'brg':>6} {'len':>6} {'wid':>5} {'fill':>5} {'sport':18} {'how':11} note"
+    fmt = "{:6} {:34} {:>11} {:>10} {:>11} {:>6} {:>6} {:>5} {:>5} {:18} {:11} {}"
+    hdr = fmt.format(
+        "id", "osm stadium", "way_id", "lat", "lon", "brg", "len", "wid", "fill", "sport",
+        "how", "note",
+    )  # fmt: skip
     print(hdr)
     print("-" * len(hdr))
     for sid, e in results.items():
-        name = (e["stadium"] or {}).get("name") or "-- NOT FOUND --"
+        name = ((e["stadium"] or {}).get("name") or "-- NOT FOUND --")[:34]
         cands, pick = e["candidates"], e["suggested"]
         plausible = [c for c in cands if 95 <= c["length_m"] <= 130]
         note = []
         if pick is None:
-            note.append("NO PICK")
+            note.append(f"NO PICK ({len(cands)} cands)")
         if len(plausible) > 1:
             note.append(f"{len(plausible)} plausible")
-        rows = [cands[pick]] if pick is not None else []
-        if not rows:
-            print(f"{sid:6} {name[:34]:34} {'':>11} {'':>10} {'':>11} {'':>6} {'':>6} {'':>5} {'':>5} {'':18} {str(e['method']):11} {'; '.join(note)} ({len(cands)} cands)")
+        if pick is None:
+            print(fmt.format(sid, name, *[""] * 8, str(e["method"]), "; ".join(note)))
             continue
-        c = rows[0]
+        c = cands[pick]
         print(
-            f"{sid:6} {name[:34]:34} {c['osm_way_id']:>11} {c['lat']:>10.5f} {c['lon']:>11.5f} "
-            f"{c['bearing_deg']:>6.1f} {c['length_m']:>6.1f} {c['width_m']:>5.1f} {c['fill']:>5.2f} "
-            f"{c['tags'].get('sport', '')[:18]:18} {e['method']:11} {'; '.join(note)}"
+            fmt.format(
+                sid,
+                name,
+                c["osm_way_id"],
+                f"{c['lat']:.5f}",
+                f"{c['lon']:.5f}",
+                f"{c['bearing_deg']:.1f}",
+                f"{c['length_m']:.1f}",
+                f"{c['width_m']:.1f}",
+                f"{c['fill']:.2f}",
+                c["tags"].get("sport", "")[:18],
+                e["method"],
+                "; ".join(note),
+            )  # fmt: skip
         )
     print(f"\nall candidates: {OUT_PATH}", file=sys.stderr)
 
