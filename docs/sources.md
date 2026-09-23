@@ -341,6 +341,23 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     excluded from movement comparisons (P4).
     The response does not say which model produced a value, or when that model run was
     issued; neither can be recorded.
+  - **HRRR domain, for the Environment analyst's `weather_forecast_domain`** (verified
+    2026-09-23): Open-Meteo's GFS/HRRR docs page (`open-meteo.com/en/docs/gfs-api`) lists
+    "HRRR Conus" (3 km, hourly) and doesn't document how `best_match` picks HRRR by
+    location. So membership is tested against HRRR's own grid, from NOAA's
+    `https://rapidrefresh.noaa.gov/hrrr/HRRR_conus.domain.txt`: Lambert conformal, true
+    latitude 38.5N (both), standard longitude 97.5W, centered at 38.5N 97.5W, 1799 × 1059
+    mass points at 3000 m; corners SW 21.13812,-122.7195 / NW 47.84364,-134.0986 /
+    NE 47.84364,-60.90137 / SE 21.13812,-72.28046. Forward-projecting those four corners
+    (sphere R = 6370 km, WRF's) lands exactly on ±2697 km / ±1587 km, the grid's
+    half-extents — that confirms the parameters. Every US venue in `stadiums` lies ≥ 300 km
+    inside the grid (closest: SEA00, 318 km); every international venue is outside
+    (closest: MEX00, 584 km beyond the southern edge). Inside the grid means HRRR is
+    available there; it does **not** prove `best_match` used HRRR for a given hour.
+  - **Venue time zones** (`stadiums.tz`, 2026-09-23): entered by city as IANA zones, then
+    cross-checked by calling this endpoint with `timezone=auto` at each stadium's stored
+    lat/lon — the response's `timezone` matched all 41 rows. (The collector itself always
+    requests `timezone=UTC`; `auto` was used only for this check.)
 - **Known traps:**
   - **Wind is an exterior 10 m open-terrain estimate, not field wind.** `wind_speed_10m`
     is the model's wind 10 m above ground for the grid cell, with no stadium in it. Inside a

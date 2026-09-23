@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 import psycopg
@@ -22,6 +22,16 @@ from pipeline.collectors.weather_schedule import Target
 from pipeline.core.base import Collector, RunContext, WorkResult
 from pipeline.core.db import filter_changed, upsert_rows
 from pipeline.core.hashing import hash_row
+
+# The venue guard lives in pipeline/core/venue.py so the Environment analyst applies the
+# identical rule; re-exported here because this collector is where it's applied first.
+from pipeline.core.venue import (  # noqa: F401
+    GameVenue,
+    SkipReason,
+    Stadium,
+    VenueDecision,
+    resolve_venue,
+)
 
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -64,10 +74,6 @@ _REQUIRED_VARIABLES = ("temperature_2m", "wind_speed_10m", "wind_direction_10m")
 # preceding-hour aggregates, so H+4 covers the game's last hour (docs/sources.md).
 WINDOW_HOURS = 5
 
-SkipReason = Literal[
-    "fixed_roof", "roof_closed", "name_mismatch", "unknown_stadium", "no_forecast_data"
-]
-
 _ROW_COLS = [
     "game_id",
     "target_id",
@@ -90,32 +96,6 @@ _ROW_COLS = [
 _ROW_PK = ["game_id", "as_of", "valid_time"]
 
 
-@dataclass(frozen=True)
-class GameVenue:
-    game_id: str
-    season: int
-    week: int
-    stadium_id: str | None
-    stadium_name: str | None  # games.stadium, the string the name guard checks
-    roof: str | None  # games.roof for this game (null pre-game at retractable venues)
-
-
-@dataclass(frozen=True)
-class Stadium:
-    stadium_id: str
-    known_names: tuple[str, ...]
-    lat: float
-    lon: float
-    roof_type: str
-
-
-@dataclass(frozen=True)
-class VenueDecision:
-    fetch: bool
-    skip_reason: SkipReason | None = None
-    roof_conflict: bool = False  # open venue, but games.roof claims dome/closed
-
-
 @dataclass
 class _Planned:
     target: Target
@@ -132,26 +112,6 @@ class _Plan:
 class NoForecastData(Exception):
     """Open-Meteo has no usable hourly data for this game window (HTTP 400 out of range,
     or nulls in a required variable). The target is skipped, never filled in."""
-
-
-def resolve_venue(game: GameVenue, stadium: Stadium | None) -> VenueDecision:
-    """Pure. The name guard runs before the roof rule: a game whose stadium name doesn't
-    match its stadium_id's known names (e.g. 2026_05_PHI_JAX, JAX00 but "Tottenham
-    Hotspur Stadium") is never fetched with that row's coords, whatever its roof."""
-    if stadium is None:
-        return VenueDecision(False, "unknown_stadium")
-    if game.stadium_name is None or game.stadium_name not in stadium.known_names:
-        return VenueDecision(False, "name_mismatch")
-    if stadium.roof_type == "fixed":
-        return VenueDecision(False, "fixed_roof")
-    if stadium.roof_type == "retractable" and game.roof == "closed":
-        return VenueDecision(False, "roof_closed")
-    # Retractable with roof null/open is fetched -- nflverse leaves games.roof null
-    # pre-game, so the Environment analyst labels these "if roof open". An open venue
-    # nflverse calls dome/closed (MCG, Stade de France, Munich) is fetched: the structural
-    # roof_type wins, and the conflict is surfaced for the auditor.
-    conflict = stadium.roof_type == "open" and game.roof in ("dome", "closed")
-    return VenueDecision(True, None, conflict)
 
 
 def game_window(kickoff: dt.datetime) -> list[dt.datetime]:

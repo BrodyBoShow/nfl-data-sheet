@@ -469,6 +469,54 @@ REVIEW: dict[str, dict[str, Any]] = {
     ),
 }
 
+# IANA time zone per venue, for the Environment analyst's timezone-crossing signal.
+# Added 2026-09-23: entered by city, then cross-checked against Open-Meteo's
+# `timezone=auto` answer for each row's stored lat/lon -- all 41 matched. A zone, not a
+# fixed UTC offset, so DST (and Arizona's lack of it) resolves per kickoff date.
+TZ: dict[str, str] = {
+    "ATL97": "America/New_York",
+    "BAL00": "America/New_York",
+    "BOS00": "America/New_York",
+    "BUF00": "America/New_York",
+    "CAR00": "America/New_York",
+    "CHI98": "America/Chicago",
+    "CIN00": "America/New_York",
+    "CLE00": "America/New_York",
+    "DAL00": "America/Chicago",
+    "DEN00": "America/Denver",
+    "DET00": "America/Detroit",
+    "FRA00": "Europe/Berlin",
+    "GER00": "Europe/Berlin",
+    "GNB00": "America/Chicago",
+    "HOU00": "America/Chicago",
+    "IND00": "America/Indiana/Indianapolis",
+    "JAX00": "America/New_York",
+    "KAN00": "America/Chicago",
+    "LAX01": "America/Los_Angeles",
+    "LON00": "Europe/London",
+    "LON02": "Europe/London",
+    "MAD01": "Europe/Madrid",
+    "MEL00": "Australia/Melbourne",
+    "MEX00": "America/Mexico_City",
+    "MIA00": "America/New_York",
+    "MIN01": "America/Chicago",
+    "MUN01": "Europe/Berlin",
+    "NAS00": "America/Chicago",
+    "NOR00": "America/Chicago",
+    "NYC01": "America/New_York",
+    "PAR00": "Europe/Paris",
+    "PHI00": "America/New_York",
+    "PHO00": "America/Phoenix",
+    "PIT00": "America/New_York",
+    "RIO00": "America/Sao_Paulo",
+    "SAO00": "America/Sao_Paulo",
+    "SEA00": "America/Los_Angeles",
+    "SFO01": "America/Los_Angeles",
+    "TAM00": "America/New_York",
+    "VEG00": "America/Los_Angeles",
+    "WAS00": "America/New_York",
+}
+
 KEEPS_BEARING = {"osm_field_agrees", "osm_field_outline_disagrees"}
 COLUMNS = [
     "stadium_id",
@@ -486,6 +534,7 @@ COLUMNS = [
     "bearing_basis",
     "outline_axis_deg",
     "source_note",
+    "tz",
 ]
 
 
@@ -507,6 +556,7 @@ def main() -> None:
     cands = json.loads(CANDIDATES.read_text(encoding="utf-8"))
     outlines = json.loads(OUTLINES.read_text(encoding="utf-8"))
     assert set(REVIEW) == set(cands), set(REVIEW) ^ set(cands)
+    assert set(TZ) == set(REVIEW), set(TZ) ^ set(REVIEW)
 
     def feature(sid: str) -> tuple[str, int]:
         if "stadium_feature" in REVIEW[sid]:
@@ -557,6 +607,7 @@ def main() -> None:
                 "bearing_basis": r["basis"],
                 "outline_axis_deg": f"{ax[0]:.1f}" if ax else "",
                 "source_note": r["note"],
+                "tz": TZ[sid],
             }
         )
 

@@ -42,6 +42,7 @@ import nflreadpy as nfl
 
 from pipeline.analysts.availability_impact import AvailabilityImpactAnalyst
 from pipeline.analysts.efficiency import EfficiencyAnalyst
+from pipeline.analysts.environment import EnvironmentAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
@@ -69,7 +70,7 @@ _COLLECTORS: list[Collector] = [
     StadiumsCollector(),
     WeatherCollector(),
 ]
-_ANALYSTS: list[Analyst] = [EfficiencyAnalyst(), AvailabilityImpactAnalyst()]
+_ANALYSTS: list[Analyst] = [EfficiencyAnalyst(), AvailabilityImpactAnalyst(), EnvironmentAnalyst()]
 
 _FRESHNESS_CHECKS = [
     FreshnessCheck(agent="id_spine", tier="T2"),
@@ -77,6 +78,9 @@ _FRESHNESS_CHECKS = [
     FreshnessCheck(agent="efficiency", tier="T2"),
     FreshnessCheck(agent="availability", tier="T1"),
     FreshnessCheck(agent="availability_impact", tier="T1"),
+    # Same trigger as availability_impact (any collector writing rows this tick), so the
+    # same T1 cadence. Its own inputs_ready skips only when no game is within 7 days.
+    FreshnessCheck(agent="environment", tier="T1"),
     # odds deliberately has no FreshnessCheck here -- check_freshness/_TIER_MAX_AGE
     # assumes a roughly regular per-tier cadence (T1 = flag past 6h since last success),
     # but odds_schedule.py's targets are legitimately >6h apart by design (e.g.

@@ -13,6 +13,7 @@ import hashlib
 import io
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -42,6 +43,7 @@ _COLS = [
     "bearing_basis",
     "outline_axis_deg",
     "source_note",
+    "tz",
 ]
 
 
@@ -74,6 +76,7 @@ class StadiumRow(BaseModel):
     ]
     outline_axis_deg: float | None
     source_note: str
+    tz: str  # IANA zone; 0021_stadiums_tz.sql leaves the column nullable, this doesn't
 
     @field_validator(
         "field_bearing", "field_osm_way_id", "field_length_m", "outline_axis_deg", mode="before"
@@ -103,6 +106,10 @@ class StadiumRow(BaseModel):
                 f"{self.stadium_id}: bearing_basis {self.bearing_basis!r} doesn't match "
                 f"field_bearing/field_osm_way_id presence"
             )
+        try:
+            ZoneInfo(self.tz)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"{self.stadium_id}: tz {self.tz!r} is not an IANA zone") from exc
         return self
 
 

@@ -80,6 +80,21 @@ def test_unknown_roof_type_is_rejected():
         StadiumsCollector().validate(_rewrite(mutate))
 
 
+def test_real_csv_carries_a_zone_for_every_venue():
+    rows = {r.stadium_id: r for r in StadiumsCollector().validate(_csv_text())["rows"]}
+    assert rows["PHO00"].tz == "America/Phoenix"  # no DST -- why a zone, not an offset
+    assert rows["MEL00"].tz == "Australia/Melbourne"
+    assert all(r.tz for r in rows.values())
+
+
+def test_unknown_tz_is_rejected():
+    def mutate(rows):
+        next(r for r in rows if r["stadium_id"] == "GNB00")["tz"] = "America/Green_Bay"
+
+    with pytest.raises(ValueError, match="GNB00"):
+        StadiumsCollector().validate(_rewrite(mutate))
+
+
 def test_duplicate_stadium_id_is_rejected():
     def mutate(rows):
         rows.append(dict(rows[0]))

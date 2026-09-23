@@ -371,6 +371,148 @@ exempt-list stint escalating isn't a practice-participation trend).
   >= 2` gate, injury-only scope — see this phase's session notes for the live data that
   prompted it: 151/347 rows were single-snapshot 0s indistinguishable from "stable").
 
+### Environment sector (Phase 4)
+
+Source: `pipeline/analysts/environment.py`. Reads `games`, `stadiums`,
+`weather_snapshot_targets`, `weather_snapshots`. No prior-blend and no opponent
+adjustment; `league_pct` and `stability` are always null (lead time is exposed as its own
+signal rather than folded into a made-up `stability` decay). **Added:** Phase 4,
+2026-09-23.
+
+**Scope: per game, not per dispatcher week.** Each run covers every game with
+`now − 24h < kickoff ≤ now + 7d`, whatever `ctx.week` is, because weather belongs to a
+game and a Thursday game's snapshots are captured before nflreadpy's current week
+advances. Every row carries **its game's own `season`/`week`**, so a game has the same
+unique key whichever dispatcher week computes it. The 24h lookback keeps a game in scope
+long enough for `weather_status` to settle after its last target closes at kickoff + 1h.
+After a game leaves the window, its last rows stay as they were.
+
+Two scopes, both with `game_id` set and `player_id` null:
+- **game** (`team` null): weather, `weather_status`, `venue_roof_code`, `surface_code`.
+- **team** (`team` set, one row per side): rest, travel, timezone.
+
+`inputs_version`: weather value rows carry `weather@<snapshot as_of>`, naming the exact
+snapshot used. Every other row carries `schedules@<nflverse timestamp>,stadiums_csv@<hash>`.
+
+#### Which snapshot (headline)
+The latest captured snapshot taken before kickoff: `lead_hours >= 0`, largest `as_of`.
+- A t2 capture taken after kickoff is never the headline. That also means headline values
+  stop changing at kickoff.
+- t48 counts if it's the only capture, flagged by `weather_model_regime_break = 1`.
+- No movement or delta signals yet. If they're added, they start at t36 (P4.md).
+
+#### `weather_status` (game scope, emitted for every game in the window)
+Derived from structure first (name guard via `pipeline/core/venue.py`'s `resolve_venue`,
+the same function the weather collector uses), then from capture state:
+
+| Value | Meaning | Derived from |
+|---|---|---|
+| 1 | forecast available | a headline snapshot exists |
+| 2 | indoor, weather doesn't apply | `stadiums.roof_type='fixed'`, or retractable with `games.roof='closed'` or a target skipped `roof_closed` |
+| 3 | awaiting capture | kickoff ahead, nothing captured: a target is still pending, or the game is beyond the collector's 54h horizon (no target rows yet) |
+| 4 | missed | nothing captured and either kickoff passed or every target closed (`missed` / `no_forecast_data`) |
+| 5 | venue unresolved | name guard failed (`name_mismatch` / `unknown_stadium`, e.g. `2026_05_PHI_JAX`) |
+| 6 | not tracked | no target rows and kickoff already past (games played before the weather collector existed) |
+
+A dome is known from `stadiums` alone, so it never depends on target rows. A missed capture
+is known only from targets, so the two can't be confused. Weather value rows exist **only**
+for status 1.
+
+**Caveat, a stale 3:** analysts run only on a dispatcher tick where some collector wrote
+rows. A target flipping to `missed` writes 0 rows, so the 3 → 4 change waits for the next
+tick where something else writes (typically the next weather capture of any game).
+**A stored `weather_status = 3` whose game has already kicked off does not mean "still
+awaiting capture."** It means the status was computed before the targets closed. Treat it
+as unknown until it's recomputed. Once the game drops out of the 24h lookback it's never
+recomputed, so such a row can stay 3 permanently.
+
+#### Wind: one shape, speed-only first
+`wind_speed_mph` and `wind_direction_mode` are always present with a forecast. The split
+rows are added on top of them only when `wind_direction_mode = 3`. A consumer reads the
+mode once and knows which rows to expect.
+
+| `wind_direction_mode` | Meaning |
+|---|---|
+| 1 | speed only: the venue has a field bearing, but no forecast hour reaches 8 mph sustained |
+| 2 | speed only: `stadiums.field_bearing` is null (20 of 41 venues), checked first |
+| 3 | split available: `wind_along_field_mph` / `wind_crosswind_mph` present |
+
+| Signal | Formula | `sample_n` |
+|---|---|---|
+| `wind_speed_mph` | mean `wind_speed_10m_mph`, hour offsets 0–4 | 5 |
+| `wind_gust_max_mph` | max `wind_gusts_10m_mph`, offsets 1–4, non-null only; no row if all null | non-null hours |
+| `wind_along_field_mph` | mean over qualifying hours of \|v·cos(dir − field_bearing)\| | qualifying hours (of 5) |
+| `wind_crosswind_mph` | mean over qualifying hours of \|v·sin(dir − field_bearing)\| | qualifying hours (of 5) |
+
+- A qualifying hour has sustained speed ≥ 8 mph (`_DIRECTION_MIN_MPH`, P4.md) and a
+  non-null direction. Gusts never qualify an hour.
+- There's no minimum count of qualifying hours: `sample_n` says how much of the game the
+  split covers.
+- The components are magnitudes. The field is symmetric and teams switch ends every
+  quarter, so headwind vs. tailwind (or wind "from" vs. "to") has no meaning for a whole
+  game.
+- **All wind is Open-Meteo's exterior 10 m estimate, a relative indicator only, never
+  field-level wind** (`docs/sources.md`).
+
+#### Other weather values (status 1 only)
+Hour offsets: instantaneous variables use 0–4 (kickoff hour H through H+4).
+Preceding-hour aggregates use 1–4, because offset 0 would describe the hour before
+kickoff. A sum, max, or mean with any null or missing hour in its range is **omitted**,
+never computed from part of the window.
+
+| Signal | Formula |
+|---|---|
+| `temperature_f` / `apparent_temperature_f` | mean, offsets 0–4 |
+| `precip_total_in` / `snowfall_total_in` | sum, offsets 1–4 |
+| `precip_prob_max_pct` | max, offsets 1–4 |
+| `weather_lead_hours` | the headline snapshot's `lead_hours` |
+| `weather_model_regime_break` | 1 if the headline is t48 (GFS), else 0 |
+| `weather_forecast_domain` | 1 = venue inside NOAA's HRRR CONUS grid, 2 = outside, meaning Open-Meteo's `best_match` model there is unverified: lower confidence, not a different number. Computed by projecting the stadium's coords onto the HRRR grid (`docs/sources.md`), not from a list of stadium IDs. |
+| `venue_elevation_m` | the snapshot's `grid_elevation_m` (Open-Meteo's 90 m DEM elevation), used as altitude (Denver, Mexico City). Only for fetched games; a full-coverage version would need a `stadiums` elevation column (not built). |
+
+#### Venue codes (game scope)
+| `venue_roof_code` | Meaning |
+|---|---|
+| 1 | fixed roof |
+| 2 | retractable, closed |
+| 3 | retractable, open or not yet reported: label "if roof open" (nflverse leaves `games.roof` null before the game) |
+| 4 | open-air |
+
+Emitted only when the venue resolves; there's no row for status 5.
+
+| `surface_code` | `games.surface` values |
+|---|---|
+| 1 | `grass` |
+| 2 | `fieldturf`, `matrixturf`, `sportturf`, `a_turf`, `astroturf` |
+
+Emitted for every game with a recognized value. `''`, null, or an unrecognized string gets
+no row and is logged in `agent_runs.meta.unrecognized_surface`.
+
+#### Rest, travel, timezone (team scope)
+| Signal | Formula |
+|---|---|
+| `rest_days` | `games.home_rest` / `away_rest` |
+| `rest_diff` | own rest − opponent's rest |
+| `travel_miles` | great-circle miles, team's home venue → game venue (`stadiums` lat/lon) |
+| `tz_shift_hours` | **primary.** Wrapped to [−12, +12): `((raw + 12) mod 24) − 12`. Positive = traveled east (SF at a 1pm ET game = +3, a 10am body-clock kickoff). |
+| `tz_offset_diff_raw_hours` | unwrapped: game venue's UTC offset − home venue's, each at the kickoff instant via `zoneinfo` (DST and Arizona resolved per date) |
+
+- **Home venue** is the `stadium_id` a team uses most for its REG home games that season.
+  `games` has no neutral-site flag. In 2026 each team's own stadium beats its one
+  international "home" game 8–1 (JAX 7–1). A tie is never broken by guessing: that team
+  gets no travel or timezone rows, and the tie is logged in `agent_runs.meta`.
+- **Home timezone** is that stadium's `stadiums.tz`, so there's no separate team → tz map
+  to drift.
+- At an international or neutral-site game, **both** teams travel and shift: DET's
+  "home" game in Munich shows DET's trip too.
+- **Magnitude is never clipped.** London and Munich read 5–9h, domestic trips ≤3h.
+- **Wrapping only matters past 12h.** LA at Melbourne is raw +17 (AEST +10 vs. PDT −7),
+  which is the same body-clock shift as −7 going west. `tz_shift_hours` reads −7, so it's
+  directly comparable with every other game; `tz_offset_diff_raw_hours` keeps the +17.
+  Read `tz_shift_hours`.
+- No travel or timezone rows when the game's venue is unresolved (status 5). Rest rows are
+  still written.
+
 ### Stale-signal cleanup
 
 `Analyst.run()` itself (`pipeline/core/base.py`) deletes every signal name an analyst
@@ -392,3 +534,10 @@ authoritative for its scope; a signal a prior run wrote that this run's (possibl
 narrower) logic no longer produces does not survive. This is what caught and removed
 the 151 single-snapshot `practice_trend_risk` rows from before the `sample_n >= 2` gate
 existed — `upsert_rows` alone only ever inserts/updates the rows it's given.
+
+**Exception: `EnvironmentAnalyst` scopes cleanup by game, not by week.** Its window spans
+dispatcher weeks (see "Environment sector"). A `ctx.season`/`ctx.week` delete would miss
+next week's games and wipe finished games' frozen rows. So it overrides
+`_delete_stale_signals` to delete `sector = 'environment' AND signal = ANY(<its
+signal_names>) AND game_id = ANY(<this run's window game_ids>)`. That is still limited to
+its own sector and signal names, so the registry test's guarantee holds.
