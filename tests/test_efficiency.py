@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from pipeline.analysts.efficiency import (
     _OL_SNAP_POSITIONS,
@@ -90,6 +91,151 @@ def test_no_leakage_extra_future_weeks_dont_change_output():
 
     assert a.sort("week").equals(b.sort("week"))
     assert set(a["week"].to_list()) == {1, 2, 3}
+
+
+_E2E_TEAMS = ("AA", "BB", "CC", "DD")
+_E2E_BASE_EPA = {"AA": 0.10, "BB": -0.05, "CC": 0.02, "DD": -0.08}
+
+
+def _e2e_pairings(week):
+    if week % 3 == 0:
+        return [("AA", "DD"), ("BB", "CC")]
+    if week % 2 == 0:
+        return [("AA", "CC"), ("BB", "DD")]
+    return [("AA", "BB"), ("CC", "DD")]
+
+
+def _e2e_team_week(season, weeks, epa_shift=0.0):
+    rows = []
+    for w in weeks:
+        for a, b in _e2e_pairings(w):
+            for team, opp in ((a, b), (b, a)):
+                epa = (_E2E_BASE_EPA[team] + 0.01 * w + epa_shift) * 60
+                rows.append(
+                    _tw_row(team, opp, w, season=season, epa_sum=epa, pass_epa_sum=epa * 0.6,
+                            rush_epa_sum=epa * 0.4, points=21 + int(epa))
+                )
+    return rows
+
+
+def _e2e_qb(season, weeks, starter_override=None):
+    starter_override = starter_override or {}
+    rows = []
+    for w in weeks:
+        for team in _E2E_TEAMS:
+            starter = starter_override.get(team, f"{team}_QB1")
+            rows.append((starter, team, season, w, "REG", 35))
+            if starter != f"{team}_QB1":
+                rows.append((f"{team}_QB1", team, season, w, "REG", 3))
+    return rows
+
+
+def _e2e_ol(season, weeks, group_override=None, snaps=60):
+    group_override = group_override or {}
+    rows = []
+    for w in weeks:
+        for team in _E2E_TEAMS:
+            prefix = group_override.get(team, f"{team}_OL")
+            for i in range(5):
+                rows.append((f"{prefix}{i}", team, season, w, "REG", "T", snaps))
+    return rows
+
+
+def _run_compute_with(monkeypatch, *, week, team_week, qb, ol, depth=()):
+    import pipeline.analysts.efficiency as eff
+
+    tw_df = pl.DataFrame(team_week, schema=eff._TEAM_WEEK_SCHEMA)
+    qb_df = pl.DataFrame(qb, schema=eff._PLAYER_WEEK_QB_SCHEMA, orient="row")
+    ol_df = pl.DataFrame(ol, schema=eff._SNAPS_OL_SCHEMA, orient="row")
+    depth_df = pl.DataFrame(list(depth), schema=eff._DEPTH_SCHEMA, orient="row")
+    monkeypatch.setattr(eff, "_fetch_team_week", lambda conn, s, p: tw_df)
+    monkeypatch.setattr(eff, "_fetch_player_week_qb", lambda conn, s, p: qb_df)
+    monkeypatch.setattr(eff, "_fetch_snaps_ol", lambda conn, s, p: ol_df)
+    monkeypatch.setattr(eff, "_fetch_depth", lambda conn: depth_df)
+    monkeypatch.setattr(eff, "_build_inputs_version", lambda conn: "test")
+    # A historical backfill week is never the live week, so the real function returns
+    # False there. Stubbed only to avoid its nflreadpy date lookup, not to change behavior.
+    monkeypatch.setattr(eff, "_depth_fallback_allowed", lambda ctx: False)
+
+    analyst = eff.EfficiencyAnalyst()
+    df = analyst.compute(_make_ctx(season=2099, week=week))
+    return df.drop("as_of").sort(["signal", "team"]), analyst._last_run_meta
+
+
+def test_compute_ignores_future_weeks_end_to_end(monkeypatch):
+    """The full compute() path, not just _filter_current_season: team_week, the QB-change
+    factor, and the O-line-continuity factor must all ignore weeks >= the target week.
+    This is the guarantee the 2019-2025 backfill (P5) rests on: a week-N signal may only
+    see games from weeks 1..N-1, or the backtest is worthless."""
+    prior_tw = _e2e_team_week(2098, range(1, 7))
+    prior_qb = _e2e_qb(2098, range(1, 7))
+    prior_ol = _e2e_ol(2098, range(1, 7))
+
+    past_tw = _e2e_team_week(2099, range(1, 4))
+    past_qb = _e2e_qb(2099, range(1, 4))
+    past_ol = _e2e_ol(2099, range(1, 4))
+
+    # Planted future (weeks 4-6): a large EPA swing, a brand-new AA starting QB with no
+    # prior attempts (would drop AA's qb_factor to 0.6 if leaked), and an entirely new AA
+    # O-line with far more snaps (would take over the top-5 group if leaked).
+    future_tw = _e2e_team_week(2099, range(4, 7), epa_shift=0.5)
+    future_qb = _e2e_qb(2099, range(4, 7), starter_override={"AA": "AA_QB2"})
+    future_ol = _e2e_ol(2099, range(4, 7), group_override={"AA": "AA_NEWOL"}, snaps=500)
+
+    without_future = _run_compute_with(
+        monkeypatch, week=4,
+        team_week=prior_tw + past_tw, qb=prior_qb + past_qb, ol=prior_ol + past_ol,
+    )
+    with_future = _run_compute_with(
+        monkeypatch, week=4,
+        team_week=prior_tw + past_tw + future_tw,
+        qb=prior_qb + past_qb + future_qb,
+        ol=prior_ol + past_ol + future_ol,
+    )
+
+    # Not bit-exact: a larger input frame changes polars' internal summation order, which
+    # moves values by ~1 ULP (measured 7e-18 on values ~0.02). atol=1e-12 is still ~11
+    # orders of magnitude below what the planted 0.5-EPA future shift would produce.
+    assert_frame_equal(
+        without_future[0], with_future[0], check_exact=False, rel_tol=0, abs_tol=1e-12
+    )
+    assert without_future[1] == with_future[1]
+    assert with_future[1]["teams"]["AA"]["current_qb"] == "AA_QB1"
+
+    # Control: the planted rows are material. At week 7 they're legitimately in scope and
+    # change both values and AA's resolved QB, so the equality above isn't vacuous.
+    week7_past_only = _run_compute_with(
+        monkeypatch, week=7,
+        team_week=prior_tw + past_tw, qb=prior_qb + past_qb, ol=prior_ol + past_ol,
+    )
+    week7_with_future = _run_compute_with(
+        monkeypatch, week=7,
+        team_week=prior_tw + past_tw + future_tw,
+        qb=prior_qb + past_qb + future_qb,
+        ol=prior_ol + past_ol + future_ol,
+    )
+    assert not week7_past_only[0].equals(week7_with_future[0])
+    assert week7_with_future[1]["teams"]["AA"]["current_qb"] == "AA_QB2"
+
+
+def test_historical_week_one_never_reads_depth(monkeypatch):
+    """Disclosed P5 backtest asymmetry: a historical week 1 has no current-season games,
+    and depth holds only today's snapshot, so the current QB/O-line resolve to unknown
+    (qb_factor = ol_factor = 1.0), never to today's depth chart."""
+    depth = [("AA", "QB", 1, "TODAYS_QB")] + [
+        ("AA", slot, 1, f"TODAYS_{slot}") for slot in ("LT", "LG", "C", "RG", "RT")
+    ]
+    _, meta = _run_compute_with(
+        monkeypatch, week=1,
+        team_week=_e2e_team_week(2098, range(1, 7)) + _e2e_team_week(2099, range(1, 4)),
+        qb=_e2e_qb(2098, range(1, 7)),
+        ol=_e2e_ol(2098, range(1, 7)),
+        depth=depth,
+    )
+    assert meta["teams"]["AA"]["current_qb"] is None
+    assert meta["teams"]["AA"]["current_ol"] == []
+    assert meta["teams"]["AA"]["qb_factor"] == 1.0
+    assert meta["teams"]["AA"]["ol_factor"] == 1.0
 
 
 def test_postseason_current_season_includes_all_reg_plus_earlier_post():
