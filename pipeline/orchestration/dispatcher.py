@@ -46,6 +46,8 @@ from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
+from pipeline.collectors.stadiums import StadiumsCollector
+from pipeline.collectors.weather import WeatherCollector
 from pipeline.core.base import Analyst, Collector, RunResult
 from pipeline.orchestration.auditor import FreshnessCheck, audit_and_alert
 
@@ -62,6 +64,10 @@ _COLLECTORS: list[Collector] = [
     NflverseBulkCollector(),
     AvailabilityCollector(),
     OddsCollector(),
+    # Stadiums before weather: a CSV edit (e.g. a newly confirmed known_name) lands in
+    # the same tick the weather collector's venue guard reads it.
+    StadiumsCollector(),
+    WeatherCollector(),
 ]
 _ANALYSTS: list[Analyst] = [EfficiencyAnalyst(), AvailabilityImpactAnalyst()]
 
@@ -80,6 +86,12 @@ _FRESHNESS_CHECKS = [
     # instead (auditor.check_odds_targets, wired below via audit_and_alert's
     # odds_season/odds_week), which alerts only on a target whose own deadline passed
     # uncaptured or a week short of its expected capture count.
+    #
+    # stadiums and weather have no FreshnessCheck either. stadiums only writes when the
+    # checked-in CSV changes (every other run is skipped_fresh), so "time since last
+    # success" is meaningless for it. weather is kickoff-relative, with gaps of days
+    # between games -- it gets check_venue_problems + check_weather_targets instead
+    # (audit_and_alert's weather_season/weather_week).
 ]
 
 
@@ -119,7 +131,13 @@ def main() -> int:
     results = _run_tick(_COLLECTORS, _ANALYSTS, season=season, week=week)
     any_failed = any(result.status == "failed" for result in results)
 
-    alerted = audit_and_alert(_FRESHNESS_CHECKS, odds_season=season, odds_week=week)
+    alerted = audit_and_alert(
+        _FRESHNESS_CHECKS,
+        odds_season=season,
+        odds_week=week,
+        weather_season=season,
+        weather_week=week,
+    )
     _set_github_output("alerted", "true" if alerted else "false")
 
     return 1 if any_failed else 0

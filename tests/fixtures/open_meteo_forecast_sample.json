@@ -8,8 +8,8 @@
   "elevation": 190.0,
   "hourly_units": {
     "time": "iso8601",
-    "temperature_2m": "\u00c2\u00b0F",
-    "apparent_temperature": "\u00c2\u00b0F",
+    "temperature_2m": "\u00b0F",
+    "apparent_temperature": "\u00b0F",
     "precipitation": "inch",
     "precipitation_probability": "%",
     "rain": "inch",
@@ -17,7 +17,7 @@
     "weather_code": "wmo code",
     "wind_speed_10m": "mp/h",
     "wind_gusts_10m": "mp/h",
-    "wind_direction_10m": "\u00c2\u00b0"
+    "wind_direction_10m": "\u00b0"
   },
   "hourly": {
     "time": [

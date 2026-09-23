@@ -19,6 +19,7 @@ import psycopg
 
 from pipeline.core.config import get_settings
 from pipeline.core.db import get_connection
+from pipeline.core.schedule import to_gameday
 
 # Max allowed staleness before flagging, matching docs/architecture.md's freshness tiers.
 _TIER_MAX_AGE = {
@@ -117,6 +118,105 @@ def check_odds_targets(
         f"odds: {len(captured)}/{len(due)} due targets captured this week "
         f"(season {season} week {week}) -- {'; '.join(detail)}"
     ]
+
+
+def summarize_venue_problems(rows: list[tuple]) -> dict[str, str]:
+    """Pure. `rows` are (game_id, stadium_id, games_stadium, known_names | None,
+    roof_type | None, games_roof) for every not-yet-played game this season. Returns up
+    to two messages keyed 'venue' / 'roof_conflict':
+
+    - venue: games the weather collector's name guard will refuse -- no stadiums row for
+      the stadium_id, or games.stadium not among that row's known_names (e.g.
+      2026_05_PHI_JAX: JAX00 but "Tottenham Hotspur Stadium"). Fix by correcting the
+      upstream row or, after confirming a rename, adding the name to
+      reference/stadiums.csv -- never by fetching with the stored coords.
+    - roof_conflict: open-air venues where nflverse's games.roof says dome/closed (MCG,
+      Stade de France, Munich). Weather is still fetched (structural roof_type wins);
+      this is surfaced so the upstream label isn't silently trusted elsewhere."""
+    unknown, mismatched, conflicts = [], [], []
+    for game_id, stadium_id, games_stadium, known_names, roof_type, games_roof in rows:
+        if known_names is None:
+            unknown.append(f"{game_id} ({stadium_id})")
+        elif games_stadium not in known_names:
+            mismatched.append(f"{game_id} ({stadium_id} but '{games_stadium}')")
+        elif roof_type == "open" and games_roof in ("dome", "closed"):
+            conflicts.append(f"{game_id} ({stadium_id}, games.roof='{games_roof}')")
+
+    out: dict[str, str] = {}
+    detail = []
+    if mismatched:
+        detail.append(f"stadium name not in known_names: {', '.join(sorted(mismatched))}")
+    if unknown:
+        detail.append(f"stadium_id missing from stadiums: {', '.join(sorted(unknown))}")
+    if detail:
+        out["venue"] = (
+            f"weather: venue guard will skip {len(mismatched) + len(unknown)} "
+            f"upcoming game(s) -- {'; '.join(detail)}"
+        )
+    if conflicts:
+        out["roof_conflict"] = (
+            "weather: open-air venue labeled dome/closed by nflverse (fetched anyway, "
+            f"stadiums.roof_type wins): {', '.join(sorted(conflicts))}"
+        )
+    return out
+
+
+def check_venue_problems(conn: psycopg.Connection, season: int, now: datetime) -> dict[str, str]:
+    """Runs summarize_venue_problems over every game in `season` from today (ET) on --
+    catches a mislabeled game as soon as nflverse publishes it, not only once its
+    weather target comes due 48h out."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT g.game_id, g.stadium_id, g.stadium, s.known_names, s.roof_type, g.roof "
+            "FROM games g LEFT JOIN stadiums s ON s.stadium_id = g.stadium_id "
+            "WHERE g.season = %s AND g.gameday >= %s",
+            (season, to_gameday(now)),
+        )
+        return summarize_venue_problems(cur.fetchall())
+
+
+def summarize_weather_targets(rows: list[tuple], now: datetime) -> list[str]:
+    """Pure. `rows` are per-game aggregates over weather_snapshot_targets: (game_id,
+    captured, missed_or_overdue, deliberate_skips, no_forecast_data, last_deadline).
+
+    Individual missed targets are expected and not alerted: windows near kickoff are an
+    hour wide and GitHub drops many scheduled ticks. The alert is a game that finished its
+    whole schedule (last_deadline passed) with zero snapshots and no deliberate skip
+    (fixed/closed roof, or a venue-guard skip -- which check_venue_problems already
+    reports) -- i.e. a game that simply got no weather. A no_forecast_data skip should
+    never happen inside the 48h horizon, so any is reported too."""
+    no_weather, no_data = [], []
+    for game_id, captured, missed, deliberate, no_forecast, last_deadline in rows:
+        if no_forecast:
+            no_data.append(game_id)
+        if last_deadline <= now and captured == 0 and deliberate == 0 and missed > 0:
+            no_weather.append(game_id)
+    detail = []
+    if no_weather:
+        detail.append(f"no snapshot captured at all: {', '.join(sorted(no_weather))}")
+    if no_data:
+        detail.append(f"Open-Meteo had no data (unexpected <48h out): {', '.join(sorted(no_data))}")
+    return [f"weather: {'; '.join(detail)}"] if detail else []
+
+
+def check_weather_targets(
+    conn: psycopg.Connection, season: int, week: int, now: datetime
+) -> list[str]:
+    """Weather's schedule-aware check, in place of a generic FreshnessCheck -- same
+    reasoning as check_odds_targets: runs are deliberately sparse between targets."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT game_id, "
+            "count(*) FILTER (WHERE status = 'captured'), "
+            "count(*) FILTER (WHERE status = 'missed' OR (status = 'pending' AND deadline <= %s)), "
+            "count(*) FILTER (WHERE status = 'skipped' AND skip_reason IN "
+            "('fixed_roof', 'roof_closed', 'name_mismatch', 'unknown_stadium')), "
+            "count(*) FILTER (WHERE status = 'skipped' AND skip_reason = 'no_forecast_data'), "
+            "max(deadline) "
+            "FROM weather_snapshot_targets WHERE season = %s AND week = %s GROUP BY game_id",
+            (now, season, week),
+        )
+        return summarize_weather_targets(cur.fetchall(), now)
 
 
 def check_availability_outage(conn: psycopg.Connection) -> dict[str, str]:
@@ -232,11 +332,18 @@ def audit_and_alert(
     *,
     odds_season: int | None = None,
     odds_week: int | None = None,
+    weather_season: int | None = None,
+    weather_week: int | None = None,
 ) -> bool:
     """Run freshness checks and alert on anything stale or never run, plus the
     odds-specific schedule check (see check_odds_targets) when `odds_season`/
     `odds_week` are given -- odds has no entry in `checks` itself, since a generic
     elapsed-time check doesn't fit its deliberately sparse, calendar-gated cadence.
+
+    Weather gets the same treatment when `weather_season`/`weather_week` are given: the
+    venue check (check_venue_problems, every remaining game this season) and the
+    schedule-aware target check (check_weather_targets) -- neither fits a generic
+    elapsed-time FreshnessCheck.
 
     Alerts are deduped per check (see `_send_if_new`) so a persistent condition posts
     once, not on every dispatcher tick. Returns True if a *new* alert was sent this run
@@ -265,6 +372,23 @@ def audit_and_alert(
                 _clear_alert(conn, alert_key)
             else:
                 # check_odds_targets returns at most one message (see its docstring).
+                alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
+
+        if weather_season is not None and weather_week is not None:
+            venue = check_venue_problems(conn, weather_season, now)
+            for kind in ("venue", "roof_conflict"):
+                alert_key = f"weather_{kind}:{weather_season}"
+                if kind not in venue:
+                    _clear_alert(conn, alert_key)
+                    continue
+                alerted = _send_if_new(conn, alert_key, venue[kind], now) or alerted
+
+            alert_key = f"weather_targets:{weather_season}:{weather_week}"
+            messages = check_weather_targets(conn, weather_season, weather_week, now)
+            if not messages:
+                _clear_alert(conn, alert_key)
+            else:
+                # summarize_weather_targets returns at most one message.
                 alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
 
         outages = check_availability_outage(conn)

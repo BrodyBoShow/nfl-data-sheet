@@ -12,7 +12,7 @@ Phase: P3
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -50,8 +50,7 @@ def _pick_week(games: list[_GameRow], at: date) -> tuple[int, int, str] | None:
         gamedays_by_week.setdefault((season, week, season_type), []).append(gameday)
 
     windows = [
-        (key, *_window_from_gamedays(gamedays))
-        for key, gamedays in gamedays_by_week.items()
+        (key, *_window_from_gamedays(gamedays)) for key, gamedays in gamedays_by_week.items()
     ]
 
     containing = sorted((w for w in windows if w[1] <= at <= w[2]), key=lambda w: w[1])
@@ -81,6 +80,16 @@ def to_gameday(at: datetime | date) -> date:
     needs the identical conversion when matching an odds event's commence_time against
     games.gameday directly -- one place to get this right, not two copies to drift."""
     return at.astimezone(_ET).date() if isinstance(at, datetime) else at
+
+
+def kickoff_utc(gameday: date, gametime: str) -> datetime:
+    """A game's kickoff as a tz-aware UTC instant, from games.gameday (ET calendar day)
+    and games.gametime ("HH:MM" 24h ET -- verified live 2026-09-18 against a real week-2
+    row: DET@BUF Thursday "20:15"). Shared by odds_schedule.py and weather_schedule.py so
+    both anchor to kickoff identically."""
+    hour, minute = (int(p) for p in gametime.split(":"))
+    local = datetime(gameday.year, gameday.month, gameday.day, hour, minute, tzinfo=_ET)
+    return local.astimezone(UTC)
 
 
 def resolve_season_week(conn: psycopg.Connection, at: datetime | date) -> tuple[int, int, str]:

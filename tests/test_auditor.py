@@ -7,6 +7,8 @@ from pipeline.orchestration.auditor import (
     check_availability_outage,
     check_freshness,
     check_odds_targets,
+    summarize_venue_problems,
+    summarize_weather_targets,
 )
 
 
@@ -306,3 +308,66 @@ def test_clear_alert_lets_an_identical_message_resend_later(monkeypatch):
     sent = _send_if_new(conn, "odds:2026:3", "0/1 due targets captured", _NOW)  # type: ignore[arg-type]
 
     assert sent is True
+
+
+# --------------------------------------------------------------------------------------
+# weather: venue guard + schedule checks
+# --------------------------------------------------------------------------------------
+
+_JAX_NAMES = ["EverBank Stadium", "TIAA Bank Stadium"]
+
+
+def test_venue_all_matching_returns_nothing():
+    rows = [("2026_03_NE_JAX", "JAX00", "EverBank Stadium", _JAX_NAMES, "open", "outdoors")]
+    assert summarize_venue_problems(rows) == {}
+
+
+def test_venue_mislabeled_game_alerts():
+    rows = [
+        ("2026_03_NE_JAX", "JAX00", "EverBank Stadium", _JAX_NAMES, "open", "outdoors"),
+        ("2026_05_PHI_JAX", "JAX00", "Tottenham Hotspur Stadium", _JAX_NAMES, "open", "outdoors"),
+    ]
+    out = summarize_venue_problems(rows)
+    assert set(out) == {"venue"}
+    assert "2026_05_PHI_JAX" in out["venue"] and "Tottenham Hotspur Stadium" in out["venue"]
+    assert "2026_03_NE_JAX" not in out["venue"]
+
+
+def test_venue_unknown_stadium_id_alerts():
+    out = summarize_venue_problems([("2026_20_X_Y", "NEW00", "New Place", None, None, None)])
+    assert "stadium_id missing" in out["venue"] and "NEW00" in out["venue"]
+
+
+def test_open_venue_labeled_dome_is_a_roof_conflict_not_a_venue_problem():
+    rows = [("2026_07_PIT_NO", "PAR00", "Stade de France", ["Stade de France"], "open", "dome")]
+    out = summarize_venue_problems(rows)
+    assert set(out) == {"roof_conflict"} and "PAR00" in out["roof_conflict"]
+
+
+def test_fixed_roof_dome_label_is_not_a_conflict():
+    rows = [("2026_03_NYJ_DET", "DET00", "Ford Field", ["Ford Field"], "fixed", "dome")]
+    assert summarize_venue_problems(rows) == {}
+
+
+# rows: (game_id, captured, missed_or_overdue, deliberate_skips, no_forecast_data, last_deadline)
+_PAST = _NOW - timedelta(hours=1)
+_FUTURE = _NOW + timedelta(hours=1)
+
+
+def test_weather_individual_misses_do_not_alert():
+    assert summarize_weather_targets([("G", 6, 4, 0, 0, _PAST)], _NOW) == []
+
+
+def test_weather_game_with_zero_snapshots_alerts_once_its_schedule_is_over():
+    assert summarize_weather_targets([("G", 0, 10, 0, 0, _FUTURE)], _NOW) == []
+    msgs = summarize_weather_targets([("G", 0, 10, 0, 0, _PAST)], _NOW)
+    assert len(msgs) == 1 and "no snapshot captured at all: G" in msgs[0]
+
+
+def test_weather_deliberately_skipped_game_does_not_alert():
+    assert summarize_weather_targets([("DOME", 0, 0, 10, 0, _PAST)], _NOW) == []
+
+
+def test_weather_no_forecast_data_is_reported():
+    msgs = summarize_weather_targets([("G", 9, 0, 0, 1, _FUTURE)], _NOW)
+    assert len(msgs) == 1 and "no data" in msgs[0]

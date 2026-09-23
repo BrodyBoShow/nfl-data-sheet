@@ -19,6 +19,8 @@ from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
+from pipeline.collectors.stadiums import StadiumsCollector
+from pipeline.collectors.weather import WeatherCollector
 from pipeline.core.base import Analyst, Collector
 
 _JOBS: dict[str, Collector | Analyst] = {
@@ -28,6 +30,8 @@ _JOBS: dict[str, Collector | Analyst] = {
     "availability": AvailabilityCollector(),
     "availability_impact": AvailabilityImpactAnalyst(),
     "odds": OddsCollector(),
+    "stadiums": StadiumsCollector(),
+    "weather": WeatherCollector(),
 }
 
 _USAGE = (

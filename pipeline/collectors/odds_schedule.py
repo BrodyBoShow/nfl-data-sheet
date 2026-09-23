@@ -20,6 +20,8 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
+from pipeline.core.schedule import kickoff_utc
+
 _ET = ZoneInfo("America/New_York")
 
 # h2h + spreads + totals, us region = 3 credits/call (docs/sources.md, sourced from The
@@ -81,8 +83,7 @@ def _et(d: dt.date, hour: int, minute: int) -> dt.datetime:
 
 
 def _kickoff(gameday: dt.date, gametime: str) -> dt.datetime:
-    hour, minute = (int(p) for p in gametime.split(":"))
-    return _et(gameday, hour, minute)
+    return kickoff_utc(gameday, gametime)
 
 
 def compute_week_targets(games: list[GameRow]) -> list[Target]:
@@ -127,9 +128,7 @@ def compute_week_targets(games: list[GameRow]) -> list[Target]:
     late_kickoffs = [k for k in sunday_kickoffs if k.astimezone(_ET).hour >= 15]
     if late_kickoffs:
         earliest_late = min(late_kickoffs)
-        targets.append(
-            Target("sun_late", earliest_late - _PRE_KICKOFF_WINDOW, earliest_late)
-        )
+        targets.append(Target("sun_late", earliest_late - _PRE_KICKOFF_WINDOW, earliest_late))
 
     for weekday, target_id in (("Thursday", "thu_pre_tnf"), ("Monday", "mon_pre_mnf")):
         kicks = by_weekday.get(weekday)
@@ -242,9 +241,7 @@ def credits_spent_this_week(conn: psycopg.Connection, season: int, week: int) ->
 def credits_spent_this_month(conn: psycopg.Connection, season: int, now: dt.datetime) -> int:
     """Sums across every week whose captured targets fall in `now`'s calendar month --
     mirrors the Odds API's actual free-tier reset, which is monthly, not per-week/season."""
-    month_start = now.astimezone(dt.UTC).replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0
-    )
+    month_start = now.astimezone(dt.UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     with conn.cursor() as cur:
         cur.execute(
             "SELECT COALESCE(SUM(credits_spent), 0) FROM odds_snapshot_targets "
