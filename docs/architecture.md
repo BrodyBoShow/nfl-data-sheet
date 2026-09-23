@@ -139,7 +139,7 @@ daily, **T3** weekly, **OD** on demand.
 | Live game | ESPN scoreboard/game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
 | Odds | The Odds API free tier + ESPN embedded lines | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Stadiums reference | `reference/stadiums.csv` (hand-reviewed; coords + field bearing from OpenStreetMap, roof type cited per row) | Hand-maintained | T3 | 4 | stadiums (coords, roof_type, field_bearing, known_names) |
-| Weather | Open-Meteo (no key); venue from the `stadiums` table | Open data | T1 | 4 | weather_snapshots (append-only), weather_snapshot_targets; 10 kickoff-relative snapshots per non-fixed-roof game (`weather_schedule.py`) |
+| Weather | Open-Meteo (no key); venue from the `stadiums` table | Open data | T1 | 4 | weather_snapshots (append-only), weather_snapshot_targets; 7 kickoff-relative snapshots per non-fixed-roof game (`weather_schedule.py`) |
 | Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, injury_presence |
 | Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 7 | news_items (deduped URL+hash), news_tags (rule-based) |
 
@@ -171,7 +171,7 @@ daily, **T3** weekly, **OD** on demand.
 | Thu | nflverse stat-correction re-pull; authoritative efficiency rebuild; practice report 2; pre-TNF odds; TNF live window |
 | Fri | Practice report 3 + game statuses; availability impact; morning odds; draft Sunday cards |
 | Sat | Status changes/elevations; morning odds; market movement; auditor pre-Sunday sweep |
-| Sun | Weather snapshots per game at T-48/36/24/18/12/6/4/2/1/0h from kickoff (all days, non-fixed-roof venues; see P4); odds 9:00/12:30/3:45/pre-SNF; lock projections pre-kickoff; live windows; grade finished games |
+| Sun | Weather snapshots per game at T-48/36/24/18/12h plus wide T-6h..T-2h and T-2h..kickoff+1h buckets (all days, non-fixed-roof venues; see P4); odds 9:00/12:30/3:45/pre-SNF; lock projections pre-kickoff; live windows; grade finished games |
 | Mon | nflverse Sunday data; usage/snap updates; pre-MNF odds; MNF live window |
 
 Live polling runs as **one looping job per game window**, not a new job every few

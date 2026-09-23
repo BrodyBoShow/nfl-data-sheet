@@ -1,5 +1,5 @@
 """
-Job: Compute each upcoming game's weather-snapshot target windows (10 per game, relative
+Job: Compute each upcoming game's weather-snapshot target windows (7 per game, relative
      to kickoff) and decide, from stored target state vs. absolute time, which targets are
      due right now and which have been missed. The scheduling half of the weather
      collector -- pipeline/collectors/weather.py does the venue guard and the fetch.
@@ -22,6 +22,9 @@ from pipeline.core.schedule import kickoff_utc
 # (target_id, hours before kickoff), earliest first. Weighted late (docs/phases/P4.md):
 # earlier snapshots mostly capture model noise. t48 is kept as the only forecast that
 # exists when Sunday cards are drafted Friday, but flagged (MODEL_REGIME_BREAK_TARGETS).
+# The late targets are two wide buckets (t6: T-6h..T-2h, t2: T-2h..kickoff+1h), not
+# t6/t4/t2/t1/t0: measured dispatcher ticks land 4.5-5.5h apart, so 1-hour windows were
+# mostly missed. Each row stores its true lead_hours, so a wide bucket loses nothing.
 LEADS: tuple[tuple[str, int], ...] = (
     ("t48", 48),
     ("t36", 36),
@@ -29,18 +32,16 @@ LEADS: tuple[tuple[str, int], ...] = (
     ("t18", 18),
     ("t12", 12),
     ("t6", 6),
-    ("t4", 4),
     ("t2", 2),
-    ("t1", 1),
-    ("t0", 0),
 )
 
 # t48 lands past HRRR's reach at US venues (GFS) while t36+ is HRRR -- the t48 -> t36
 # change is partly a model switch (docs/sources.md). Flagged by target for every venue.
 MODEL_REGIME_BREAK_TARGETS = frozenset({"t48"})
 
-# t0's window: kickoff to kickoff + this. There's no next-later target to close it.
-_T0_WINDOW = dt.timedelta(hours=1)
+# How long the last target's window (t2) stays open past kickoff. There's no next-later
+# target to close it.
+_PAST_KICKOFF_WINDOW = dt.timedelta(hours=1)
 
 # How far ahead ensure_targets looks for games: the earliest target's lead, plus slack so
 # a game enters the table a little before its t48 window opens.
@@ -75,10 +76,10 @@ class Decision:
 
 def compute_game_targets(game_id: str, kickoff: dt.datetime) -> list[Target]:
     """Pure. One target per lead in LEADS. Each window opens at kickoff - lead and closes
-    when the next-later target's window opens (t0: kickoff + _T0_WINDOW), so windows
+    when the next-later target's window opens (t2: kickoff + _PAST_KICKOFF_WINDOW), so windows
     never overlap and a late tick can never file a snapshot under the wrong lead."""
     opens = [kickoff - dt.timedelta(hours=hours) for _, hours in LEADS]
-    closes = opens[1:] + [kickoff + _T0_WINDOW]
+    closes = opens[1:] + [kickoff + _PAST_KICKOFF_WINDOW]
     return [
         Target(game_id, target_id, kickoff, open_at, close_at)
         for (target_id, _), open_at, close_at in zip(LEADS, opens, closes, strict=True)
@@ -104,7 +105,7 @@ def decide(pending: list[Target], now: dt.datetime) -> Decision:
 
 
 def upcoming_games(conn: psycopg.Connection, now: dt.datetime) -> list[GameRow]:
-    """Games whose kickoff falls in (now - t0 window, now + HORIZON]. Queried by ET
+    """Games whose kickoff falls in (now - _PAST_KICKOFF_WINDOW, now + HORIZON]. Queried by ET
     gameday range first (games has no kickoff timestamp column), then filtered exactly."""
     start_day = (now - dt.timedelta(days=1)).date()
     end_day = (now + HORIZON + dt.timedelta(days=1)).date()
@@ -118,13 +119,13 @@ def upcoming_games(conn: psycopg.Connection, now: dt.datetime) -> list[GameRow]:
     games = []
     for game_id, season, week, gameday, gametime, stadium_id in rows:
         kickoff = kickoff_utc(gameday, gametime)
-        if now - _T0_WINDOW < kickoff <= now + HORIZON:
+        if now - _PAST_KICKOFF_WINDOW < kickoff <= now + HORIZON:
             games.append(GameRow(game_id, season, week, kickoff, stadium_id))
     return games
 
 
 def ensure_targets(conn: psycopg.Connection, games: list[GameRow]) -> int:
-    """Inserts every game's 10 targets as 'pending'. On conflict, only a still-pending row
+    """Inserts every game's targets as 'pending'. On conflict, only a still-pending row
     has its kickoff/window refreshed -- a flexed game (kickoff moved after its targets
     were created) gets correct windows, while captured/missed/skipped rows are never
     touched. A game first seen after some of its windows already closed still gets those

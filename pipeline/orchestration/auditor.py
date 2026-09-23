@@ -179,11 +179,12 @@ def summarize_weather_targets(rows: list[tuple], now: datetime) -> list[str]:
     """Pure. `rows` are per-game aggregates over weather_snapshot_targets: (game_id,
     captured, missed_or_overdue, deliberate_skips, no_forecast_data, last_deadline).
 
-    Individual missed targets are expected and not alerted: windows near kickoff are an
-    hour wide and GitHub drops many scheduled ticks. The alert is a game that finished its
-    whole schedule (last_deadline passed) with zero snapshots and no deliberate skip
-    (fixed/closed roof, or a venue-guard skip -- which check_venue_problems already
-    reports) -- i.e. a game that simply got no weather. A no_forecast_data skip should
+    Individual missed targets are expected and not alerted: GitHub drops many
+    scheduled ticks (observed 4.5-5.5h apart), so even the wide late windows get
+    missed. The alert is a game that finished its whole schedule (last_deadline
+    passed) with zero snapshots and no deliberate skip (fixed/closed roof, or a
+    venue-guard skip -- which check_venue_problems already reports) -- i.e. a game
+    that simply got no weather. A no_forecast_data skip should
     never happen inside the 48h horizon, so any is reported too."""
     no_weather, no_data = [], []
     for game_id, captured, missed, deliberate, no_forecast, last_deadline in rows:
