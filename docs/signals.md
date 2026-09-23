@@ -513,6 +513,107 @@ no row and is logged in `agent_runs.meta.unrecognized_surface`.
 - No travel or timezone rows when the game's venue is unresolved (status 5). Rest rows are
   still written.
 
+### Market sector (Phase 4)
+
+Source: `pipeline/analysts/market.py`. Reads `games`, `odds_snapshot_targets`,
+`odds_consensus`, `odds_snapshots`. **Descriptive only**: there is no handle, ticket, or
+bet-split data, so no signal says who is betting or why a line moved. `league_pct` and
+`stability` are always null. **Added:** Phase 4, 2026-09-23.
+
+**Scope: per game, same window as Environment** (`now − 24h < kickoff ≤ now + 7d`).
+Rows carry the game's own `season`/`week` from `games`, never the odds tables'
+`season`/`week`, which pre-fix rows got wrong. Stale cleanup is scoped to the window's
+`game_id`s (see "Stale-signal cleanup").
+
+Two scopes, both with `game_id` set and `player_id` null:
+- **game** (`team` null): everything except the two team signals below.
+- **team** (`team` set, one row per side): `implied_team_total`, `win_prob_novig`.
+
+Spreads are signed **from the home team's view**, the same convention as
+`odds_snapshots.spread_home_point`: −3 = home favored by 3. Every capture is checked
+against `games.home_team`/`away_team` first.
+- If the odds tables have the teams the other way round (possible at a neutral site,
+  since `odds.py` matches either order), spreads are negated and moneyline sides are
+  swapped.
+- If neither order matches, the capture is skipped and listed in
+  `agent_runs.meta.orientation_mismatch`.
+
+`inputs_version`:
+- status 1: `odds_open@<as_of>,odds_current@<as_of>`
+- status 2–3: `odds_current@<as_of>`
+- status 4–5: `schedules@<nflverse timestamp>`
+
+#### Captures, open, and current
+- **A capture** is one poll's view of one game: an `odds_consensus` row plus that poll's
+  `odds_snapshots` rows. Only captures with `as_of < kickoff` count.
+- **Own-week vs. lookahead captures.** The Odds API returns every upcoming game, so a poll
+  fired for week N's targets also stores week N+1's lines. `odds_snapshots.target_id`
+  names the target of the week that *fired* the poll, not the game's week. A capture is
+  **own-week** when its `as_of` equals a `captured_at` in `odds_snapshot_targets` for the
+  game's `(season, week)`. `odds.py` writes `ctx.now` to both columns, so this is an
+  exact match. Any other capture is **lookahead**.
+- **Open** = the earliest own-week capture. Lookahead captures never become the open:
+  - their timing depends on the previous week's schedule;
+  - their book sets are thinner (live: 6 books on 09-18 vs. 9 on 09-22);
+  - all 5 pre-fix rows with a null `game_id` are lookahead rows.
+- **Current** = the latest capture of any kind, lookahead included.
+  `market_current_lead_hours` shows how old it is.
+
+#### `market_status` (game scope, emitted for every game in the window)
+| Value | Meaning | Rows emitted |
+|---|---|---|
+| 1 | movement available: an own-week open plus a later capture | everything |
+| 2 | one own-week capture: current *is* the open | current-state only. No open, move, velocity, crossing, or book-set rows: a single observation is not a move of 0. |
+| 3 | lines exist, but none are own-week (lookahead only, or every own-week poll so far missed this game) | current-state only |
+| 4 | awaiting: nothing captured, kickoff ahead | status + `market_own_week_captures` only |
+| 5 | missed: nothing captured, kickoff passed | status + `market_own_week_captures` only |
+
+The same **stale-status caveat** as `weather_status` applies. Analysts only run on ticks
+where some collector wrote rows, so a stored 4 for a game that has already kicked off
+means "computed before kickoff", not "still awaiting".
+
+#### `market_open_basis` (status 1 only)
+| Value | Meaning |
+|---|---|
+| 1 | the week's `tue_opener`, captured **on time**: before the Wednesday 09:00 ET after its window opened. This is today's window rule, applied to every row regardless of the stored `deadline` (pre-fix rows carry the old, much wider one). |
+| 2 | the week's `tue_opener`, captured **late** (only possible under the pre-fix window). Week 2 2026's fired Fri 09-18 23:14Z. It's labeled opener but isn't an opening line. |
+| 3 | no opener line for this game: the open comes from a later own-week target. Either the opener was missed, or its poll didn't resolve this game. |
+
+#### Current-state signals (status 1–3)
+| Signal | Formula | `sample_n` |
+|---|---|---|
+| `spread_home_current` / `total_current` | `odds_consensus` median at current | book count |
+| `market_current_lead_hours` | kickoff − current `as_of`, hours | |
+| `spread_book_range` / `total_book_range` | `spread_point_range` / `total_point_range` at current (max − min across books). **No row** when null (< 2 books), never 0. | book count |
+| `spread_key_straddle` | 1 if, for any key k in {±3, ±7, ±10, ±14}, the current per-book spreads fall into at least two of {below k, exactly k, beyond k} (e.g. books at 2.5 and 3), else 0. The books don't agree which side of a key the line is on. No row with < 2 books. | books with a spread |
+| `implied_team_total` (team) | home = total/2 − home_spread/2, away = total/2 + home_spread/2, from the current consensus medians. Spread and total medians may come from slightly different book sets. | min(spread, total book count) |
+| `win_prob_novig` (team) | For each book with **both** moneyline prices: raw p = 100/(o+100) if o > 0, else −o/(−o+100). Vig removed proportionally: p_home = r_home/(r_home + r_away). Median across books; away = 1 − home, so the two sides sum to 1. Books missing a side are skipped; zero usable books → no row. | books used |
+| `market_own_week_captures` | own-week pre-kickoff captures of this game (emitted for every status) | |
+
+Proportional de-vigging ignores the favorite-longshot bias. Shin/power methods and a
+hold (overround) signal are not built.
+
+#### Movement signals (status 1 only)
+| Signal | Formula | `sample_n` |
+|---|---|---|
+| `spread_home_open` / `total_open` | consensus median at open | book count |
+| `market_open_lead_hours` | kickoff − open `as_of`, hours | |
+| `market_open_basis` | table above | |
+| `spread_home_move` / `total_move` | current − open | min(open, current) book count |
+| `spread_move_per_day` / `total_move_per_day` | move ÷ days between open and current | same |
+| `spread_key_crossings` | number of keys k in {±3, ±7, ±10, ±14} with `(open − k)(current − k) < 0`: the consensus passed **strictly through** k. Landing on a key or leaving from one is not a crossing. Quarter-point medians count (2.25 → 3.25 crosses 3), and a favorite flip −3.5 → 3.5 crosses two. | |
+| `spread_book_set_changed` / `total_book_set_changed` | 1 if the set of bookmakers carrying that market (non-null point in `odds_snapshots`) differs between open and current, else 0 | |
+| `spread_book_count_open` / `_current`, `total_book_count_open` / `_current` | the consensus book count at each end | |
+
+**Read a move together with its `*_book_set_changed`.** A consensus median can move
+because books joined or left, not because any book moved: three books joining at a
+different number can produce a 1.5-point "move" by themselves. At 1, the move may be
+composition, not market movement. A matched-books-only move is not built.
+
+**Velocity is a coarse average** over at most ~6 captures a week. It is not an
+instantaneous rate, and it says nothing about why the line moved. A last-leg rate isn't
+built. Key numbers for totals aren't built either.
+
 ### Stale-signal cleanup
 
 `Analyst.run()` itself (`pipeline/core/base.py`) deletes every signal name an analyst
@@ -540,4 +641,5 @@ dispatcher weeks (see "Environment sector"). A `ctx.season`/`ctx.week` delete wo
 next week's games and wipe finished games' frozen rows. So it overrides
 `_delete_stale_signals` to delete `sector = 'environment' AND signal = ANY(<its
 signal_names>) AND game_id = ANY(<this run's window game_ids>)`. That is still limited to
-its own sector and signal names, so the registry test's guarantee holds.
+its own sector and signal names, so the registry test's guarantee holds. **`MarketAnalyst`
+does the same**, for the same reason (same per-game window).

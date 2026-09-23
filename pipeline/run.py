@@ -16,6 +16,7 @@ import nflreadpy as nfl
 from pipeline.analysts.availability_impact import AvailabilityImpactAnalyst
 from pipeline.analysts.efficiency import EfficiencyAnalyst
 from pipeline.analysts.environment import EnvironmentAnalyst
+from pipeline.analysts.market import MarketAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
@@ -34,6 +35,7 @@ _JOBS: dict[str, Collector | Analyst] = {
     "stadiums": StadiumsCollector(),
     "weather": WeatherCollector(),
     "environment": EnvironmentAnalyst(),
+    "market": MarketAnalyst(),
 }
 
 _USAGE = (
