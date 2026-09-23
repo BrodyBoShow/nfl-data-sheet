@@ -7,6 +7,7 @@ from pipeline.orchestration.auditor import (
     check_availability_outage,
     check_freshness,
     check_odds_targets,
+    summarize_projection_locks,
     summarize_venue_problems,
     summarize_weather_targets,
 )
@@ -371,3 +372,31 @@ def test_weather_deliberately_skipped_game_does_not_alert():
 def test_weather_no_forecast_data_is_reported():
     msgs = summarize_weather_targets([("G", 9, 0, 0, 1, _FUTURE)], _NOW)
     assert len(msgs) == 1 and "no data" in msgs[0]
+
+
+# --- projection locks ---------------------------------------------------------------------
+# rows: (game_id, kickoff, locked, projection_status | None)
+
+
+def test_locked_games_do_not_alert():
+    assert summarize_projection_locks([("G", _PAST, True, 1)], _NOW) == []
+
+
+def test_unlocked_game_that_kicked_off_alerts_with_its_card_status():
+    msgs = summarize_projection_locks(
+        [("A", _PAST, False, 2), ("B", _PAST, False, None), ("C", _PAST, True, 1)], _NOW
+    )
+    assert len(msgs) == 1
+    assert "2 game(s)" in msgs[0]
+    assert "A (status 2)" in msgs[0] and "B (status no card)" in msgs[0]
+    assert "C" not in msgs[0].split("--")[1]
+
+
+def test_unlocked_future_game_does_not_alert_yet():
+    assert summarize_projection_locks([("G", _FUTURE, False, 1)], _NOW) == []
+
+
+def test_kickoff_exactly_now_counts_and_older_than_24h_does_not():
+    assert summarize_projection_locks([("G", _NOW, False, 1)], _NOW) != []
+    old = _NOW - timedelta(hours=24)
+    assert summarize_projection_locks([("G", old, False, 1)], _NOW) == []

@@ -54,7 +54,7 @@ jobs:
         run: |
           if [ "${{ steps.dispatcher.outcome }}" = "failure" ]; then
             title="Dispatcher run failed ($(date -u +%Y-%m-%dT%H:%MZ))"
-            body="A collector or analyst run failed. See the workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            body="A collector, analyst, or synthesizer run failed. See the workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           else
             title="Auditor alert ($(date -u +%Y-%m-%dT%H:%MZ))"
             body="The auditor flagged a new issue (see Discord/logs for the message). Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

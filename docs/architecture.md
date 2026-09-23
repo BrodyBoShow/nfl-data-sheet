@@ -91,7 +91,12 @@ flowchart TB
     `load_ff_playerids()` lags current-season rookies/UDFAs (see `docs/sources.md`).
   - **Auditor**: after each run, checks freshness vs. expectation, row-count anomalies,
     schema drift, null spikes. Alerts via GitHub issue or Discord webhook; exposes
-    per-domain staleness status for the UI.
+    per-domain staleness status for the UI. Since P5 it also alerts on any game that
+    kicked off in the last 24h without a `projection_log` lock (`check_projection_locks`),
+    naming the card's last `projection_status` as the likely reason.
+  - **Dispatcher tick order**: collectors, then analysts (only if a collector wrote
+    rows), then synthesizers on **every** tick (locks are time-triggered, so they can't
+    wait on a collector write), then the auditor.
   - **Grader**: grades every locked projection after the game, tracks closing-line value
     by signal and sector, writes calibration used by the efficiency analyst and
     synthesizer.

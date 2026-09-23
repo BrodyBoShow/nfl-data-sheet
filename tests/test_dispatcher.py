@@ -87,6 +87,34 @@ def test_run_tick_result_reports_an_analyst_failure():
     assert any(r.status == "failed" for r in results)
 
 
+def test_synthesizer_runs_on_a_quiet_tick():
+    """Locks are time-triggered, so the synthesizer runs even when no collector wrote
+    rows and the analysts were skipped."""
+    collector = _FakeJob("collector", rows_written=0)
+    analyst = _FakeJob("analyst", rows_written=0)
+    synthesizer = _FakeJob("synthesizer", rows_written=0)
+
+    results = _run_tick([collector], [analyst], season=2026, week=2, synthesizers=[synthesizer])
+
+    assert analyst.run_calls == 0
+    assert synthesizer.run_calls == 1
+    assert [r.name for r in results] == ["collector", "synthesizer"]
+
+
+def test_synthesizer_runs_after_analysts():
+    order: list[str] = []
+
+    class _Ordered(_FakeJob):
+        def run(self, *, season: int, week: int) -> RunResult:
+            order.append(self.name)
+            return super().run(season=season, week=week)
+
+    _run_tick([_Ordered("collector", 3)], [_Ordered("analyst", 0)], season=2026, week=2,
+              synthesizers=[_Ordered("synthesizer", 0)])
+
+    assert order == ["collector", "analyst", "synthesizer"]
+
+
 def test_set_github_output_is_a_noop_without_the_env_var(monkeypatch):
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     _set_github_output("alerted", "true")  # must not raise

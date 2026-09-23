@@ -1,6 +1,6 @@
 """
 Job: Entry point for the GitHub Actions cron -- runs every registered collector, then
-     every registered analyst, then the auditor.
+     every registered analyst, then every synthesizer, then the auditor.
 Reads: nothing directly (delegates to each job's should_run/inputs_ready)
 Writes: nothing directly (delegates to each job)
 Tier: T0
@@ -50,8 +50,9 @@ from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
 from pipeline.collectors.stadiums import StadiumsCollector
 from pipeline.collectors.weather import WeatherCollector
-from pipeline.core.base import Analyst, Collector, RunResult
+from pipeline.core.base import Analyst, Collector, RunResult, Synthesizer
 from pipeline.orchestration.auditor import FreshnessCheck, audit_and_alert
+from pipeline.synthesis.synthesizer import MatchupSynthesizer
 
 
 class _RunnableJob(Protocol):
@@ -77,6 +78,10 @@ _ANALYSTS: list[Analyst] = [
     EnvironmentAnalyst(),
     MarketAnalyst(),
 ]
+# After the analysts, on every tick -- see _run_tick.
+_SYNTHESIZERS: list[Synthesizer] = [
+    MatchupSynthesizer(),
+]
 
 _FRESHNESS_CHECKS = [
     FreshnessCheck(agent="id_spine", tier="T2"),
@@ -90,6 +95,9 @@ _FRESHNESS_CHECKS = [
     # Same trigger and window as environment. It recomputes on any collector's write, not
     # only odds', so its runs aren't tied to odds_schedule's sparse targets.
     FreshnessCheck(agent="market", tier="T1"),
+    # Runs every tick (not gated on collector writes), so T1's 6h catches a broken run
+    # well before a missed lock would. Missed locks themselves are check_projection_locks.
+    FreshnessCheck(agent="synthesizer", tier="T1"),
     # odds deliberately has no FreshnessCheck here -- check_freshness/_TIER_MAX_AGE
     # assumes a roughly regular per-tier cadence (T1 = flag past 6h since last success),
     # but odds_schedule.py's targets are legitimately >6h apart by design (e.g.
@@ -114,14 +122,19 @@ def _run_tick(
     *,
     season: int,
     week: int,
+    synthesizers: Sequence[_RunnableJob] = (),
 ) -> list[RunResult]:
     """Run every collector, then every analyst -- but only if at least one collector
-    wrote new/changed rows this tick (see module docstring for why). Returns every
-    RunResult from this tick (collectors always, analysts only if they ran), so the
-    caller can tell whether any job actually failed."""
+    wrote new/changed rows this tick (see module docstring for why) -- then every
+    synthesizer, on every tick. Synthesizers aren't gated on collector writes: a
+    projection lock is time-triggered (kickoff - 6h), and gating it on "a collector
+    wrote rows" would miss locks on quiet ticks. It's cheap, since cards are hash-diffed.
+    Returns every RunResult from this tick, so the caller can tell whether any job
+    actually failed."""
     results = [c.run(season=season, week=week) for c in collectors]
     if any(result.rows_written > 0 for result in results):
         results += [a.run(season=season, week=week) for a in analysts]
+    results += [s.run(season=season, week=week) for s in synthesizers]
     return results
 
 
@@ -141,7 +154,9 @@ def main() -> int:
     season = nfl.get_current_season()
     week = nfl.get_current_week()
 
-    results = _run_tick(_COLLECTORS, _ANALYSTS, season=season, week=week)
+    results = _run_tick(
+        _COLLECTORS, _ANALYSTS, season=season, week=week, synthesizers=_SYNTHESIZERS
+    )
     any_failed = any(result.status == "failed" for result in results)
 
     alerted = audit_and_alert(

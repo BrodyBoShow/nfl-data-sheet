@@ -19,7 +19,7 @@ import psycopg
 
 from pipeline.core.config import get_settings
 from pipeline.core.db import get_connection
-from pipeline.core.schedule import to_gameday
+from pipeline.core.schedule import kickoff_utc, to_gameday
 
 # Max allowed staleness before flagging, matching docs/architecture.md's freshness tiers.
 _TIER_MAX_AGE = {
@@ -220,6 +220,49 @@ def check_weather_targets(
         return summarize_weather_targets(cur.fetchall(), now)
 
 
+_LOCK_CHECK_LOOKBACK = timedelta(hours=24)
+
+
+def summarize_projection_locks(rows: list[tuple], now: datetime) -> list[str]:
+    """Pure. `rows` are (game_id, kickoff, locked, projection_status | None) for games
+    near now. Alerts on any game with `now - 24h < kickoff <= now` and no projection_log
+    row: it kicked off without a locked pre-kickoff claim. The card's last
+    projection_status is included as the likely reason (2 awaiting efficiency, 3 an
+    input null, 4 model stale; none = no card was ever written). At most one message."""
+    missed = sorted(
+        f"{game_id} (status {status if status is not None else 'no card'})"
+        for game_id, kickoff, locked, status in rows
+        if now - _LOCK_CHECK_LOOKBACK < kickoff <= now and not locked
+    )
+    if not missed:
+        return []
+    return [
+        f"projections: {len(missed)} game(s) kicked off in the last 24h without a locked "
+        f"projection -- {', '.join(missed)}"
+    ]
+
+
+def check_projection_locks(conn: psycopg.Connection, now: datetime) -> list[str]:
+    """Every game that kicked off in the last 24h must have a projection_log row. The
+    synthesizer locks at kickoff - 6h on the first tick it gets; ticks land ~5h apart,
+    so a missed lock usually means the synthesizer failed or couldn't project."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT g.game_id, g.gameday, g.gametime, p.game_id IS NOT NULL, "
+            "m.projection_status "
+            "FROM games g "
+            "LEFT JOIN projection_log p ON p.game_id = g.game_id "
+            "LEFT JOIN matchup_cards m ON m.game_id = g.game_id "
+            "WHERE g.gameday BETWEEN %s AND %s AND g.gametime IS NOT NULL",
+            (to_gameday(now - _LOCK_CHECK_LOOKBACK - timedelta(days=1)), to_gameday(now)),
+        )
+        rows = [
+            (game_id, kickoff_utc(gameday, gametime), locked, status)
+            for game_id, gameday, gametime, locked, status in cur.fetchall()
+        ]
+    return summarize_projection_locks(rows, now)
+
+
 def check_availability_outage(conn: psycopg.Connection) -> dict[str, str]:
     """Reads the most recent availability collector run's meta for an outage_guard entry
     -- pipeline/collectors/availability.py skips disappearance detection and records this
@@ -346,6 +389,9 @@ def audit_and_alert(
     schedule-aware target check (check_weather_targets) -- neither fits a generic
     elapsed-time FreshnessCheck.
 
+    Every run also checks projection locks (check_projection_locks): any game that
+    kicked off in the last 24h without a projection_log row.
+
     Alerts are deduped per check (see `_send_if_new`) so a persistent condition posts
     once, not on every dispatcher tick. Returns True if a *new* alert was sent this run
     (for the dispatcher to decide whether to also file a GitHub issue) -- this is
@@ -391,6 +437,13 @@ def audit_and_alert(
             else:
                 # summarize_weather_targets returns at most one message.
                 alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
+
+        # Rolling 24h window, so one key: the message changes as games enter/leave it.
+        messages = check_projection_locks(conn, now)
+        if not messages:
+            _clear_alert(conn, "projection_locks")
+        else:
+            alerted = _send_if_new(conn, "projection_locks", messages[0], now) or alerted
 
         outages = check_availability_outage(conn)
         for source in ("espn", "sleeper"):
