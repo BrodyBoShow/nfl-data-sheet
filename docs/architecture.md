@@ -164,7 +164,7 @@ daily, **T3** weekly, **OD** on demand.
 
 | Piece | Phase | Job |
 |---|---|---|
-| Matchup synthesizer | 5 | Adjusted efficiency → points regression, backtested vs. historical closing lines. |
+| Matchup synthesizer | 5 | Adjusted efficiency → points regression, backtested vs. historical closing lines (`docs/backtest_report.md`). **T1.** Per game, same −24h..+7d window as Environment and Market. Writes one `matchup_cards` row per game until kickoff, then the card freezes. Locks the projection into `projection_log` on the first run within 6h of kickoff; a DB trigger makes that row immutable. Edges are vs. Market's current consensus, flagged rather than adjusted; `edge_validated` is false (not shown to beat the close). Model file: `pipeline/synthesis/model_coefficients.json`, refit manually. |
 | Data sheet web app | 6 | Next.js + TypeScript on Vercel. |
 | Matchup narrator | 8, optional | Cached prose per game per day, numbers-locked to the card. |
 

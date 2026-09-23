@@ -344,6 +344,20 @@ new numbers.
 - The mean per-game change is 0.07 points on the spread.
 - Per the pre-registered rule, no walk-forward refit of r is needed.
 
+**Stability barely moves the error band, and that's a finding.**
+- The out-of-sample RMS margin residual is 13.26 / 13.17 / 13.48 across the low / mid /
+  high stability buckets.
+- The closing line's own margin RMSE is 12.66.
+- Total residuals are 13.17 / 13.36 / 14.37.
+- Stability changes how much the projection's *inputs* can be trusted. It doesn't change
+  how widely NFL results scatter around a projection, whether the model's or the
+  market's.
+- So the matchup card doesn't show a per-game ± band as if it were model uncertainty. It
+  states outcome noise once, as about 13 points for every game.
+- The bucket values stored with each lock (`projection_log.spread_sd`/`total_sd`) come
+  from these same residuals, so the coverage above is in-sample by construction. The
+  grader will measure real out-of-sample coverage on live locked games.
+
 **Follow-up for the efficiency blend (not acted on here).**
 - β_def is 28.0 on weeks 1–4 vs. 19.6 on weeks 5+. β_off shows the same direction,
   smaller (39.0 vs. 36.2).

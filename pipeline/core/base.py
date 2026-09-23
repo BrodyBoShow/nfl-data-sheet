@@ -1,6 +1,6 @@
 """
-Job: Define the Collector and Analyst base classes every pipeline job extends,
-     and the shared run-and-log machinery both use.
+Job: Define the Collector, Analyst and Synthesizer base classes every pipeline job
+     extends, and the shared run-and-log machinery they use.
 Reads: nothing itself
 Writes: agent_runs (via run())
 Tier: n/a
@@ -237,4 +237,41 @@ class Analyst(ABC):
             season_type=season_type,
             is_ready=(lambda ctx: True) if force else self.inputs_ready,
             do_work=do_work,
+        )
+
+
+class Synthesizer(ABC):
+    """L3: reads `signals`, plus the spine's `games` table for identity and schedule
+    only (CLAUDE.md layer rules), and writes its own output tables, never `signals`.
+
+    Contract: inputs_ready(ctx) -> bool | str → compute(ctx) -> Any →
+    write(ctx, computed) -> WorkResult. Runs through the same `_execute` as collectors
+    and analysts, so `agent_runs` logging and failure-swallowing are identical. There is
+    no signals stale-row delete, because a synthesizer owns no signals.
+    """
+
+    name: str
+
+    @abstractmethod
+    def inputs_ready(self, ctx: RunContext) -> bool | str:
+        """`False` skips as `skipped_fresh`; a string skips as that exact status."""
+
+    @abstractmethod
+    def compute(self, ctx: RunContext) -> Any:
+        """Read via ctx.conn and build everything to write. No writes."""
+
+    @abstractmethod
+    def write(self, ctx: RunContext, computed: Any) -> WorkResult:
+        """Write via ctx.conn. Returns WorkResult(rows_written, meta)."""
+
+    def run(
+        self, *, season: int, week: int, season_type: str = "REG", force: bool = False
+    ) -> RunResult:
+        return _execute(
+            name=self.name,
+            season=season,
+            week=week,
+            season_type=season_type,
+            is_ready=(lambda ctx: True) if force else self.inputs_ready,
+            do_work=lambda ctx: self.write(ctx, self.compute(ctx)),
         )

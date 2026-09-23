@@ -590,6 +590,25 @@ means "computed before kickoff", not "still awaiting".
 | `win_prob_novig` (team) | For each book with **both** moneyline prices: raw p = 100/(o+100) if o > 0, else −o/(−o+100). Vig removed proportionally: p_home = r_home/(r_home + r_away). Median across books; away = 1 − home, so the two sides sum to 1. Books missing a side are skipped; zero usable books → no row. | books used |
 | `market_own_week_captures` | own-week pre-kickoff captures of this game (emitted for every status) | |
 
+**`spread_key_straddle` is common, not notable** (measured 2026-09-23 with
+`scripts/inspect_straddle_rate.py`, which calls the analyst's own `key_straddle()` on
+every stored capture):
+
+| Poll (UTC) | Captures | Straddle | Rate |
+|---|---|---|---|
+| 2026-09-18 23:14 | 24 | 7 | 29% |
+| 2026-09-21 22:20 | 17 | 6 | 35% |
+| 2026-09-22 16:03 | 16 | 8 | 50% |
+| **All 2026** | 57 | 21 | 37% |
+
+- The median book range is 0.5 at every poll. Books usually split by a half point, so
+  any line sitting near 3, 7, 10, or 14 straddles.
+- It fires on roughly a third to a half of games, not most. But it's too frequent to
+  read as an alert.
+- The matchup card shows it as context, with a note saying it's common.
+- This is only three polls and one week of own-week captures. Re-run the script after a
+  few more weeks and update this table.
+
 Proportional de-vigging ignores the favorite-longshot bias. Shin/power methods and a
 hold (overround) signal are not built.
 

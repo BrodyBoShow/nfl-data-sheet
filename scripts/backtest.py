@@ -63,6 +63,7 @@ from pipeline.core.base import RunContext  # noqa: E402
 from pipeline.core.config import get_settings  # noqa: E402
 from pipeline.core.db import get_connection  # noqa: E402
 from pipeline.synthesis.model import (  # noqa: E402
+    COEFFICIENTS_PATH,
     HFA_ONLY_SPEC,
     MODEL_VERSION,
     PRIMARY_SPEC,
@@ -80,7 +81,6 @@ from scripts.estimate_reliability import (  # noqa: E402
     _fetch_season_team_week,
     estimate_reliability,
 )
-from scripts.fit_projection_model import COEFFICIENTS_PATH  # noqa: E402
 from scripts.projection_history import (  # noqa: E402
     BOOTSTRAP_N,
     BOOTSTRAP_SEED,

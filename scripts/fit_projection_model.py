@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.core.db import get_connection  # noqa: E402
 from pipeline.synthesis.model import (  # noqa: E402
+    COEFFICIENTS_PATH,
     MODEL_VERSION,
     PRIMARY_SPEC,
     build_game_frame,
@@ -56,10 +57,6 @@ from scripts.projection_history import (  # noqa: E402
     check_fit_seasons,
     load_efficiency_signals,
     load_games,
-)
-
-COEFFICIENTS_PATH = (
-    Path(__file__).resolve().parent.parent / "pipeline" / "synthesis" / "model_coefficients.json"
 )
 
 

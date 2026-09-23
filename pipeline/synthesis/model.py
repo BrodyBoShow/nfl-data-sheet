@@ -35,6 +35,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -321,6 +322,57 @@ def walk_forward(
             )
         )
     return pl.concat(parts), fits
+
+
+# --------------------------------------------------------------------------------------
+# The committed coefficients file (written by scripts/fit_projection_model.py)
+# --------------------------------------------------------------------------------------
+
+COEFFICIENTS_PATH = Path(__file__).resolve().parent / "model_coefficients.json"
+
+
+@dataclass(frozen=True)
+class BucketCalibration:
+    margin_sd: float | None
+    total_sd: float | None
+    edge_validated_spread: bool
+    edge_validated_total: bool
+
+
+@dataclass(frozen=True)
+class ModelFile:
+    model_version: str
+    spec_name: str
+    bases: tuple[str, ...]
+    fit_seasons: tuple[int, ...]
+    efficiency_fingerprint: str
+    coef: dict[str, float]
+    stability_cutpoints: tuple[float, float]
+    buckets: dict[str, BucketCalibration]
+
+
+def load_model_file(path: Path = COEFFICIENTS_PATH) -> ModelFile:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    cal = data["calibration"]
+    c1, c2 = cal["stability_cutpoints"]
+    return ModelFile(
+        model_version=data["model_version"],
+        spec_name=data["spec"]["name"],
+        bases=tuple(data["spec"]["bases"]),
+        fit_seasons=tuple(data["fit_seasons"]),
+        efficiency_fingerprint=data["efficiency_fingerprint"],
+        coef={name: float(c["value"]) for name, c in data["coefficients"].items()},
+        stability_cutpoints=(float(c1), float(c2)),
+        buckets={
+            name: BucketCalibration(
+                margin_sd=b["margin_sd"],
+                total_sd=b["total_sd"],
+                edge_validated_spread=bool(b["edge_validation"]["spread"]["validated"]),
+                edge_validated_total=bool(b["edge_validation"]["total"]["validated"]),
+            )
+            for name, b in cal["buckets"].items()
+        },
+    )
 
 
 # --------------------------------------------------------------------------------------
