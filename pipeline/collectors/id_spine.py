@@ -74,6 +74,10 @@ _GAME_COLS = [
     "div_game",
     "stadium_id",
     "stadium",
+    # 'Home' or 'Neutral' (verified live 2026-09-23: 42 Neutral games 2019-2025 --
+    # international REG games, Super Bowls, one WC). The only sourced neutral-site flag;
+    # the synthesizer (P5) uses it to drop the home-field term.
+    "location",
     "spread_line",
     "total_line",
     "old_game_id",

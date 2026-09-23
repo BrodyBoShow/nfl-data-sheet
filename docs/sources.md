@@ -78,6 +78,22 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `temp`, `wind`, `away_qb_id`/`home_qb_id`, `stadium_id`. Also carries a **game-level**
     ID crosswalk: `old_game_id`, `gsis`, `nfl_detail_id`, `pfr`, `pff`, `espn`, `ftn`.
     `seasons` accepts `int | list[int] | bool | None`; `True` (default) loads all seasons.
+  - **`location`** (verified live 2026-09-23, P5): `'Home'` or `'Neutral'`, no other
+    values. 42 `Neutral` games in 2019–2025: 34 international REG games, all 7 Super
+    Bowls, and 1 WC (2024). A "home" team's London/Munich game is `Neutral`, e.g.
+    `2019_09_HOU_JAX`. Stored as `games.location` (migration `0022`). This is the only
+    sourced neutral-site flag; the P5 synthesizer uses it to drop home-field advantage.
+    The fixture `nflreadpy_schedules_sample.parquet` already has it (7 Home, 1 Neutral).
+  - **`spread_line` is home-positive** (verified 2026-09-23 against stored `games`):
+    corr(`spread_line`, `result`) is +0.39 to +0.51 in every season 2018–2025, where
+    `result = home_score − away_score`. So `spread_line = +3` means the **home** team is
+    favored by 3. That is the **opposite sign** of `odds_snapshots.spread_home_point`/the
+    Market sector's `spread_home_*` (−3 = home favored). Negate it before comparing.
+  - **Retired codes stay raw in `games`:** 2018–19 Raiders games use `OAK` in
+    `games.home_team`/`away_team` (verified 2026-09-23), while `team_week`/`signals` hold
+    `LV` (the nflverse bulk collector normalizes, id_spine doesn't). Any join from `games`
+    to team-keyed tables must go through `normalize_team_abbr`
+    (`pipeline/core/team_aliases.py`).
   - `load_teams()` → 36 rows × 16 cols (32 current teams + historical relocated
     franchises, e.g. OAK/LV). No season param — always the full table. Key: `team_abbr`,
     `team_name`, `team_conf`, `team_division`, plus colors/logos (not needed by the spine).

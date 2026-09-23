@@ -107,8 +107,14 @@ flowchart TB
   more refined shares become available too; whether Availability impact is revisited to
   consume them is an open question for that phase, not decided here.
 
-- **L3 Synthesis and sheet** reads `signals` and never calls external sources. The web
-  app reads only our database.
+- **L3 Synthesis and sheet** reads `signals`, plus the spine's `games` table for identity
+  and schedule only (`game_id, season, week, home_team, away_team, gameday, gametime,
+  location`), and never calls external sources. The web app reads only our database.
+  - **Why `games` is allowed (amended 2026-09-23, P5):** the spine is canonical keys owned
+    by L0, not staged source data. A card has to know which teams play, where, and when
+    it kicks off (projections lock pre-kickoff), and no signal carries that. Scores,
+    lines, and results stay off-limits at runtime. Only the offline model-fitting and
+    backtest scripts (`scripts/`) read them, on completed historical seasons.
   - **Matchup synthesizer**: joins signals per game, projects spread/total, compares to
     market, writes edge cards, locks projections pre-kickoff into `projection_log`
     (immutable).

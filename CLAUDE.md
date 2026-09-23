@@ -16,7 +16,14 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
 - **L1 collectors** (`pipeline/collectors/`) fetch, validate, store. Never compute metrics.
 - **L2 analysts** (`pipeline/analysts/`) read only stored tables, never external sources.
   Write only to `signals`.
-- **L3** (`pipeline/synthesis/`, `/web`) reads `signals` only, never calls external sources.
+- **L3** (`pipeline/synthesis/`, `/web`) reads `signals`, plus the spine's `games` table
+  for **identity and schedule only**: `game_id, season, week, home_team, away_team,
+  gameday, gametime, location`. Never scores, lines, results, or any other `games` column
+  at runtime. Reason: the spine is canonical keys owned by L0, not staged source data. A
+  matchup card has to know which teams play, where, and when it kicks off (to lock
+  pre-kickoff), and no signal carries that. Historical scores and lines are read only by
+  the offline model-fitting/backtest scripts in `scripts/`, never by a scheduled L3 job.
+  L3 never calls external sources.
 - **L0** (`pipeline/orchestration/`) decides what runs, owns canonical keys, detects
   breakage, grades projections.
 

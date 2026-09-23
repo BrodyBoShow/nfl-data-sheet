@@ -4,6 +4,7 @@ import polars as pl
 import pytest
 
 from pipeline.collectors.id_spine import (
+    _GAME_COLS,
     _RETIRED_TEAM_CODES,
     IdSpineCollector,
     _build_sleeper_crosswalk_updates,
@@ -25,6 +26,14 @@ def test_validate_derives_season_type():
     validated = IdSpineCollector().validate(_load_raw())
     season_types = set(validated["schedules"]["season_type"].to_list())
     assert season_types <= {"REG", "POST"}
+
+
+def test_game_location_is_stored_and_matches_the_check_constraint():
+    # games.location CHECK (migration 0022) allows only 'Home'/'Neutral'. The fixture has
+    # a real Neutral row, so this also proves the column survives the _GAME_COLS select.
+    validated = IdSpineCollector().validate(_load_raw())
+    games = validated["schedules"].select(_GAME_COLS)
+    assert set(games["location"].drop_nulls().to_list()) == {"Home", "Neutral"}
 
 
 def test_validate_drops_null_keys():
