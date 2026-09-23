@@ -1,0 +1,134 @@
+{
+  "model_version": "p5-v1",
+  "spec": {
+    "name": "epa_per_play",
+    "bases": [
+      "epa_per_play"
+    ]
+  },
+  "fit_seasons": [
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "fitted_on": "2026-09-23",
+  "efficiency_fingerprint": "bdb237411fd8a9e3",
+  "n_games": 1871,
+  "n_team_rows": 3742,
+  "games_dropped_incomplete_features": 0,
+  "coefficients": {
+    "alpha": {
+      "value": 22.864693402634376,
+      "se": 0.15739532369935358
+    },
+    "beta_off:epa_per_play": {
+      "value": 36.587553582615044,
+      "se": 2.28299715334502
+    },
+    "beta_def:epa_per_play": {
+      "value": 20.701592603324052,
+      "se": 2.9194406796787504
+    },
+    "gamma": {
+      "value": 1.4323334801307774,
+      "se": 0.31230573078813745
+    }
+  },
+  "resid_sd_team_points": 9.536297794966167,
+  "calibration": {
+    "test_seasons": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "n_games": 1615,
+    "stability_cutpoints": [
+      0.662832,
+      0.793378
+    ],
+    "buckets": {
+      "low": {
+        "n_games": 535,
+        "stability_range": [
+          0.2262,
+          0.662096
+        ],
+        "margin_sd": 13.256791601257936,
+        "total_sd": 13.17124271316772,
+        "edge_validation": {
+          "spread": {
+            "n": 535,
+            "corr": -0.023830891214239654,
+            "ci_low": -0.10787833376289006,
+            "ci_high": 0.05640117904997831,
+            "validated": false
+          },
+          "total": {
+            "n": 535,
+            "corr": -0.0010041057183242602,
+            "ci_low": -0.0814236191098069,
+            "ci_high": 0.08119942004643665,
+            "validated": false
+          }
+        }
+      },
+      "mid": {
+        "n_games": 541,
+        "stability_range": [
+          0.662832,
+          0.793102
+        ],
+        "margin_sd": 13.172327172113874,
+        "total_sd": 13.364519412398609,
+        "edge_validation": {
+          "spread": {
+            "n": 541,
+            "corr": 0.01548768372439522,
+            "ci_low": -0.07113555724315228,
+            "ci_high": 0.10213081768115563,
+            "validated": false
+          },
+          "total": {
+            "n": 541,
+            "corr": -0.086155360654537,
+            "ci_low": -0.16863065254683604,
+            "ci_high": 0.000802497195569592,
+            "validated": false
+          }
+        }
+      },
+      "high": {
+        "n_games": 539,
+        "stability_range": [
+          0.793378,
+          0.863648
+        ],
+        "margin_sd": 13.47998692700242,
+        "total_sd": 14.370490307736308,
+        "edge_validation": {
+          "spread": {
+            "n": 539,
+            "corr": -0.08266749706349485,
+            "ci_low": -0.1677180396336994,
+            "ci_high": -0.004121243225171203,
+            "validated": false
+          },
+          "total": {
+            "n": 539,
+            "corr": -0.009786427363707408,
+            "ci_low": -0.08959256909482313,
+            "ci_high": 0.07118248112294272,
+            "validated": false
+          }
+        }
+      }
+    }
+  }
+}

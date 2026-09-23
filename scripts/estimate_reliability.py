@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import polars as pl
 import psycopg
@@ -78,16 +79,23 @@ def _pearson(a: list[float], b: list[float]) -> float | None:
     return None if result is None else float(result)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--seasons", default="2018-2025")
-    args = parser.parse_args()
-    start, end = (int(x) for x in args.seasons.split("-"))
-    seasons = list(range(start, end + 1))
-    pairs = list(zip(seasons, seasons[1:], strict=False))
+class ReliabilityEstimate(NamedTuple):
+    """One metric's r, in MetricConfig's field order: shrunk (fed to the blend) and raw."""
 
-    with get_connection() as conn:
-        season_team_week = {s: _fetch_season_team_week(conn, s) for s in seasons}
+    off: float
+    def_: float
+    off_raw: float
+    def_raw: float
+
+
+def estimate_reliability(
+    season_team_week: dict[int, pl.DataFrame], seasons: list[int]
+) -> dict[str, ReliabilityEstimate]:
+    """The full method (per-pair and pooled correlations, clipping, side-mean shrinkage,
+    down4 pinned at 0). Prints the report as it goes and returns metric name ->
+    estimate. scripts/backtest.py's r-leak sensitivity check calls this on the
+    2018->2019 pair only, with stdout redirected."""
+    pairs = list(zip(seasons, seasons[1:], strict=False))
 
     for s in seasons:
         print(f"season {s}: {season_team_week[s]['team'].n_unique()} teams staged")
@@ -198,6 +206,29 @@ def main() -> None:
             f"{final[f'{metric.name}_off']:.4f}, {final[f'{metric.name}_def']:.4f}, "
             f"{reliability[f'{metric.name}_off']:.4f}, {reliability[f'{metric.name}_def']:.4f}),"
         )
+
+    return {
+        m.name: ReliabilityEstimate(
+            final[f"{m.name}_off"],
+            final[f"{m.name}_def"],
+            reliability[f"{m.name}_off"],
+            reliability[f"{m.name}_def"],
+        )
+        for m in _METRIC_CONFIG
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seasons", default="2018-2025")
+    args = parser.parse_args()
+    start, end = (int(x) for x in args.seasons.split("-"))
+    seasons = list(range(start, end + 1))
+
+    with get_connection() as conn:
+        season_team_week = {s: _fetch_season_team_week(conn, s) for s in seasons}
+
+    estimate_reliability(season_team_week, seasons)
 
 
 if __name__ == "__main__":
