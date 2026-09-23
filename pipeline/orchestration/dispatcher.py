@@ -1,6 +1,6 @@
 """
 Job: Entry point for the GitHub Actions cron -- runs every registered collector, then
-     every registered analyst, then every synthesizer, then the auditor.
+     every registered analyst, then every synthesizer, then the grader, then the auditor.
 Reads: nothing directly (delegates to each job's should_run/inputs_ready)
 Writes: nothing directly (delegates to each job)
 Tier: T0
@@ -50,8 +50,9 @@ from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
 from pipeline.collectors.stadiums import StadiumsCollector
 from pipeline.collectors.weather import WeatherCollector
-from pipeline.core.base import Analyst, Collector, RunResult, Synthesizer
+from pipeline.core.base import Analyst, Collector, Grader, RunResult, Synthesizer
 from pipeline.orchestration.auditor import FreshnessCheck, audit_and_alert
+from pipeline.orchestration.grader import ProjectionGrader
 from pipeline.synthesis.synthesizer import MatchupSynthesizer
 
 
@@ -81,6 +82,10 @@ _ANALYSTS: list[Analyst] = [
 # After the analysts, on every tick -- see _run_tick.
 _SYNTHESIZERS: list[Synthesizer] = [
     MatchupSynthesizer(),
+]
+# After the synthesizers, on every tick. inputs_ready skips unless a game needs grading.
+_GRADERS: list[Grader] = [
+    ProjectionGrader(),
 ]
 
 _FRESHNESS_CHECKS = [
@@ -113,6 +118,10 @@ _FRESHNESS_CHECKS = [
     # success" is meaningless for it. weather is kickoff-relative, with gaps of days
     # between games -- it gets check_venue_problems + check_weather_targets instead
     # (audit_and_alert's weather_season/weather_week).
+    #
+    # grader has none: it skips on every tick without a newly finished game, so days
+    # between successes are normal. auditor.check_grades alerts on a locked game that has
+    # had a final score for a day with no grade instead.
 ]
 
 
@@ -123,18 +132,21 @@ def _run_tick(
     season: int,
     week: int,
     synthesizers: Sequence[_RunnableJob] = (),
+    graders: Sequence[_RunnableJob] = (),
 ) -> list[RunResult]:
     """Run every collector, then every analyst -- but only if at least one collector
     wrote new/changed rows this tick (see module docstring for why) -- then every
-    synthesizer, on every tick. Synthesizers aren't gated on collector writes: a
-    projection lock is time-triggered (kickoff - 6h), and gating it on "a collector
-    wrote rows" would miss locks on quiet ticks. It's cheap, since cards are hash-diffed.
-    Returns every RunResult from this tick, so the caller can tell whether any job
-    actually failed."""
+    synthesizer, then every grader, both on every tick. Synthesizers aren't gated on
+    collector writes: a projection lock is time-triggered (kickoff - 6h), and gating it
+    on "a collector wrote rows" would miss locks on quiet ticks. It's cheap, since cards
+    are hash-diffed. Graders run last so a lock taken this tick is never graded as a
+    no-lock, and their own inputs_ready skips a quiet tick. Returns every RunResult from
+    this tick, so the caller can tell whether any job actually failed."""
     results = [c.run(season=season, week=week) for c in collectors]
     if any(result.rows_written > 0 for result in results):
         results += [a.run(season=season, week=week) for a in analysts]
     results += [s.run(season=season, week=week) for s in synthesizers]
+    results += [g.run(season=season, week=week) for g in graders]
     return results
 
 
@@ -155,7 +167,12 @@ def main() -> int:
     week = nfl.get_current_week()
 
     results = _run_tick(
-        _COLLECTORS, _ANALYSTS, season=season, week=week, synthesizers=_SYNTHESIZERS
+        _COLLECTORS,
+        _ANALYSTS,
+        season=season,
+        week=week,
+        synthesizers=_SYNTHESIZERS,
+        graders=_GRADERS,
     )
     any_failed = any(result.status == "failed" for result in results)
 

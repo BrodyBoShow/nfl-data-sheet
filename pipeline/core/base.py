@@ -1,5 +1,5 @@
 """
-Job: Define the Collector, Analyst and Synthesizer base classes every pipeline job
+Job: Define the Collector, Analyst, Synthesizer and Grader base classes every pipeline job
      extends, and the shared run-and-log machinery they use.
 Reads: nothing itself
 Writes: agent_runs (via run())
@@ -248,6 +248,42 @@ class Synthesizer(ABC):
     write(ctx, computed) -> WorkResult. Runs through the same `_execute` as collectors
     and analysts, so `agent_runs` logging and failure-swallowing are identical. There is
     no signals stale-row delete, because a synthesizer owns no signals.
+    """
+
+    name: str
+
+    @abstractmethod
+    def inputs_ready(self, ctx: RunContext) -> bool | str:
+        """`False` skips as `skipped_fresh`; a string skips as that exact status."""
+
+    @abstractmethod
+    def compute(self, ctx: RunContext) -> Any:
+        """Read via ctx.conn and build everything to write. No writes."""
+
+    @abstractmethod
+    def write(self, ctx: RunContext, computed: Any) -> WorkResult:
+        """Write via ctx.conn. Returns WorkResult(rows_written, meta)."""
+
+    def run(
+        self, *, season: int, week: int, season_type: str = "REG", force: bool = False
+    ) -> RunResult:
+        return _execute(
+            name=self.name,
+            season=season,
+            week=week,
+            season_type=season_type,
+            is_ready=(lambda ctx: True) if force else self.inputs_ready,
+            do_work=lambda ctx: self.write(ctx, self.compute(ctx)),
+        )
+
+
+class Grader(ABC):
+    """L0: grades locked projections after the games are played. Reads
+    `projection_log` (never modifies it) plus scores and lines from `games`, and writes
+    only its own grade tables.
+
+    Same contract and `_execute` as `Synthesizer`: inputs_ready(ctx) -> bool | str →
+    compute(ctx) -> Any → write(ctx, computed) -> WorkResult.
     """
 
     name: str

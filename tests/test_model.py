@@ -7,6 +7,7 @@ import numpy as np
 import polars as pl
 import pytest
 
+from pipeline.core.stats import bootstrap_corr
 from pipeline.synthesis import model
 from pipeline.synthesis.model import (
     HFA_ONLY_SPEC,
@@ -23,7 +24,6 @@ from pipeline.synthesis.model import (
 )
 from scripts.projection_history import (
     add_outcomes,
-    bootstrap_corr,
     check_fit_seasons,
     edge_validation,
 )

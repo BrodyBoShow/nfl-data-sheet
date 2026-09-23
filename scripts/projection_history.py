@@ -21,10 +21,8 @@ import numpy as np
 import polars as pl
 import psycopg
 
+from pipeline.core.stats import bootstrap_corr
 from pipeline.synthesis.model import STABILITY_BUCKETS, stability_cutpoints, with_stability_bucket
-
-BOOTSTRAP_N = 2000
-BOOTSTRAP_SEED = 20260923
 
 _GAMES_SCHEMA: dict[str, Any] = {
     "game_id": pl.Utf8,
@@ -126,27 +124,6 @@ def add_outcomes(pred: pl.DataFrame) -> pl.DataFrame:
         (pl.col("margin_actual") - pl.col("margin_home")).alias("margin_resid"),
         (pl.col("total_actual") - pl.col("projected_total")).alias("total_resid"),
     )
-
-
-def bootstrap_corr(
-    x: np.ndarray, y: np.ndarray, *, n_boot: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED
-) -> dict[str, float | int | None]:
-    """Pearson r with a game-bootstrap 95% percentile CI (fixed seed, reproducible)."""
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    n = int(x.size)
-    if n < 3:
-        return {"n": n, "corr": None, "ci_low": None, "ci_high": None}
-    corr = float(np.corrcoef(x, y)[0, 1])
-    rng = np.random.default_rng(seed)
-    idx = rng.integers(0, n, size=(n_boot, n))
-    xs, ys = x[idx], y[idx]
-    xs = xs - xs.mean(axis=1, keepdims=True)
-    ys = ys - ys.mean(axis=1, keepdims=True)
-    denom = np.sqrt((xs**2).sum(axis=1) * (ys**2).sum(axis=1))
-    boot = (xs * ys).sum(axis=1)[denom > 0] / denom[denom > 0]
-    lo, hi = np.quantile(boot, [0.025, 0.975])
-    return {"n": n, "corr": corr, "ci_low": float(lo), "ci_high": float(hi)}
 
 
 def edge_validation(frame: pl.DataFrame) -> dict[str, dict[str, Any]]:

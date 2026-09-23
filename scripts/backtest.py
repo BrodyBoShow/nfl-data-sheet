@@ -62,6 +62,7 @@ from pipeline.analysts.efficiency import EfficiencyAnalyst, MetricConfig  # noqa
 from pipeline.core.base import RunContext  # noqa: E402
 from pipeline.core.config import get_settings  # noqa: E402
 from pipeline.core.db import get_connection  # noqa: E402
+from pipeline.core.stats import BOOTSTRAP_N, BOOTSTRAP_SEED  # noqa: E402
 from pipeline.synthesis.model import (  # noqa: E402
     COEFFICIENTS_PATH,
     HFA_ONLY_SPEC,
@@ -82,8 +83,6 @@ from scripts.estimate_reliability import (  # noqa: E402
     estimate_reliability,
 )
 from scripts.projection_history import (  # noqa: E402
-    BOOTSTRAP_N,
-    BOOTSTRAP_SEED,
     add_outcomes,
     calibrate,
     check_fit_seasons,

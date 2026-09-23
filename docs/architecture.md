@@ -1,7 +1,8 @@
 # Architecture
 
 Four layers plus stored tables. Solid arrows are data flow, dotted arrows are triggers,
-keys, or monitoring, thick arrows are grading feedback.
+keys, or monitoring. The grader's feedback arrows are marked **deferred**: the grader is
+reporting-only until live data justifies feeding anything back (see Grader below).
 
 ```mermaid
 flowchart TB
@@ -64,8 +65,8 @@ flowchart TB
   SYN --> PROJ --> GRADE
   AUD --> UI
 
-  GRADE ==> A_EFF
-  GRADE ==> SYN
+  GRADE -. deferred .-> A_EFF
+  GRADE -. deferred .-> SYN
 
   DISP -.-> L1
   DISP -.-> L2
@@ -96,10 +97,26 @@ flowchart TB
     naming the card's last `projection_status` as the likely reason.
   - **Dispatcher tick order**: collectors, then analysts (only if a collector wrote
     rows), then synthesizers on **every** tick (locks are time-triggered, so they can't
-    wait on a collector write), then the auditor.
-  - **Grader**: grades every locked projection after the game, tracks closing-line value
-    by signal and sector, writes calibration used by the efficiency analyst and
-    synthesizer.
+    wait on a collector write), then the grader (skips unless a game needs grading),
+    then the auditor.
+  - **Grader** (`pipeline/orchestration/grader.py`, P5):
+    - Grades every locked projection after the game into `projection_grades`: error vs.
+      result, band coverage, and win/loss against both the lock line and the nflverse
+      close.
+    - Closing-line value is computed two ways: own-source (sparse) and vs. nflverse
+      (mixed-source).
+    - Writes a `no_lock` row for any game that kicked off without a lock.
+    - Rebuilds `grade_summary`: n, a 95% CI, and a verdict per (slice, metric), plus the
+      lock rate by week and by stability bucket.
+    - Reads `projection_log` (never modifies it) and `matchup_cards`. It reads odds
+      captures through the Market analyst's own loaders. It reads `games`' scores and
+      lines, which as an L0 job it may do; the L3 synthesizer may not.
+    - Grades are sliceable by signal/sector later by joining to the locked card's
+      decomposition. Only what's on the card at lock can be graded.
+    - **Reporting-only for now.** Nothing reads its tables. The feedback arrows to
+      Efficiency and the synthesizer are deferred until at least one full live season is
+      graded **and** a pattern (e.g. the weeks 1–4 β_def gap) holds up at
+      non-exploratory status. See `docs/phases/P5.md`.
 
 - **L1 Collectors** fetch, validate, and store. They never compute metrics. Cut by
   source, one collector per source family.
@@ -118,8 +135,9 @@ flowchart TB
   - **Why `games` is allowed (amended 2026-09-23, P5):** the spine is canonical keys owned
     by L0, not staged source data. A card has to know which teams play, where, and when
     it kicks off (projections lock pre-kickoff), and no signal carries that. Scores,
-    lines, and results stay off-limits at runtime. Only the offline model-fitting and
-    backtest scripts (`scripts/`) read them, on completed historical seasons.
+    lines, and results stay off-limits to L3 at runtime. Only the offline model-fitting
+    and backtest scripts (`scripts/`) read them, on completed historical seasons, plus the
+    L0 grader after the game.
   - **Matchup synthesizer**: joins signals per game, projects spread/total, compares to
     market, writes edge cards, locks projections pre-kickoff into `projection_log`
     (immutable).
@@ -140,7 +158,7 @@ daily, **T3** weekly, **OD** on demand.
 | Dispatcher | T0 | 1 (skeleton), 8 (tuned) | Cron every ~10 min; triggers only what the calendar needs. |
 | ID spine | T2 | 1 | Canonical keys via nflreadpy `load_schedules`, `load_teams`, `load_players`, `load_ff_playerids`. |
 | Auditor | T0 | 1 (skeleton) | Freshness/row-count/schema/null checks; alerts; staleness status for UI. |
-| Grader | T2 | 5 | Grades locked projections; tracks closing-line value; writes calibration. |
+| Grader | T2 | 5 | Grades locked projections (errors, coverage, picks, CLV) and summarizes them with n/CI/verdict; reporting-only, feedback deferred. |
 
 ### L1 Collectors
 

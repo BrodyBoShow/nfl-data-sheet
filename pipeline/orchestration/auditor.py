@@ -263,6 +263,45 @@ def check_projection_locks(conn: psycopg.Connection, now: datetime) -> list[str]
     return summarize_projection_locks(rows, now)
 
 
+_GRADE_CHECK_DELAY = timedelta(hours=36)
+_GRADE_CHECK_LOOKBACK = timedelta(days=7)
+
+
+def summarize_grades(rows: list[tuple], now: datetime) -> list[str]:
+    """Pure. `rows` are (game_id, kickoff, has_score, grade_status | None) for locked
+    games. Alerts on any lock that kicked off more than 36h ago (the game plus a day for
+    nflverse's post-game schedule) and still isn't graded. The reason tells the two
+    failures apart: a final score is stored but the grader hasn't graded it (the grader
+    is broken), or no final score has arrived (nflverse lag, or a game not played). At
+    most one message."""
+    late = sorted(
+        f"{game_id} ({'scored, not graded' if has_score else 'no final score yet'}"
+        f"{f', {status}' if status else ''})"
+        for game_id, kickoff, has_score, status in rows
+        if now - _GRADE_CHECK_LOOKBACK < kickoff <= now - _GRADE_CHECK_DELAY
+        and status != "graded"
+    )
+    if not late:
+        return []
+    return [f"grades: {len(late)} locked game(s) ungraded 36h+ after kickoff -- {', '.join(late)}"]
+
+
+def check_grades(conn: psycopg.Connection, now: datetime) -> list[str]:
+    """Every locked game should be graded within about a day of its final score."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT p.game_id, p.kickoff, g.home_score IS NOT NULL AND g.away_score IS NOT NULL, "
+            "pg.grade_status "
+            "FROM projection_log p "
+            "JOIN games g ON g.game_id = p.game_id "
+            "LEFT JOIN projection_grades pg ON pg.game_id = p.game_id "
+            "WHERE p.kickoff > %s",
+            (now - _GRADE_CHECK_LOOKBACK,),
+        )
+        rows = cur.fetchall()
+    return summarize_grades(rows, now)
+
+
 def check_availability_outage(conn: psycopg.Connection) -> dict[str, str]:
     """Reads the most recent availability collector run's meta for an outage_guard entry
     -- pipeline/collectors/availability.py skips disappearance detection and records this
@@ -390,7 +429,8 @@ def audit_and_alert(
     elapsed-time FreshnessCheck.
 
     Every run also checks projection locks (check_projection_locks): any game that
-    kicked off in the last 24h without a projection_log row.
+    kicked off in the last 24h without a projection_log row. And grades (check_grades):
+    any lock still ungraded 36h after kickoff.
 
     Alerts are deduped per check (see `_send_if_new`) so a persistent condition posts
     once, not on every dispatcher tick. Returns True if a *new* alert was sent this run
@@ -444,6 +484,12 @@ def audit_and_alert(
             _clear_alert(conn, "projection_locks")
         else:
             alerted = _send_if_new(conn, "projection_locks", messages[0], now) or alerted
+
+        messages = check_grades(conn, now)
+        if not messages:
+            _clear_alert(conn, "projection_grades")
+        else:
+            alerted = _send_if_new(conn, "projection_grades", messages[0], now) or alerted
 
         outages = check_availability_outage(conn)
         for source in ("espn", "sleeper"):

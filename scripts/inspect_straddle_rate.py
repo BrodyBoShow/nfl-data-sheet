@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline.analysts.market import _load_captures, key_straddle  # noqa: E402
+from pipeline.analysts.market import key_straddle, load_captures  # noqa: E402
 from pipeline.core.db import get_connection  # noqa: E402
 
 
@@ -40,7 +40,7 @@ def main() -> None:
                 (args.season,),
             )
             game_ids = [r[0] for r in cur.fetchall()]
-        captures = _load_captures(conn, game_ids)
+        captures = load_captures(conn, game_ids)
         conn.rollback()
 
     by_poll: dict[str, list[tuple[bool, float | None]]] = {}

@@ -7,6 +7,7 @@ from pipeline.orchestration.auditor import (
     check_availability_outage,
     check_freshness,
     check_odds_targets,
+    summarize_grades,
     summarize_projection_locks,
     summarize_venue_problems,
     summarize_weather_targets,
@@ -400,3 +401,25 @@ def test_kickoff_exactly_now_counts_and_older_than_24h_does_not():
     assert summarize_projection_locks([("G", _NOW, False, 1)], _NOW) != []
     old = _NOW - timedelta(hours=24)
     assert summarize_projection_locks([("G", old, False, 1)], _NOW) == []
+
+
+# --- grades -------------------------------------------------------------------------------
+# rows: (game_id, kickoff, has_score, grade_status | None)
+
+
+def test_graded_locks_do_not_alert():
+    assert summarize_grades([("G", _NOW - timedelta(days=2), True, "graded")], _NOW) == []
+
+
+def test_ungraded_lock_alerts_after_36h_with_the_reason():
+    kickoff = _NOW - timedelta(hours=40)
+    msgs = summarize_grades(
+        [("A", kickoff, True, "awaiting_result"), ("B", kickoff, False, None)], _NOW
+    )
+    assert len(msgs) == 1 and "2 locked game(s)" in msgs[0]
+    assert "A (scored, not graded, awaiting_result)" in msgs[0]
+    assert "B (no final score yet)" in msgs[0]
+
+
+def test_recent_ungraded_lock_does_not_alert_yet():
+    assert summarize_grades([("G", _NOW - timedelta(hours=30), False, None)], _NOW) == []

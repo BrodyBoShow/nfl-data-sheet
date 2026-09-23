@@ -89,6 +89,17 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `result = home_score − away_score`. So `spread_line = +3` means the **home** team is
     favored by 3. That is the **opposite sign** of `odds_snapshots.spread_home_point`/the
     Market sector's `spread_home_*` (−3 = home favored). Negate it before comparing.
+  - **`spread_line`/`total_line` provenance is undocumented.** Checked 2026-09-23:
+    nflreadr's schedules dictionary
+    (`nflverse/nflreadr/data-raw/dictionary_schedules.csv`) defines both columns and the
+    home-positive sign, but names no book, no consensus method, and no capture time.
+  - **They are not post-game values.** On 2026-09-23 all 16 week-3 and week-4 games
+    already had a `spread_line`. nflverse updates it during the week, and id_spine
+    overwrites it with no history.
+  - **The grader treats a line as "the nflverse close" only once the same row carries a
+    final score**, i.e. from a post-game schedule file. It labels CLV against it as
+    mixed-source, because it's a different source from our 8-book median. The backtest's
+    "closing line" is this same column.
   - **Retired codes stay raw in `games`:** 2018–19 Raiders games use `OAK` in
     `games.home_team`/`away_team` (verified 2026-09-23), while `team_week`/`signals` hold
     `LV` (the nflverse bulk collector normalizes, id_spine doesn't). Any join from `games`

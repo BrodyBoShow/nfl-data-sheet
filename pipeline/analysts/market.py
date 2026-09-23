@@ -224,6 +224,38 @@ def select_open(
     return first, BASIS_OPENER_ON_TIME if opener_on_time(target) else BASIS_OPENER_LATE
 
 
+def pre_kickoff_captures(
+    captures: Iterable[Capture], game: Game
+) -> tuple[list[Capture], list[dict[str, Any]]]:
+    """(captures with as_of < kickoff, oriented to the game's home/away; one mismatch
+    record per capture neither team order matches). Public because the grader
+    (pipeline/orchestration/grader.py) reads the same pre-kickoff lines this analyst
+    does, and must not re-derive them."""
+    kept: list[Capture] = []
+    mismatches: list[dict[str, Any]] = []
+    for raw in captures:
+        if raw.as_of >= game.kickoff:
+            continue
+        aligned = orient(raw, game)
+        if aligned is None:
+            mismatches.append(
+                {
+                    "game_id": game.game_id,
+                    "as_of": _iso(raw.as_of),
+                    "odds_home": raw.home_team,
+                    "odds_away": raw.away_team,
+                }
+            )
+            continue
+        kept.append(aligned)
+    return kept, mismatches
+
+
+def latest_capture(captures: Sequence[Capture]) -> Capture | None:
+    """The "current" capture: the latest of the given (pre-kickoff) captures."""
+    return max(captures, key=lambda c: c.as_of) if captures else None
+
+
 def market_status(
     open_: Capture | None, current: Capture | None, kickoff: dt.datetime, now: dt.datetime
 ) -> float:
@@ -407,22 +439,8 @@ def build_rows(
     lookahead_only: list[str] = []
 
     for game in games:
-        pre_kickoff: list[Capture] = []
-        for raw in captures.get(game.game_id, []):
-            if raw.as_of >= game.kickoff:
-                continue
-            aligned = orient(raw, game)
-            if aligned is None:
-                orientation_mismatch.append(
-                    {
-                        "game_id": game.game_id,
-                        "as_of": _iso(raw.as_of),
-                        "odds_home": raw.home_team,
-                        "odds_away": raw.away_team,
-                    }
-                )
-                continue
-            pre_kickoff.append(aligned)
+        pre_kickoff, mismatches = pre_kickoff_captures(captures.get(game.game_id, []), game)
+        orientation_mismatch += mismatches
 
         own_targets = targets.get((game.season, game.week), [])
         own_times = {t.captured_at for t in own_targets}
@@ -430,7 +448,7 @@ def build_rows(
 
         selected = select_open(pre_kickoff, own_targets)
         open_, basis = selected if selected else (None, None)
-        current = max(pre_kickoff, key=lambda c: c.as_of) if pre_kickoff else None
+        current = latest_capture(pre_kickoff)
         status = market_status(open_, current, game.kickoff, now)
         status_counts[str(int(status))] += 1
         if status == STATUS_LOOKAHEAD_ONLY:
@@ -485,7 +503,7 @@ def load_window_games(conn: psycopg.Connection, now: dt.datetime) -> list[Game]:
     return games
 
 
-def _load_captures(conn: psycopg.Connection, game_ids: list[str]) -> dict[str, list[Capture]]:
+def load_captures(conn: psycopg.Connection, game_ids: list[str]) -> dict[str, list[Capture]]:
     books: dict[tuple[str, dt.datetime], list[BookLine]] = {}
     with conn.cursor() as cur:
         cur.execute(
@@ -562,7 +580,7 @@ class MarketAnalyst(Analyst):
 
         rows, self._meta = build_rows(
             games=games,
-            captures=_load_captures(conn, self._game_ids),
+            captures=load_captures(conn, self._game_ids),
             targets=_load_captured_targets(conn, sorted({g.season for g in games})),
             now=ctx.now,
             base_version=_base_version(conn),

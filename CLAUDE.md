@@ -25,7 +25,9 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
   the offline model-fitting/backtest scripts in `scripts/`, never by a scheduled L3 job.
   L3 never calls external sources.
 - **L0** (`pipeline/orchestration/`) decides what runs, owns canonical keys, detects
-  breakage, grades projections.
+  breakage, grades projections. The grader is the one scheduled job that reads `games`
+  scores and lines, after the game. It writes only `projection_grades`/`grade_summary`,
+  and no pipeline job reads those yet.
 
 ## Canonical keys
 - `season` int, `week` int, `season_type` text (`REG`/`POST`)

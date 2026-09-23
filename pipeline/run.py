@@ -23,10 +23,11 @@ from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
 from pipeline.collectors.stadiums import StadiumsCollector
 from pipeline.collectors.weather import WeatherCollector
-from pipeline.core.base import Analyst, Collector, Synthesizer
+from pipeline.core.base import Analyst, Collector, Grader, Synthesizer
+from pipeline.orchestration.grader import ProjectionGrader
 from pipeline.synthesis.synthesizer import MatchupSynthesizer
 
-_JOBS: dict[str, Collector | Analyst | Synthesizer] = {
+_JOBS: dict[str, Collector | Analyst | Synthesizer | Grader] = {
     "id_spine": IdSpineCollector(),
     "nflverse_bulk": NflverseBulkCollector(),
     "efficiency": EfficiencyAnalyst(),
@@ -38,6 +39,7 @@ _JOBS: dict[str, Collector | Analyst | Synthesizer] = {
     "environment": EnvironmentAnalyst(),
     "market": MarketAnalyst(),
     "synthesizer": MatchupSynthesizer(),
+    "grader": ProjectionGrader(),
 }
 
 _USAGE = (
