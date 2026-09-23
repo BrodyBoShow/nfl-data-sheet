@@ -337,7 +337,8 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     and GFS beyond it. **HRRR only reached ~42h ahead** (last non-null
     `2026-09-24T18:00`), so a T-48h snapshot comes from GFS and T-36h onward mostly from
     HRRR. **Some of the change between the T-48h and T-36h snapshots is a model switch, not
-    a change in the weather** — the movement view must not present it as a weather trend.
+    a change in the weather** — T-48h rows are stored with `model_regime_break = true` and
+    excluded from movement comparisons (P4).
     The response does not say which model produced a value, or when that model run was
     issued; neither can be recorded.
 - **Known traps:**
