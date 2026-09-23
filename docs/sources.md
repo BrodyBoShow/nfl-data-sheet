@@ -283,14 +283,85 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
 
 ## Weather (Open-Meteo)
 
-- **Status:** UNVERIFIED
-- **License:** Free tier is **non-commercial only**.
+- **Status:** VERIFIED (live-called 2026-09-23 ~00:20Z, `/v1/forecast` only). Fixture:
+  `tests/fixtures/open_meteo_forecast_sample.json` — the real kickoff-window response for
+  `2026_03_ATL_GB` (Lambeau, kickoff 2026-09-25T00:15Z) taken at T-48h.
+- **License:** Free tier is **non-commercial only** — no subscriptions, no ads, no
+  integration into commercial products (open-meteo.com/en/terms). Data is **CC BY 4.0**:
+  the web app must show an Open-Meteo attribution wherever weather appears.
 - **Reliability:** Open data, no API key required.
-- **Freshness:** T1 (T0/hourly on Sundays for outdoor games).
-- **Known traps:** Skip dome and closed-roof games entirely — no weather signal applies.
-  Requires a static stadium coords/roof/surface table (source TBD, likely maintained by
-  hand or derived from nflverse `load_teams`/stadium metadata).
-- **Params/shape/limits:** TBD on first verification call.
+- **Freshness:** T1, snapshot schedule relative to each game's kickoff (see P4).
+- **Limits (open-meteo.com/en/terms, /en/pricing):** 600 calls/min, 5,000/hour,
+  10,000/day, 300,000/month. A request counts as >1 call when it asks for **more than 10
+  hourly variables** or **more than 2 weeks** of data (fractional: 15 vars = 1.5 calls).
+  No rate-limit headers in the response (verified live — only `Date`/`Content-Type`), so
+  usage can't be read back per call; stay at ≤10 variables so every request is 1.0 call.
+- **Params/shape (verified live):**
+  - `GET https://api.open-meteo.com/v1/forecast` with `latitude`, `longitude`,
+    `hourly=<comma list>`, `wind_speed_unit=mph`, `temperature_unit=fahrenheit`,
+    `precipitation_unit=inch`, `timezone=UTC`, and `start_hour`/`end_hour`
+    (`yyyy-mm-ddThh:mm`, inclusive both ends) to fetch only the game window instead of
+    whole days.
+  - The 10 variables used (exactly 10 → 1.0 call): `temperature_2m`,
+    `apparent_temperature`, `precipitation`, `precipitation_probability`, `rain`,
+    `snowfall`, `weather_code`, `wind_speed_10m`, `wind_gusts_10m`, `wind_direction_10m`.
+    Units come back in `hourly_units` (`°F`, `inch`, `%`, `wmo code`, `mp/h`, `°`) —
+    assert them in `validate` rather than trusting the request params.
+  - Response: `{latitude, longitude, generationtime_ms, utc_offset_seconds, timezone,
+    timezone_abbreviation, elevation, hourly_units, hourly}`; `hourly` is parallel arrays
+    keyed by variable name plus `time`. With `timezone=UTC`, `time` values are
+    **naive ISO strings with no `Z`** (`"2026-09-25T00:00"`) — parse as UTC explicitly.
+  - **Hourly semantics** (docs): `temperature_2m`, `weather_code`, wind speed/direction are
+    instantaneous at the hour; `precipitation`, `rain`, `snowfall` are the **preceding-hour
+    sum**; `wind_gusts_10m` is the **preceding-hour max**; `precipitation_probability` is
+    for the preceding hour. So covering a game that starts in hour H needs hours H through
+    H+4 (the H+4 row's sums cover the game's last hour) — the fixture is that 5-row window.
+  - Multiple comma-separated `latitude`/`longitude` pairs are accepted; the response
+    becomes a **JSON list** of the single-location object (verified live, 2 points). The
+    collector uses one request per game anyway — each game needs its own `start_hour`/
+    `end_hour`, and per-game requests keep one failure from sinking the batch.
+- **Forecast horizon (verified live):**
+  - Hourly data runs ~15.8 days from the current UTC midnight: at 2026-09-23T00:20Z, core
+    variables were non-null through `2026-10-08T18:00` (379 of 384 hours from
+    `forecast_days=16`); `wind_gusts_10m` ended 6h earlier (`T12:00`). Past the last model
+    hour but inside the 16-day range, values come back **`null`**, not omitted. Past the
+    16-day range, the request **fails with HTTP 400**:
+    `{"reason":"Parameter 'start_hour' is out of allowed range from 2026-06-22 to
+    2026-10-08","error":true}`.
+  - The P4 schedule's earliest snapshot is T-48h, so this is never hit in normal
+    operation — but the collector still skips a target (no row stored) if the response is
+    a 400 or any hour of the game window is `null` in a wind/temperature field. It never
+    carries a value forward or interpolates to fill a gap.
+  - Default `models` (`best_match`) at a US venue matched `gfs_seamless` for every hour
+    and `ncep_hrrr_conus` for 40 of its 43 hours: the high-res HRRR model is used near-term
+    and GFS beyond it. **HRRR only reached ~42h ahead** (last non-null
+    `2026-09-24T18:00`), so a T-48h snapshot comes from GFS and T-36h onward mostly from
+    HRRR. **Some of the change between the T-48h and T-36h snapshots is a model switch, not
+    a change in the weather** — the movement view must not present it as a weather trend.
+    The response does not say which model produced a value, or when that model run was
+    issued; neither can be recorded.
+- **Known traps:**
+  - **Wind is an exterior 10 m open-terrain estimate, not field wind.** `wind_speed_10m`
+    is the model's wind 10 m above ground for the grid cell, with no stadium in it. Inside a
+    bowl the field-level wind is lower and swirls, and the relationship is not linear or
+    documented anywhere free. Stored columns carry the height and unit
+    (`wind_speed_10m_mph`, `wind_gusts_10m_mph`, `wind_direction_10m_deg`), and the
+    Environment analyst treats them as a **relative indicator** ("windier than usual
+    outside this stadium"), never as the wind the players will feel. No correction factor
+    is applied — there's no sourced one.
+  - **Grid snapping:** the response `latitude`/`longitude` is the model grid cell, not the
+    requested point (requested 44.50133,-88.06222 → returned 44.50524,-88.049416, ~1 km
+    off; `ecmwf_ifs025` snaps to 44.5,-88.0). Store the returned cell alongside the
+    requested stadium coords. `elevation` is from a 90 m DEM and drives cell choice +
+    statistical downscaling (default `cell_selection=land`).
+  - Gusts can read **below** sustained speed in the same row (fixture 00:00 row:
+    speed 3.2, gust 2.5 mph) because gust is a preceding-hour max and speed is an instant
+    value. Store both as returned; don't "correct" either.
+  - Skip fixed-roof venues entirely, and retractable venues whose game-row `roof` is
+    `closed`. nflverse `games.roof` is null pre-game for every retractable venue in 2026 and
+    wrongly says `dome` for open-air international grounds (MCG, Stade de France, Munich) —
+    see the P4 roof rule, which lets the `stadiums` table's structural `roof_type` override
+    it.
 
 ## Availability (ESPN injuries, Sleeper players)
 
