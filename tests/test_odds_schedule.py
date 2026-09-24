@@ -8,6 +8,7 @@ from pipeline.collectors.odds_schedule import (
     compute_week_targets,
     decide,
 )
+from pipeline.synthesis.synthesizer import in_lock_window
 
 # A normal week: Thursday opener, a split Sunday slate (one early, one late kickoff),
 # and a Monday closer -- covers every branch of compute_week_targets.
@@ -57,11 +58,35 @@ def test_tue_opener_closes_wednesday_morning_not_saturday():
     assert targets["tue_opener"].deadline == datetime(2026, 9, 16, 13, 0, tzinfo=UTC)
 
 
-def test_pre_kickoff_windows_open_four_hours_before_kickoff():
+_PRE_KICKOFF_TARGETS = ("thu_pre_tnf", "sun_early", "sun_late", "mon_pre_mnf")
+
+
+def test_pre_kickoff_windows_open_six_hours_before_kickoff():
     targets = {t.target_id: t for t in compute_week_targets(_FULL_WEEK_GAMES)}
-    for target_id in ("thu_pre_tnf", "sun_late", "mon_pre_mnf"):
+    for target_id in _PRE_KICKOFF_TARGETS:
         target = targets[target_id]
-        assert target.deadline - target.scheduled_for == timedelta(hours=4), target_id
+        assert target.deadline - target.scheduled_for == timedelta(hours=6), target_id
+
+
+def test_pre_kickoff_targets_open_exactly_when_their_lock_window_opens():
+    # Week 3 2026: TNF locked at 19:28Z on Tuesday's line because thu_pre_tnf opened at
+    # 20:15Z, 2h after the lock window. Every pre-kickoff target must be due on the first
+    # tick that can lock its anchor game -- and not before, or the line ages until then.
+    targets = {t.target_id: t for t in compute_week_targets(_FULL_WEEK_GAMES)}
+    for target_id in _PRE_KICKOFF_TARGETS:
+        target = targets[target_id]
+        kickoff = target.deadline
+        assert in_lock_window(kickoff, target.scheduled_for), target_id
+        assert not in_lock_window(kickoff, target.scheduled_for - timedelta(seconds=1)), target_id
+
+
+def test_sun_early_anchors_to_an_international_kickoff():
+    # A 9:30 ET London game: the old fixed 9:00 ET open would trail its lock window by
+    # 5.5h; anchored to kickoff it opens at 03:30 ET like any other slate.
+    london = [(date(2026, 10, 4), "Sunday", "09:30"), (date(2026, 10, 4), "Sunday", "13:00")]
+    targets = {t.target_id: t for t in compute_week_targets(london)}
+    assert targets["sun_early"].scheduled_for == datetime(2026, 10, 4, 7, 30, tzinfo=UTC)
+    assert targets["sun_early"].deadline == datetime(2026, 10, 4, 13, 30, tzinfo=UTC)
 
 
 def test_no_thursday_or_monday_game_omits_those_targets():
@@ -168,6 +193,25 @@ def test_catch_up_collapsing_fires_only_the_most_recent_open_target():
     )
     assert decision.fire == later
     assert decision.missed == [("tue_opener", "superseded")]
+
+
+def test_overlapping_sunday_windows_spend_one_call_not_two():
+    # sun_early (07:00-13:00 ET) and sun_late (10:25-16:25 ET here) overlap. A first
+    # Sunday tick inside the overlap fires sun_late only; sun_early is superseded.
+    targets = compute_week_targets(_FULL_WEEK_GAMES)
+    decision = decide(
+        targets,
+        states={
+            "tue_opener": TargetState("tue_opener", "captured", 3),
+            "sat_market_movement": TargetState("sat_market_movement", "captured", 3),
+            "thu_pre_tnf": TargetState("thu_pre_tnf", "captured", 3),
+        },
+        now=datetime(2026, 9, 20, 16, 45, tzinfo=UTC),  # 12:45 ET
+        credits_spent_this_week=9,
+        credits_spent_this_month=9,
+    )
+    assert decision.fire is not None and decision.fire.target_id == "sun_late"
+    assert decision.missed == [("sun_early", "superseded")]
 
 
 def test_weekly_cap_blocks_fire_even_with_open_window():

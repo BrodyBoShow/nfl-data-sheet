@@ -15,7 +15,7 @@ carries its game's own season/week, never the dispatcher's.
 written again to either table, so its card freezes.
 
 **Lock.**
-- A game locks on the first run with `kickoff - _LOCK_LEAD <= now < kickoff` where the
+- A game locks on the first run with `kickoff - LOCK_LEAD <= now < kickoff` where the
   projection is computable (projection_status 1).
 - The insert is `INSERT ... ON CONFLICT (game_id) DO NOTHING`, and migration 0023's
   trigger makes the row immutable.
@@ -68,7 +68,7 @@ from pipeline.analysts.market import (
 from pipeline.core.base import RunContext, Synthesizer, WorkResult
 from pipeline.core.db import filter_changed, upsert_rows
 from pipeline.core.hashing import hash_row
-from pipeline.core.schedule import kickoff_utc
+from pipeline.core.schedule import LOCK_LEAD, kickoff_utc
 from pipeline.core.team_aliases import normalize_team_abbr
 from pipeline.synthesis.model import (
     COEFFICIENTS_PATH,
@@ -83,9 +83,8 @@ from pipeline.synthesis.model import (
 
 CARD_VERSION = 1
 
-# Lock lead. Observed dispatcher ticks land 4.5-5.5h apart, so a narrower window could
-# miss the lock entirely (docs/phases/P5.md).
-_LOCK_LEAD = dt.timedelta(hours=6)
+# The lock lead (LOCK_LEAD) lives in pipeline/core/schedule.py, shared with the odds
+# target calendar so a lock never fires before that slate's pre-kickoff line is due.
 _LOOKBACK = dt.timedelta(hours=24)
 _LOOKAHEAD = dt.timedelta(days=7)
 
@@ -162,7 +161,7 @@ def in_window(kickoff: dt.datetime, now: dt.datetime) -> bool:
 
 
 def in_lock_window(kickoff: dt.datetime, now: dt.datetime) -> bool:
-    return kickoff - _LOCK_LEAD <= now < kickoff
+    return kickoff - LOCK_LEAD <= now < kickoff
 
 
 def _iso(t: dt.datetime | None) -> str | None:
@@ -605,7 +604,7 @@ def build_cards(
         else:
             lock_block = {"locked": False, "locked_at": None, "kickoff_at_lock": None,
                           "lock_lead_hours": None,
-                          "locks_from": _iso(g.kickoff - _LOCK_LEAD)}
+                          "locks_from": _iso(g.kickoff - LOCK_LEAD)}
             edge_at_lock = None
 
         card = {

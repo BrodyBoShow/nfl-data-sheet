@@ -25,6 +25,14 @@ _LOOKAHEAD_DAYS = 2
 # games.gameday is nflverse's ET calendar-day convention -- see _to_gameday below.
 _ET = ZoneInfo("America/New_York")
 
+# How long before kickoff the synthesizer's lock window opens. Observed dispatcher ticks
+# land 4.5-5.5h apart, so a narrower window could miss the lock entirely
+# (docs/phases/P5.md). Shared with odds_schedule.py, whose pre-kickoff targets open at
+# this same instant: the first tick in a lock window then captures a fresh line before
+# the synthesizer locks against it. A target opening later than the lock window lets a
+# lock fire on the previous target's line (2026 week 3 TNF locked a ~51h-old opener).
+LOCK_LEAD = timedelta(hours=6)
+
 _GameRow = tuple[date, int, int, str]  # (gameday, season, week, season_type)
 
 

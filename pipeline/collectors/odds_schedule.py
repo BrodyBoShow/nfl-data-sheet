@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-from pipeline.core.schedule import kickoff_utc
+from pipeline.core.schedule import LOCK_LEAD, kickoff_utc
 
 _ET = ZoneInfo("America/New_York")
 
@@ -39,18 +39,18 @@ MONTHLY_CREDIT_CEILING = 500
 
 MissReason = Literal["deadline_passed", "superseded", "weekly_cap", "monthly_cap"]
 
-# How long before a Thu/Sun-late/Mon kickoff a pre-kickoff target's window opens. A
-# 2-hour window (thu_pre_tnf/mon_pre_mnf's original width) and a 20-minute one
-# (sun_late's original width) both proved too narrow live: thu_pre_tnf's 2-hour window
-# in week 2 closed with zero dispatcher ticks landing inside it (missed_reason =
-# 'deadline_passed'), while the observed gap between successful ticks that same week
-# spanned most of a day. 4 hours is still unambiguously "pre-kickoff, not a stale
-# day-old line" (it doesn't reach back past the previous day), while giving a tick
-# roughly 2x the room to land. It's a judgment call, not a guarantee -- a long enough
-# dead stretch still misses it, and that's fine (see compute_week_targets' note on
-# tue_opener: a real miss, reported by the auditor, beats stretching the window until
-# it stops meaning what its name says).
-_PRE_KICKOFF_WINDOW = dt.timedelta(hours=4)
+# How long before its anchor kickoff a pre-kickoff target's window opens (sun_early,
+# sun_late, thu_pre_tnf, mon_pre_mnf): the synthesizer's lock lead, LOCK_LEAD (6h). The
+# dispatcher runs the odds collector, then the Market analyst, then the synthesizer in
+# one tick, so a target opening at the same instant as its slate's lock window means the
+# first tick inside that window captures a fresh line and locks against it. The windows
+# were 4h wide until 2026 week 3 (first 2h/20min, both too narrow live -- thu_pre_tnf
+# closed with zero ticks inside it in week 2), which left 2h at the start of every lock
+# window with no target due: week 3's TNF locked at 19:28Z against the Tuesday opener,
+# ~51h old, because thu_pre_tnf didn't open until 20:15Z. Opening earlier than the lock
+# window would be as bad the other way (a capture that then ages until the lock), so the
+# two stay one shared constant rather than two numbers that happen to match.
+_PRE_KICKOFF_WINDOW = LOCK_LEAD
 
 # (gameday, weekday, gametime) -- gametime is "HH:MM" 24h ET, games.gametime's format
 # (verified live 2026-09-18 against a real week-2 row: DET@BUF Thursday "20:15").
@@ -91,9 +91,16 @@ def compute_week_targets(games: list[GameRow]) -> list[Target]:
     rows. Every deadline is anchored to a real kickoff time from `games` rather than an
     assumed schedule shape (a flexed game, an early international kickoff, or a playoff
     round with a different day layout still gets a correct pre-kickoff deadline instead
-    of a guessed one). Window-open times (9:00 ET Sunday, 10:00 ET Tuesday/Saturday,
-    _PRE_KICKOFF_WINDOW before a Thu/Sun-late/Mon kickoff) are scheduling policy, not
+    of a guessed one). Window-open times (10:00 ET Tuesday/Saturday, _PRE_KICKOFF_WINDOW
+    before the Sun-early/Sun-late/Thu/Mon anchor kickoff) are scheduling policy, not
     sourced facts -- those are the only genuinely chosen numbers here.
+
+    Each pre-kickoff target is anchored to the earliest kickoff of its slate, so it
+    opens with that slate's lock window. Later kickoffs in the same slate (a 16:25 after
+    a 16:05, or SNF, which counts as sun_late) lock against the anchor's capture, up to
+    a few hours old. Windows may overlap (sun_early's with sat_market_movement's last
+    hour, sun_late's with sun_early's last ~3h); decide()'s catch-up collapsing fires the
+    newest one and marks the other superseded, so an overlap never costs a second call.
 
     tue_opener closes Wednesday 9:00 ET, not "whenever it eventually fires" -- a window
     left open past that isn't really an opening line any more (live evidence: it once
@@ -122,7 +129,7 @@ def compute_week_targets(games: list[GameRow]) -> list[Target]:
     targets = [
         Target("tue_opener", _et(tuesday, 10, 0), _et(wednesday, 9, 0)),
         Target("sat_market_movement", _et(saturday, 10, 0), _et(sunday, 8, 0)),
-        Target("sun_early", _et(sunday, 9, 0), sunday_kickoffs[0]),
+        Target("sun_early", sunday_kickoffs[0] - _PRE_KICKOFF_WINDOW, sunday_kickoffs[0]),
     ]
 
     late_kickoffs = [k for k in sunday_kickoffs if k.astimezone(_ET).hour >= 15]
@@ -195,8 +202,10 @@ def _fetch_games(conn: psycopg.Connection, season: int, week: int) -> list[GameR
 
 def ensure_week_targets(conn: psycopg.Connection, season: int, week: int) -> list[Target]:
     """Computes this week's target calendar and inserts any not-yet-seen rows as
-    'pending' (ON CONFLICT DO NOTHING -- never overwrites a target's captured/missed
-    state on a later call). Returns the full target list either way, for decide()."""
+    'pending'. An existing row is refreshed only while it's still pending, and only its
+    window (scheduled_for/deadline -- a calendar-rule change or a flexed kickoff moves
+    it); a captured/missed row is never touched, so its stored window stays the one it
+    was judged against. Returns the full target list either way, for decide()."""
     targets = compute_week_targets(_fetch_games(conn, season, week))
     if not targets:
         return targets
@@ -210,7 +219,12 @@ def ensure_week_targets(conn: psycopg.Connection, season: int, week: int) -> lis
             "INSERT INTO odds_snapshot_targets "
             "(season, week, target_id, scheduled_for, deadline, credits_estimate) "
             "VALUES (%s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (season, week, target_id) DO NOTHING",
+            "ON CONFLICT (season, week, target_id) DO UPDATE SET "
+            "scheduled_for = EXCLUDED.scheduled_for, deadline = EXCLUDED.deadline, "
+            "updated_at = now() "
+            "WHERE odds_snapshot_targets.status = 'pending' AND ("
+            "odds_snapshot_targets.scheduled_for IS DISTINCT FROM EXCLUDED.scheduled_for OR "
+            "odds_snapshot_targets.deadline IS DISTINCT FROM EXCLUDED.deadline)",
             rows,
         )
     return targets
