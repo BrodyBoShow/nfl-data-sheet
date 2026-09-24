@@ -141,7 +141,7 @@ Freshness tiers: **T0** every few minutes, **T1** hourly or several a day, **T2*
 | Piece | Phase | Job |
 |---|---|---|
 | Matchup synthesizer | 5 | Joins signals per game; projects spread and total; compares to market; writes edge cards and locks projections before kickoff into `projection_log` (immutable). Start simple: adjusted efficiency → points regression, backtested vs historical closing lines. |
-| Data sheet web app | 6 | Next.js + TypeScript on Vercel. Game view, player view, signal cross-reference and filters, matchup cards with sample sizes and staleness badges. |
+| Data sheet web app | 6 | Next.js + TypeScript on Vercel. Read-only week view and game view (matchup card plus the signals behind it), with sample sizes, stability, and `as_of` freshness. *(Scope narrowed 2026-09-24, see `docs/phases/P6.md` §0: player view → P7; signal cross-reference and auditor staleness badges deferred.)* |
 | Matchup narrator | 8, optional | On-demand prose from one card's signals, cached per game per day. Cannot introduce numbers not on the card. |
 
 ---
@@ -255,7 +255,7 @@ Live polling runs as **one looping job per game window**, not a new job every fe
 | **P3 Availability** | Availability collector, availability impact analyst | Current week's statuses stored with verified sources; impact signals for teams with key absences |
 | **P4 Market and environment** | Odds and weather collectors; market and environment analysts | Credit usage logged and under budget; weather only for outdoor games; signals written |
 | **P5 Synthesis and grading** | Synthesizer, projection log, grader, backtest 2019–2025 vs closing lines | Backtest report committed; projections lock pre-kickoff; grader writes results after games |
-| **P6 Data sheet UI** | Next.js app on Vercel reading Supabase views | Filter games/players, cross-reference signals, cards show sample size and staleness |
+| **P6 Data sheet UI** | Next.js app on Vercel reading Supabase's `web` schema (anon key, read-only grants + RLS): week view, game view | Week and game views render every card state; anon access verified by `scripts/verify_anon_access.py`; honesty test suite passes; deployed on Vercel Hobby *(revised 2026-09-24, see `docs/phases/P6.md`)* |
 | **P7 Role, scheme, intel** | Usage and scheme analysts; live news intel collector with rule-based tagging | Signals written; news items deduped and linked to teams and players via the crosswalk; no LLM calls |
 | **P8 Live and narrator** | Live collector, dispatcher tuning, optional LLM news parsing (Haiku batch, changed items only), optional narrator | Live scores during a game window; Actions minutes and credits reviewed |
 
