@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     supabase_db_url: str = Field(alias="SUPABASE_DB_URL")
     supabase_url: str | None = Field(default=None, alias="SUPABASE_URL")
     supabase_service_role_key: str | None = Field(default=None, alias="SUPABASE_SERVICE_ROLE_KEY")
+    # Publishable (sb_publishable_...) or legacy anon JWT. Only scripts/verify_anon_access.py
+    # and the web app use it; the pipeline never does.
+    supabase_anon_key: str | None = Field(default=None, alias="SUPABASE_ANON_KEY")
     odds_api_key: str | None = Field(default=None, alias="ODDS_API_KEY")
     discord_webhook_url: str | None = Field(default=None, alias="DISCORD_WEBHOOK_URL")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
