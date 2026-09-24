@@ -265,6 +265,48 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
 - **Status:** VERIFIED (live-called 2026-09-18, `/v4/sports/americanfootball_nfl/odds/`
   only — ESPN embedded lines still unverified, see below).
 - **License:** The Odds API free tier terms apply.
+- **Display terms:** read 2026-09-24 for P6 step 1 from
+  https://the-odds-api.com/terms-and-conditions.html. The page says "Last updated: 31
+  August 2026", and it has no clause specific to free plans.
+  - **Quoted verbatim from "Restrictions":**
+    > Do not resell, repackage, or redistribute our data as a standalone data product.
+    > This includes, but is not limited to, offering our data through your own API, data
+    > feed, downloadable files, or any other format intended to serve as a source of raw
+    > data for others.
+    >
+    > We support and encourage the use of our data in websites, mobile apps, dashboards,
+    > analytical tools, and other user-facing applications, including commercial use,
+    > provided our data is not the primary product being sold or redistributed.
+    >
+    > Permitted uses include, but are not limited to:
+    > - Storing our data and retaining it indefinitely
+    > - Displaying our data in a UI, website, or mobile app, including for commercial use
+    > - Using our data in research papers and analytical dashboards
+    > - Calculating and displaying values you derive from our data
+    > - Using our data to train statistical and machine learning models
+    >
+    > We mainly prohibit reselling the data as a raw data feed, i.e. a competing product.
+    > In other words, don't resell our data as your own API or data source.
+    >
+    > Attribution to The Odds API is not required, but is always appreciated.
+    >
+    > If we reasonably suspect a violation of these terms, including the resale or
+    > redistribution of our data as a data service, we reserve the right to revoke your
+    > API key and block future access.
+    >
+    > If you are unsure whether your use case is permitted, please contact us.
+  - **Quoted verbatim from "Responsible Gambling":**
+    > If the Service is used to promote bookmakers or gambling services, users are
+    > encouraged to display appropriate responsible gambling messaging (e.g., "Gamble
+    > Responsibly. 18+") on their customer-facing platforms.
+  - **Decision:** open for the user; see `docs/phases/P6.md` step 1.
+    - Displaying the consensus lines and the derived movement signals on the site is the
+      "Calculating and displaying values you derive from our data" item.
+    - The terms have no separate "derived data" clause.
+    - The part that needs a decision is the `web` schema (migration 0026). It's a
+      PostgREST API readable by anyone holding the anon key, and it returns market-sector
+      signals in bulk. That's adjacent to "offering our data through your own API ...
+      intended to serve as a source of raw data for others".
 - **Reliability:** Credit-limited.
 - **Freshness:** T1.
 - **Params/shape/limits:**
