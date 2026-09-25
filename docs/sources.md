@@ -683,6 +683,9 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     - The outage guard (`is_source_outage`, 50%) can't see this: the feed is always
       full-size. This is the mechanism behind "ESPN drops IR/PUP players once they're old
       news" below.
+    - **Fixed 2026-09-25:** ESPN `Injured Reserve`/`Out`/`Doubtful` are no longer cleared
+      by absence; they leave that state only through a listed row. Stale states are
+      resolved in the analyst. See `docs/phases/P3.md`, "Correctness item".
   - **Sleeper**: `GET https://api.sleeper.app/v1/players/nfl`, no auth. Full dump,
     ~14.6MB, 12,228 players (verified count) keyed by Sleeper's own player id. No
     documented rate limit; CDN-cached (`s-maxage=600`) — the ≤1/day cap is a courtesy

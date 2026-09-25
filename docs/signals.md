@@ -325,6 +325,20 @@ itself is the only signal available. Every designation buckets into exactly one 
   silently treated as healthy).
 - **`non_injury_unavailable`** — `NA`, `Sus`, `COV`, `DNR`.
 
+**Who counts as currently flagged** (`_resolve_current_state`): a player is flagged if
+any source currently lists a non-healthy designation, and an ESPN clearance never
+overrides an active Sleeper designation.
+- Since 2026-09-25, ESPN `Injured Reserve`/`Out`/`Doubtful` are never cleared by absence.
+  ESPN's feed is a 25-per-team recency window (`docs/sources.md`).
+- When such a state has been missing from ESPN's polls past the miss threshold, it's
+  **stale**:
+  - It yields to any current Sleeper row for the player, flagged or cleared.
+  - It yields to a snap in a game after ESPN last listed him.
+  - Otherwise the player stays flagged with ESPN's designation.
+- Staleness reads `injury_presence`, which is current state, so it's exact for the live
+  week and approximate when an earlier week is recomputed. See `docs/phases/P3.md`,
+  "Correctness item".
+
 Both `injury` and `non_injury_unavailable` count as "flagged" for
 `snap_share_at_risk`/`snap_share_redistribution_gain`/`ol_cluster_count`/
 `secondary_cluster_count` (a suspended starter's snaps are just as much at risk as an

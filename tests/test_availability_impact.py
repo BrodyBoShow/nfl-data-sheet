@@ -102,6 +102,58 @@ def test_resolve_current_state_single_source_cleared_is_healthy():
     assert r["designation"] is None
 
 
+# Stale ESPN states (docs/phases/P3.md, "Correctness item"): an ESPN IR/Out/Doubtful the
+# collector holds past the miss threshold yields to Sleeper or to a later snap, and
+# otherwise stands with its age.
+
+_SEEN = datetime(2026, 9, 20, 12, tzinfo=UTC)
+
+
+def _stale_espn(designation: str = "Injured Reserve") -> dict:
+    return {"team": "KC", "designation": designation, "stale": True, "last_seen_at": _SEEN}
+
+
+def test_stale_espn_yields_to_a_cleared_sleeper_row():
+    sources = {"espn": _stale_espn(), "sleeper": {"team": "KC", "designation": None}}
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] is None
+
+
+def test_stale_espn_yields_to_a_flagged_sleeper_row():
+    sources = {"espn": _stale_espn("Out"), "sleeper": {"team": "KC", "designation": "IR"}}
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] == "IR"
+    assert r["source"] == "sleeper"
+    assert r["espn_stale_since"] is None
+
+
+def test_stale_espn_alone_stands_with_its_age():
+    r = _resolve_current_state("p1", {"espn": _stale_espn()})
+    assert r["designation"] == "Injured Reserve"
+    assert r["espn_stale_since"] == _SEEN
+
+
+def test_stale_espn_alone_clears_when_he_played_after_espn_last_listed_him():
+    played = datetime(2026, 9, 21, 17, tzinfo=UTC)
+    r = _resolve_current_state("p1", {"espn": _stale_espn()}, last_played_at=played)
+    assert r["designation"] is None
+    assert r["team"] == "KC"
+
+
+def test_stale_espn_alone_stands_when_his_last_game_predates_espn_last_listing():
+    played = datetime(2026, 9, 14, 17, tzinfo=UTC)
+    r = _resolve_current_state("p1", {"espn": _stale_espn()}, last_played_at=played)
+    assert r["designation"] == "Injured Reserve"
+
+
+def test_fresh_espn_state_is_unaffected_by_the_stale_rule():
+    sources = {"espn": {"team": "KC", "designation": "Out", "stale": False, "last_seen_at": _SEEN},
+               "sleeper": {"team": "KC", "designation": None}}
+    r = _resolve_current_state("p1", sources)
+    assert r["designation"] == "Out"
+    assert r["espn_stale_since"] is None
+
+
 def test_compute_availability_category_encodes_both_flagged_buckets():
     flagged = [
         {"player_id": "p1", "category": _CATEGORY_INJURY},

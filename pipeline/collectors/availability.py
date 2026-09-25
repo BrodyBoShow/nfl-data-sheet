@@ -25,11 +25,14 @@ from pipeline.core.db import delete_rows, filter_changed, upsert_rows
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 from pipeline.core.injury_changelog import (
+    MISS_THRESHOLD,
     build_cleared_row,
     build_presence_rows,
     decide_injury_row,
     detect_cleared,
+    expected_present_count,
     is_source_outage,
+    sticky_ids,
 )
 from pipeline.core.schedule import resolve_season_week
 from pipeline.core.team_aliases import normalize_team_abbr
@@ -436,13 +439,16 @@ class AvailabilityCollector(Collector):
             active_from_db = {
                 sid: state for sid, state in last_state.items() if not state["is_cleared"]
             }
-            if is_source_outage(len(active_from_db), len(present_this_poll)):
+            sticky = sticky_ids(source, active_from_db)
+            expected = expected_present_count(set(active_from_db), present_this_poll, sticky)
+            if is_source_outage(expected, len(present_this_poll)):
                 # A truncated/outage response must never mark the whole active roster
                 # cleared -- that would silently re-add everyone as "new" first_seen rows
                 # on the next good poll. Skip clearance for this source this run; the
                 # auditor alerts on agent_runs.meta['outage_guard'].
                 outage_guard[source] = {
                     "active": len(active_from_db),
+                    "expected": expected,
                     "seen": len(present_this_poll),
                 }
                 continue
@@ -457,8 +463,14 @@ class AvailabilityCollector(Collector):
                 sid: state["consecutive_misses"] for sid, state in presence_state.items()
             }
             to_clear, updated_counts = detect_cleared(
-                active_from_db, present_this_poll, prior_counts
+                active_from_db, present_this_poll, prior_counts, sticky=sticky
             )
+            # Held by the ESPN absence rule (injury_changelog.ESPN_ABSENCE_STICKY): past
+            # the miss threshold but not cleared. Recorded so the hold is visible per run.
+            if source == "espn":
+                counts["absence_held"] = sum(
+                    1 for sid in sticky if updated_counts.get(sid, 0) >= MISS_THRESHOLD
+                )
             for source_player_id in to_clear:
                 prior_state = active_from_db[source_player_id]
                 cleared_row = build_cleared_row(

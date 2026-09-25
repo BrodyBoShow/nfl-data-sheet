@@ -3,7 +3,8 @@ Job: Compute injury-driven availability-impact signals -- snap-share redistribut
      replacement depth-order delta, OL/secondary cluster counts, practice-trend risk, and
      an availability_category label -- for players and teams currently flagged unavailable
      (injured or otherwise) this week.
-Reads: injuries, agent_runs, snaps (staged), depth (staged), players, teams
+Reads: injuries, injury_presence (ESPN staleness), agent_runs, snaps (staged), depth
+       (staged), players, teams, games
 Writes: signals (sector='availability')
 Tier: T1
 Phase: P3
@@ -22,7 +23,8 @@ import psycopg
 from pipeline.core.base import Analyst, RunContext, WorkResult
 from pipeline.core.db import upsert_rows
 from pipeline.core.freshness import get_last_value
-from pipeline.core.schedule import et_day_bounds, to_gameday, week_window
+from pipeline.core.injury_changelog import MISS_THRESHOLD, is_absence_sticky
+from pipeline.core.schedule import et_day_bounds, kickoff_utc, to_gameday, week_window
 
 _log = logging.getLogger(__name__)
 
@@ -529,17 +531,41 @@ def _build_signals_frame(
 
 
 def _resolve_current_state(
-    player_id: str, sources: dict[str, dict[str, Any]]
+    player_id: str,
+    sources: dict[str, dict[str, Any]],
+    last_played_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Cross-source resolution -- a player is flagged if ANY source that has EVER listed
     them currently says non-healthy; an ESPN clearance must never override an active
-    Sleeper designation. ESPN's injury report is a weekly-report proxy that drops
-    IR/PUP/Reserve players once they're old news, while Sleeper keeps carrying them --
-    verified in P3 (~210 Sleeper-only flagged players, mostly IR/PUP/Reserve). Healthy
-    only when every source that has ever listed this player currently says cleared or
-    healthy. When exactly one source is flagged, its designation/team wins. When both
-    are flagged, ESPN's designation/team wins (the original reason for the ESPN
-    preference -- its vocabulary is more structured)."""
+    Sleeper designation. ESPN's feed is each team's 25 most recently updated entries
+    (docs/sources.md), so it drops IR/PUP/Reserve players once they're old news, while
+    Sleeper keeps carrying them -- verified in P3 (~210 Sleeper-only flagged players,
+    mostly IR/PUP/Reserve). Healthy only when every source that has ever listed this
+    player currently says cleared or healthy. When exactly one source is flagged, its
+    designation/team wins. When both are flagged, ESPN's designation/team wins (the
+    original reason for the ESPN preference -- its vocabulary is more structured).
+
+    Stale ESPN states (docs/phases/P3.md, "Correctness item"): an ESPN IR/Out/Doubtful
+    state the collector is holding past the miss threshold (`stale`, set by
+    _fetch_current_state_by_source) isn't cleared by absence, but it's also not fresh.
+    It yields to Sleeper whenever Sleeper has a current row for the player (flagged or
+    cleared), and to a snap: `last_played_at` (latest kickoff with >=1 snap) after ESPN
+    last listed him means he played, so the stale ESPN state is dropped. Otherwise it
+    stands, and `espn_stale_since` carries when ESPN last listed him."""
+    espn_stale_since = None
+    espn = sources.get("espn")
+    if espn is not None and espn.get("stale"):
+        seen_at = espn.get("last_seen_at")
+        played_since = last_played_at is not None and seen_at is not None and (
+            last_played_at > seen_at
+        )
+        if "sleeper" in sources or played_since:
+            if len(sources) == 1:
+                return {"player_id": player_id, "team": espn["team"], "designation": None,
+                        "source": None, "espn_stale_since": None}
+            sources = {s: st for s, st in sources.items() if s != "espn"}
+        else:
+            espn_stale_since = seen_at
     flagged = {
         source: state
         for source, state in sources.items()
@@ -547,7 +573,8 @@ def _resolve_current_state(
     }
     if not flagged:
         team = sources.get("espn", next(iter(sources.values())))["team"]
-        return {"player_id": player_id, "team": team, "designation": None, "source": None}
+        return {"player_id": player_id, "team": team, "designation": None, "source": None,
+                "espn_stale_since": None}
     driving_source = "espn" if "espn" in flagged else next(iter(flagged))
     state = flagged[driving_source]
     return {
@@ -555,39 +582,87 @@ def _resolve_current_state(
         "team": state["team"],
         "designation": state["designation"],
         "source": driving_source,
+        "espn_stale_since": espn_stale_since if driving_source == "espn" else None,
     }
 
 
 def _fetch_current_state_by_source(
     conn: psycopg.Connection, season: int, week: int, season_type: str
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    """{player_id: {source: {team, designation, is_cleared}}} -- every source's latest
-    row for that player as of this week's end, not rows literally stamped with this week
-    (see _fetch_current_injuries). Exposed separately from _fetch_current_injuries so a
-    diagnostic (e.g. scripts/verify_injury_changelog.py) can inspect what each source
-    independently says without reimplementing this query."""
+    """{player_id: {source: {team, designation, is_cleared, stale, last_seen_at}}} --
+    every source's latest row for that player as of this week's end, not rows literally
+    stamped with this week (see _fetch_current_injuries). Exposed separately from
+    _fetch_current_injuries so a diagnostic (e.g. scripts/verify_injury_changelog.py) can
+    inspect what each source independently says without reimplementing this query.
+
+    `stale` (ESPN only): the state is one the collector never clears by absence
+    (injury_changelog.is_absence_sticky) and injury_presence shows the player missing
+    from at least MISS_THRESHOLD consecutive ESPN polls. `last_seen_at` is ESPN's last
+    sighting. injury_presence is current state, not history, so staleness is exact for
+    the live week and approximate when an earlier week is recomputed."""
     _, week_end = week_window(conn, season, week, season_type)
     _, window_end = et_day_bounds(week_end)
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT DISTINCT ON (player_id, source)
-                player_id, source, team, designation, is_cleared
-            FROM injuries
-            WHERE player_id IS NOT NULL AND as_of < %s
-            ORDER BY player_id, source, as_of DESC
+            SELECT DISTINCT ON (i.player_id, i.source)
+                i.player_id, i.source, i.team, i.designation, i.is_cleared,
+                p.consecutive_misses, p.last_seen_at
+            FROM injuries i
+            LEFT JOIN injury_presence p
+                ON p.source = i.source AND p.source_player_id = i.source_player_id
+            WHERE i.player_id IS NOT NULL AND i.as_of < %s
+            ORDER BY i.player_id, i.source, i.as_of DESC
             """,
             (window_end,),
         )
         rows = cur.fetchall()
     by_player: dict[str, dict[str, dict[str, Any]]] = {}
-    for player_id, source, team, designation, is_cleared in rows:
+    for player_id, source, team, designation, is_cleared, misses, last_seen_at in rows:
+        stale = (
+            not is_cleared
+            and is_absence_sticky(source, designation)
+            and (misses or 0) >= MISS_THRESHOLD
+        )
         by_player.setdefault(player_id, {})[source] = {
             "team": team,
             "designation": designation,
             "is_cleared": is_cleared,
+            "stale": stale,
+            "last_seen_at": last_seen_at,
         }
     return by_player
+
+
+def _fetch_last_played(
+    conn: psycopg.Connection, player_ids: list[str], before: datetime
+) -> dict[str, datetime]:
+    """{player_id: latest kickoff (UTC) of a game where he logged >= 1 offense, defense,
+    or ST snap}, kickoffs before `before` only. Only asked for players holding a stale
+    ESPN state -- a snap after ESPN last listed him is positive evidence he's back."""
+    if not player_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT s.player_id, g.gameday, g.gametime
+            FROM snaps s JOIN games g USING (game_id)
+            WHERE s.player_id = ANY(%s)
+              AND COALESCE(s.offense_snaps, 0) + COALESCE(s.defense_snaps, 0)
+                  + COALESCE(s.st_snaps, 0) > 0
+            """,
+            (player_ids,),
+        )
+        rows = cur.fetchall()
+    latest: dict[str, datetime] = {}
+    for player_id, gameday, gametime in rows:
+        if gameday is None or gametime is None:
+            continue
+        day = gameday if isinstance(gameday, date) else date.fromisoformat(str(gameday))
+        kickoff = kickoff_utc(day, gametime)
+        if kickoff < before and (player_id not in latest or kickoff > latest[player_id]):
+            latest[player_id] = kickoff
+    return latest
 
 
 def _fetch_current_injuries(
@@ -600,7 +675,14 @@ def _fetch_current_injuries(
     target week must still show up, e.g. Questionable since week 2, no change in
     week 3)."""
     by_player = _fetch_current_state_by_source(conn, season, week, season_type)
-    return [_resolve_current_state(pid, sources) for pid, sources in by_player.items()]
+    stale_ids = [pid for pid, s in by_player.items() if s.get("espn", {}).get("stale")]
+    _, week_end = week_window(conn, season, week, season_type)
+    _, window_end = et_day_bounds(week_end)
+    last_played = _fetch_last_played(conn, stale_ids, window_end)
+    return [
+        _resolve_current_state(pid, sources, last_played.get(pid))
+        for pid, sources in by_player.items()
+    ]
 
 
 def _fetch_poll_days_by_source(

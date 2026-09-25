@@ -6,8 +6,10 @@ from pipeline.core.injury_changelog import (
     build_presence_rows,
     decide_injury_row,
     detect_cleared,
+    expected_present_count,
     is_source_outage,
     replay_history,
+    sticky_ids,
 )
 
 # --------------------------------------------------------------------------------------
@@ -365,3 +367,95 @@ def test_replay_sleeper_skip_day_leaves_no_batch_so_it_is_not_a_miss():
     kept, cleared = replay_history(rows)
     assert cleared == []
     assert [r["as_of"] for r in kept] == [1]  # as_of=3 is an unchanged repeat, dropped
+
+
+# --------------------------------------------------------------------------------------
+# ESPN absence-sticky designations (docs/phases/P3.md, "Correctness item"): ESPN's feed
+# is a 25-per-team recency window, so IR/Out/Doubtful players age out of it without
+# recovering. Absence never clears them; only a listed row does.
+# --------------------------------------------------------------------------------------
+
+
+def test_sticky_ids_are_espn_ir_out_doubtful_only():
+    active = {
+        "ir": {"designation": "Injured Reserve"},
+        "out": {"designation": "Out"},
+        "dbt": {"designation": "Doubtful"},
+        "q": {"designation": "Questionable"},
+        "act": {"designation": "Active"},
+    }
+    assert sticky_ids("espn", active) == {"ir", "out", "dbt"}
+    sleeper_active = {"ir": {"designation": "IR"}, "out": {"designation": "Out"}}
+    assert sticky_ids("sleeper", sleeper_active) == set()
+
+
+def test_detect_cleared_never_clears_sticky_and_keeps_counting_misses():
+    active = {"ir": {"team": "KC"}, "q": {"team": "KC"}}
+    to_clear, updated = detect_cleared(
+        active, present_this_poll=set(), prior_counts={"ir": 5, "q": 1}, sticky={"ir"}
+    )
+    assert to_clear == ["q"]
+    assert updated == {"ir": 6}
+
+
+def test_expected_present_count_excludes_absent_sticky_only():
+    active = {"a", "b", "ir1", "ir2"}
+    assert expected_present_count(active, present={"a", "b"}, sticky={"ir1", "ir2"}) == 2
+    # a sticky player who IS present still counts
+    assert expected_present_count(active, present={"a", "ir1"}, sticky={"ir1", "ir2"}) == 3
+
+
+def test_replay_espn_ir_absent_two_batches_is_held_not_cleared():
+    rows = [
+        _hist_row(source_player_id="IR", as_of=1, designation="Injured Reserve"),
+        _hist_row(source_player_id="Q", as_of=1, designation="Questionable"),
+        _hist_row(source_player_id="X", as_of=1),
+        _hist_row(source_player_id="X", as_of=2),
+        _hist_row(source_player_id="X", as_of=3),
+    ]
+    _, cleared = replay_history(rows)
+    assert [c["source_player_id"] for c in cleared] == ["Q"]
+
+
+def test_replay_espn_ir_leaves_state_through_a_listed_row():
+    rows = [
+        _hist_row(source_player_id="IR", as_of=1, designation="Injured Reserve"),
+        _hist_row(source_player_id="X", as_of=2),
+        _hist_row(source_player_id="X", as_of=3),
+        _hist_row(source_player_id="IR", as_of=4, designation="Active"),
+    ]
+    kept, cleared = replay_history(rows)
+    assert cleared == []
+    assert [r["designation"] for r in kept if r["source_player_id"] == "IR"] == [
+        "Injured Reserve",
+        "Active",
+    ]
+
+
+def test_replay_sleeper_ir_still_clears_on_absence():
+    rows = [
+        _hist_row(source="sleeper", source_player_id="IR", as_of=1, designation="IR"),
+        _hist_row(source="sleeper", source_player_id="X", as_of=1),
+        _hist_row(source="sleeper", source_player_id="X", as_of=2),
+        _hist_row(source="sleeper", source_player_id="X", as_of=3),
+    ]
+    _, cleared = replay_history(rows)
+    assert [c["source_player_id"] for c in cleared] == ["IR"]
+
+
+def test_replay_held_sticky_players_do_not_trip_the_outage_guard():
+    # 3 held IR players plus 2 normal ones: a poll seeing the 2 normal ones is a full
+    # feed, not an outage, so the Questionable player absent from it still clears.
+    rows = [
+        *[_hist_row(source_player_id=f"IR{i}", as_of=1, designation="Injured Reserve")
+          for i in range(3)],
+        _hist_row(source_player_id="A", as_of=1),
+        _hist_row(source_player_id="B", as_of=1),
+        _hist_row(source_player_id="Q", as_of=1),
+        _hist_row(source_player_id="A", as_of=2),
+        _hist_row(source_player_id="B", as_of=2),
+        _hist_row(source_player_id="A", as_of=3),
+        _hist_row(source_player_id="B", as_of=3),
+    ]
+    _, cleared = replay_history(rows)
+    assert [c["source_player_id"] for c in cleared] == ["Q"]

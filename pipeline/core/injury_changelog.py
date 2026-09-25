@@ -25,6 +25,40 @@ _STATE_FIELDS = ("team", "designation", "body_part")
 # loses practice data no structured field carries. See docs/phases/P3.md.
 _PRACTICE_NOTES_RE = re.compile(r"practic", re.IGNORECASE)
 
+MISS_THRESHOLD = 2
+
+# ESPN's injuries feed is each team's 25 most recently updated entries, not a full list
+# (verified live 2026-09-25, docs/sources.md). These are the designations that stop
+# updating and age out of that window, so for them absence is evidence of staleness, not
+# recovery (docs/phases/P3.md, "Correctness item"). Measured 2026-09-18..25: 42 of ESPN's
+# 281 absence-clears were IR/Out, none of those players had logged a snap since, while
+# 191 genuine exits from these designations were posted as fresh listed entries. Such a
+# player leaves the state only through a listed row. Sleeper is a full dump, not a
+# window, and keeps the absence rule; so does Questionable (a weekly designation).
+ESPN_ABSENCE_STICKY = frozenset({"Injured Reserve", "Out", "Doubtful"})
+
+
+def is_absence_sticky(source: str, designation: str | None) -> bool:
+    """True iff absence from this source's feed must never clear this designation."""
+    return source == "espn" and designation in ESPN_ABSENCE_STICKY
+
+
+def sticky_ids(source: str, active: dict[str, dict[str, Any]]) -> set[str]:
+    """The source_player_ids in `active` (one source's last-known-active states) that
+    absence can't clear. One helper for the collector and replay_history, so they can't
+    disagree on the rule."""
+    return {
+        sid for sid, state in active.items() if is_absence_sticky(source, state.get("designation"))
+    }
+
+
+def expected_present_count(active: set[str], present: set[str], sticky: set[str]) -> int:
+    """The outage guard's denominator: active players this poll should contain. A sticky
+    player already absent is expected to stay out of ESPN's recency window, so counting
+    them would let held IR/Out players pile up until the guard trips on every poll and
+    silently disables clearing for everyone else."""
+    return len(active - (sticky - present))
+
 
 def decide_injury_row(
     prior: dict[str, Any] | None, candidate: dict[str, Any]
@@ -53,7 +87,8 @@ def detect_cleared(
     present_this_poll: set[str],
     prior_counts: dict[str, int],
     *,
-    miss_threshold: int = 2,
+    miss_threshold: int = MISS_THRESHOLD,
+    sticky: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[str], dict[str, int]]:
     """active_from_db: {source_player_id: last-known state} for ONE source, already
     restricted by the caller to is_cleared=false rows. present_this_poll: source_player_ids
@@ -78,6 +113,11 @@ def detect_cleared(
       whether previously tracked or brand new) plus every previously-active id that's
       absent but still under miss_threshold (incremented by 1). Ids in to_clear are
       deliberately excluded here; the caller removes their row instead of upserting it.
+
+    `sticky` (see sticky_ids): ids absence can never clear. Their misses keep counting
+    past miss_threshold and stay in updated_counts, so injury_presence records how long
+    they've been out of the feed (the analyst reads that as staleness), but they're
+    never in to_clear.
     """
     updated_counts: dict[str, int] = dict.fromkeys(present_this_poll, 0)
     to_clear: list[str] = []
@@ -85,7 +125,7 @@ def detect_cleared(
         if source_player_id in present_this_poll:
             continue
         misses = prior_counts.get(source_player_id, 0) + 1
-        if misses >= miss_threshold:
+        if misses >= miss_threshold and source_player_id not in sticky:
             to_clear.append(source_player_id)
         else:
             updated_counts[source_player_id] = misses
@@ -178,7 +218,11 @@ def replay_history(
         for as_of in sorted(batches):
             batch_rows = batches[as_of]
             present_ids = {row["source_player_id"] for row in batch_rows}
-            active_count_before = len(active)
+            # The guard compares against who was active BEFORE this batch, minus sticky
+            # players already expected to be out of the window -- same as the collector.
+            expected = expected_present_count(
+                set(active), present_ids, sticky_ids(source, active)
+            )
 
             for row in batch_rows:
                 sid = row["source_player_id"]
@@ -194,10 +238,12 @@ def replay_history(
                 active[sid] = {"player_id": row["player_id"], "team": row["team"],
                                 "designation": row["designation"]}
 
-            if is_source_outage(active_count_before, len(present_ids)):
+            if is_source_outage(expected, len(present_ids)):
                 continue
 
-            to_clear, miss_counts = detect_cleared(active, present_ids, miss_counts)
+            to_clear, miss_counts = detect_cleared(
+                active, present_ids, miss_counts, sticky=sticky_ids(source, active)
+            )
 
             for sid in to_clear:
                 prior_state = active.pop(sid)
