@@ -15,6 +15,7 @@ export interface EdgeValidation {
 
 export interface BacktestSummary {
   model_version: string;
+  fit_seasons: number[]; // seasons the coefficients were fit on (cards: projection_status 5)
   test_seasons: number[];
   n_games: number;
   margin_mae: { model: number; close: number };

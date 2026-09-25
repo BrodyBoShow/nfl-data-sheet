@@ -128,9 +128,14 @@ export function buildSummary(reportMd, coefficients) {
     }
   }
   if (!Object.keys(buckets).length) throw new ContentError("calibration has no buckets");
+  const fitSeasons = coefficients.fit_seasons;
+  if (!Array.isArray(fitSeasons) || !fitSeasons.every(Number.isInteger)) {
+    throw new ContentError("model_coefficients.json has no fit_seasons list");
+  }
 
   return {
     model_version: coefficients.model_version,
+    fit_seasons: fitSeasons,
     test_seasons: seasons,
     n_games: n,
     margin_mae: {

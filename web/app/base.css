@@ -150,6 +150,56 @@ table.data .sticky {
   left: 0;
   background: var(--bg);
 }
+table.data th.num,
+table.data td.num {
+  text-align: right;
+}
+/* Row headers (e.g. the matchup) stay at body weight; the spec allows 400/500/600. */
+table.data tbody th {
+  font-weight: 400;
+}
+/* A day-group label stays in view while a wide table scrolls sideways. */
+table.data .group-label {
+  display: inline-block;
+  position: sticky;
+  left: var(--cell-pad-x);
+}
+
+/* Page head and week navigation. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.week-nav {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+.nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+}
+.nav-row a[aria-current="page"] {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+/* Favorite-flip marker in a numeric cell: a word in UI type. The markup puts a real
+   space after it, so text extraction and screen readers get "flipped CHI −5.4". */
+.flip {
+  font-family: var(--font-sans);
+}
+
+.legend {
+  margin-top: var(--space-2);
+  max-width: 90ch;
+}
 
 /* Validation / state tag: hairline border in --warn, 2px radius max. */
 .tag {

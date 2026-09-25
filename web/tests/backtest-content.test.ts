@@ -23,6 +23,7 @@ describe("buildSummary on the committed report", () => {
   it("reads the out-of-sample margin MAE and the pooled spread edge correlation", () => {
     const s = summarize();
     expect(s.n_games).toBe(1615);
+    expect(s.fit_seasons).toEqual([2019, 2020, 2021, 2022, 2023, 2024, 2025]);
     expect(s.test_seasons).toEqual([2020, 2021, 2022, 2023, 2024, 2025]);
     expect(s.margin_mae).toEqual({ model: 10.32, close: 9.76 });
     expect(s.spread_edge_corr).toEqual({ r: -0.032, ci: [-0.08, 0.016], n: 1615, validated: false });
@@ -56,6 +57,7 @@ describe("buildSummary fails loudly instead of misreading", () => {
     ["report and coefficients disagreeing on n", () => summarize(report, { ...coefficients, calibration: { ...coefficients.calibration, n_games: 1600 } }), /disagree: margin n 1615 vs calibration.n_games 1600/],
     ["report and coefficients disagreeing on seasons", () => summarize(report, { ...coefficients, calibration: { ...coefficients.calibration, test_seasons: [2021, 2022] } }), /disagree: report seasons/],
     ["coefficients without calibration", () => summarize(report, { model_version: "x" }), /no calibration block/],
+    ["coefficients without fit_seasons", () => summarize(report, { ...coefficients, fit_seasons: undefined }), /no fit_seasons/],
   ];
   it.each(broken)("throws on %s", (_, run, message) => {
     expect(run).toThrow(message);

@@ -1,7 +1,8 @@
 // Layout check (docs/phases/P6.md §7, step 2 onward): no horizontal page scroll at
 // 375px and 1280px, light and dark, and the styling is live. An unstyled page has no
 // overflow either, so this also checks that tokens and fonts actually loaded. From
-// step 4: the backtest status line fits on one line at 1280px (§5).
+// step 4: the backtest status line fits on one line at 1280px (§5). From step 5: at
+// 1280px no data table needs its own horizontal scroll.
 //
 // Drives the locally installed Chrome (playwright-core, no browser download) against
 // a running `next start`.
@@ -56,6 +57,10 @@ for (const [width, scheme] of [[375, "light"], [1280, "light"], [375, "dark"], [
       bg: cs("body")?.backgroundColor,
       statusSize: cs(".status-line")?.fontSize,
       titleSize: cs(".t-title")?.fontSize,
+      // Wide tables scroll inside .table-scroll. On desktop they should fit without that.
+      tablesOverflowing: [...document.querySelectorAll(".table-scroll")].filter(
+        (el) => el.scrollWidth > el.clientWidth,
+      ).length,
       statusLines: (() => {
         const el = document.querySelector(".status-line");
         if (!el) return null;
@@ -75,11 +80,13 @@ for (const [width, scheme] of [[375, "light"], [1280, "light"], [375, "dark"], [
     m.fontsLoaded.includes("IBM Plex Mono");
   // §5: the status line is one line in the header rule on desktop. It may wrap on phones.
   const statusOneLine = width < 1280 || m.statusLines === 1;
-  const pass = noHScroll && styled && statusOneLine;
+  const tablesFit = width < 1280 || m.tablesOverflowing === 0;
+  const pass = noHScroll && styled && statusOneLine && tablesFit;
   ok &&= pass;
   console.log(
     `${pass ? "PASS" : "FAIL"}  ${width}px ${scheme}  styled=${styled} ` +
-      `scrollWidth=${m.scrollW} clientWidth=${m.clientW} statusLines=${m.statusLines} bg=${m.bg}`,
+      `scrollWidth=${m.scrollW} clientWidth=${m.clientW} statusLines=${m.statusLines} ` +
+      `tablesOverflowing=${m.tablesOverflowing} bg=${m.bg}`,
   );
   await page.close();
 }
