@@ -42,8 +42,31 @@ def test_decide_changed_when_body_part_differs():
     assert decide_injury_row(_state(body_part="Ankle"), _state()) == "changed"
 
 
-def test_decide_changed_when_notes_differs():
-    assert decide_injury_row(_state(notes="old"), _state()) == "changed"
+def test_decide_changed_when_notes_differs_and_mention_practice():
+    new = _state(notes="He was limited in practice Wednesday.")
+    assert decide_injury_row(_state(notes="old"), new) == "changed"
+
+
+def test_decide_practice_match_is_broad_and_case_insensitive():
+    # "unable to practice" and "Practiced" both count -- recall over precision.
+    texts = ("Unable to practice again.", "He Practiced fully.", "Signed to the practice squad.")
+    for text in texts:
+        assert decide_injury_row(_state(notes="old"), _state(notes=text)) == "changed", text
+
+
+def test_decide_skips_notes_only_change_without_practice_language():
+    new = _state(notes="Folk missed a 53-yard field goal in the fourth quarter.")
+    assert decide_injury_row(_state(notes="old blurb"), new) is None
+
+
+def test_decide_skips_when_notes_drop_practice_language():
+    prior = _state(notes="Limited in practice Wednesday.")
+    assert decide_injury_row(prior, _state(notes="Expected to play Sunday.")) is None
+
+
+def test_decide_changed_when_designation_differs_even_if_notes_lack_practice():
+    prior = _state(designation="Out", notes="old")
+    assert decide_injury_row(prior, _state(notes="new blurb")) == "changed"
 
 
 def test_decide_skips_when_nothing_tracked_changed():

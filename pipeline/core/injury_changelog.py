@@ -10,10 +10,20 @@ Phase: P3
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
-_TRACKED_FIELDS = ("team", "designation", "body_part", "notes")
+_STATE_FIELDS = ("team", "designation", "body_part")
+
+# A notes-only change is written only when the new text mentions practice at all.
+# Deliberately broad (user decision, 2026-09-25): measured on 2026-09-18..25, 38% of all
+# change-log rows were ESPN rewriting a news blurb with nothing else changed, but those
+# blurbs are the only place either source states practice participation ("was limited in
+# practice Wednesday"), in prose. A plain substring over-matches ("practice squad") and
+# that's the intended trade -- a false positive costs one row, a false negative silently
+# loses practice data no structured field carries. See docs/phases/P3.md.
+_PRACTICE_NOTES_RE = re.compile(r"practic", re.IGNORECASE)
 
 
 def decide_injury_row(
@@ -21,13 +31,19 @@ def decide_injury_row(
 ) -> Literal["first_seen", "changed"] | None:
     """prior/candidate: {team, designation, body_part, notes} for one (source,
     source_player_id). None prior -> first appearance, always write. Otherwise write iff
-    any tracked field differs from the last stored state. Never compares `raw` or
-    `season`/`week`/`season_type` -- those can shift without the tracked fields changing
-    (e.g. ESPN's raw.details.returnDate ticking forward) and aren't what the change-log
-    exists to capture."""
+    team/designation/body_part differs from the last stored state, or notes differs AND
+    the new notes mention practice (_PRACTICE_NOTES_RE). A notes-only change without
+    practice language isn't written, so the stored notes can lag the feed's latest blurb
+    until the next written row. Never compares `raw` or `season`/`week`/`season_type` --
+    those can shift without the tracked fields changing (e.g. ESPN's
+    raw.details.returnDate ticking forward) and aren't what the change-log exists to
+    capture."""
     if prior is None:
         return "first_seen"
-    if any(prior.get(f) != candidate.get(f) for f in _TRACKED_FIELDS):
+    if any(prior.get(f) != candidate.get(f) for f in _STATE_FIELDS):
+        return "changed"
+    new_notes = candidate.get("notes")
+    if prior.get("notes") != new_notes and _PRACTICE_NOTES_RE.search(new_notes or ""):
         return "changed"
     return None
 
