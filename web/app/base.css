@@ -78,6 +78,10 @@ a {
   overflow-wrap: anywhere;
 }
 
+.nowrap {
+  white-space: nowrap;
+}
+
 main.shell {
   padding-top: var(--space-3);
   padding-bottom: var(--space-6);
