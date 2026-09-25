@@ -23,9 +23,54 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     verbatim under "P7 research" below.
   - **PFR-sourced data (`snaps`, `pfr_advstats`) and NGS data (`ngs`) have no license
     stated by nflverse** (checked 2026-09-25: release notes and nflreadr loader docs).
-    The providers' own terms haven't been read yet. Pending verbatim quotes for the user
-    to decide on. **This blocks displaying them in a web player view** (`docs/phases/P7.md`
-    open item 2), not collecting them.
+    We fetch both from nflverse's GitHub releases, not from the providers' sites. The
+    providers' own terms are quoted below, verbatim, for the user to decide on. **No
+    interpretation is recorded here. This blocks displaying them in a web player view**
+    (`docs/phases/P7.md` open item 2), not collecting them.
+  - **Sports Reference (Pro Football Reference)**,
+    https://www.sports-reference.com/termsofuse.html. The page reads "Effective Date:
+    October 1, 2004" and "Last Updated: May 19, 2023"; read 2026-09-25.
+    - From "2. Proprietary Rights":
+      > SRL owns or licenses the data, statistics, text, graphics, images, forms, artwork, sound recordings, audio, video, software, and other material for this Site (the "Content"), as well as the selection, coordination, arrangement, and organization and enhancement of the Content (also, the "Content") for this Site.
+    - From "5. Permitted Use":
+      > Our guiding principles are that (1) sharing, using, modifying, repackaging, or publishing data found on individual SRL webpages is welcomed, whether for commercial or non-commercial purposes, but (2) any such sharing, use, modification, repackaging, or publication should explicitly credit SRL as the source of the data to the maximum extent possible and (3) any such sharing, use, modification, repackaging, or publication must not violate any express restrictions set forth in this Section 5, especially the restrictions set forth in subparts 5(i) and 5(j) below.
+      >
+      > Subject to the terms of this Agreement, you are granted a limited, personal, non-exclusive, non-sublicensable, non-assignable, non-transferable, and revocable license to access and use the Site and Content. However, except as expressly permitted by this Agreement, in connection with the use of the Site, you may not:
+      >
+      > - without our express written permission, use any automated means to access or use the Site, including scripts, bots, scrapers, data miners, or similar software, in a manner that adversely impacts site performance or access; or
+      > - use any material or Content from the Site, including without limitation any statistics or data, (i) to create any database, archive, or other data store that competes with or constitutes a material substitute for the services or data stores offered on the Site or by the Site's Data Providers or (ii) to provide any service that competes with or constitutes a material substitute for the services or data stores offered on the Site or by the Site's Data Providers; or
+      > - copy or use any material or Content from the Site, including without limitation any statistics, data, text, graphics, or images, for purposes of training, fine-tuning, prompting, or instructing artificial intelligence models or technologies in any manner, including without limitation for purposes of (i) generating answers, text, scores, statistics, notes, graphics, images, or any other output; or (ii) supporting machine learning methods used to predict, classify, label, or score inputs into the models; or
+    - The list items are quoted individually; the other items in the same list cover
+      altering the Site, security probing, posting content, and the like.
+    - Relevant beyond the web view: the last item names "prompting" AI models. Phase 8's
+      optional LLM narrator is an AI model prompted with card data. Noted as a pointer,
+      not a reading.
+  - **Sports Reference data-use page**, https://www.sports-reference.com/data_use.html.
+    The page has no date of its own (the site-wide footer reads "Site Last Updated:
+    Wednesday, September 23, 11:38AM"); read 2026-09-25.
+    `https://www.pro-football-reference.com/about/data_use.html` returned HTTP 403.
+    > This means that you should not create websites or tools based on data you scrape from Sports Reference or any of our sites or use our data to train generative artificial intelligence models without our permission.
+
+    > There are a couple of additional mitigating factors. For some of our datasets, our licenses completely preclude any redistribution of the data. And, in some cases, we cannot even give you explicit permission to reuse en masse what you find on the site. Additionally, we need to block any aggressive spidering of the site to maintain site performance for non-bot traffic (i.e. actual people using the site).
+    >
+    > As an aside, copyright law is clear that facts cannot be copyrighted, so you are free to reuse facts found on this site in accordance with copyright laws.
+  - **NFL Next Gen Stats**, https://www.nfl.com/legal/terms. The page reads "Updated:
+    May 16, 2024"; read 2026-09-25.
+    - Applicability, verified: nextgenstats.nfl.com's footer (in its app bundle
+      `dist/app.738fbeb581d2c85cb721.js`) links "Terms of Service" to
+      `https://www.nfl.com/help/terms`, which 301-redirects to `/legal/terms/`. The same
+      footer reads "Next Gen Stats, Next Generation Stats, NFL and the NFL shield design
+      are registered trademarks of the National Football League."
+    - Scope, from the preamble:
+      > The following Terms and Conditions (the "Agreement") govern your use of the websites, mobile applications, and other online and mobile services that link to or post this Agreement (collectively, the "Services") that are operated by NFL Enterprises, LLC (collectively, "NFL," "we," "our," "us").
+    - From "1.1 General":
+      > As between you and us, we own all right, title and interest, including all intellectual property and proprietary rights (including goodwill), in and to, and related to, the Services, Modular Content, and all Trademarks, software, technology, platforms, applications, user interface, tools, links, text, images, photographs, video, audio, graphics, user interface, and other content (and the selection, coordination, and arrangement of any content), data, analytics, algorithms, or materials included or displayed in or through, provided with or through the use of, or generated from the Services, and any and all improvements to or derivatives of the forgoing.
+      >
+      > Except as expressly provided in this Agreement, you are prohibited from copying, reproducing, modifying, distributing, displaying, performing, or transmitting any of the Services or contents of the Services for any purposes, and nothing otherwise stated or implied in the Services confers on you any license or right to do so. To the extent you obtain any rights in our content, Services, or Modular Content, you hereby assign all such rights, title, and interest to the NFL.
+    - From "1.3 Permitted Uses":
+      > You may use the Services solely for your own individual non-commercial and informational purposes only. Any other use, including for any commercial purposes, is strictly prohibited without our express prior written consent. Systematic retrieval of data or other content from the Services, whether to create or compile, directly or indirectly, a collection, compilation, database, or directory, is prohibited absent our express prior written consent.
+    - From "11. Prohibited Uses Generally" ("You further agree not to:"):
+      > (f) use or attempt to use any engine, software, tool, agent or other device or mechanism (including, browsers, spiders, robots, avatars or intelligent agents) to navigate or search the Services to harvest or otherwise collect information from the Services to be used for any commercial purpose;
 - **Reliability:** Open data, actively maintained.
 - **Freshness:** Play-by-play updates nightly after game days. NFL stat corrections land
   Mon–Wed, so the **Thursday re-pull is authoritative** for the prior week.
@@ -71,8 +116,12 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   (ID spine); `load_pbp`, `load_player_stats`, `load_snap_counts`, `load_nextgen_stats`,
   `load_ftn_charting`, `load_depth_charts`, `load_pfr_advstats` (bulk collector, P2 —
   `load_team_stats` and `load_rosters` were verified but aren't staged; see the
-  collector's docstring for why); `load_participation` (bulk collector, added P7; shape
-  live-checked 2026-09-25, fixture pending in P7 step 2).
+  collector's docstring for why); `load_participation` (bulk collector, added P7;
+  VERIFIED 2026-09-25, fixtures `tests/fixtures/nflreadpy_participation_sample.parquet`
+  (2025, every play of the pbp fixture's game `2025_01_ARI_NO`, 174 × 26; all 174 join
+  to pbp on `nflverse_game_id`/`play_id`) and `nflreadpy_participation_2022_sample.parquet`
+  (20 × 20, the older NGS-era schema). Regenerate with
+  `uv run python scripts/make_nflverse_bulk_fixtures.py --only participation`.
 - **Staged tables span two phases' analysts, one collector.** The `player_week`,
   `team_week`, `ngs`, and `depth` staged tables (db/migrations/0006) feed the Phase 2
   Efficiency analyst; `snaps`, `ftn`, and `pfr_advstats` feed the Phase 7 Usage/role and
@@ -204,7 +253,7 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `nflreadpy_nextgen_{passing,rushing,receiving}_sample.parquet`,
     `nflreadpy_pfr_advstats_{pass,rush,rec,def}_sample.parquet`. Regenerate with
     `uv run python scripts/make_nflverse_bulk_fixtures.py`.
-- **P7 research (live-checked 2026-09-25; participation fixture pending, P7 step 2):**
+- **P7 research (live-checked 2026-09-25; participation fixtures saved the same day):**
   - **`load_participation(seasons=...)`** downloads
     `pbp_participation/pbp_participation_<season>` (read via `inspect.getsource`).
     - **nflreadpy caps seasons at `get_current_season(roster=True) - 1`** and raises
