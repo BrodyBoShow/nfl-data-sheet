@@ -11,6 +11,7 @@ flowchart TB
     SPINE[ID spine]
     AUD[Auditor]
     GRADE[Grader]
+    RET[Retention]
   end
 
   subgraph L1["L1 Collectors (cut by source)"]
@@ -28,6 +29,7 @@ flowchart TB
   subgraph L2["L2 Analysts (cut by sector)"]
     A_EFF[Efficiency]
     A_USE[Usage and role]
+    A_PEF[Player efficiency]
     A_SCH[Scheme]
     A_AVI[Availability impact]
     A_ENV[Environment]
@@ -35,6 +37,7 @@ flowchart TB
   end
 
   SIGNALS[(Signals table)]
+  PLAYER[(Player tables)]
 
   subgraph L3["L3 Synthesis and sheet"]
     SYN[Matchup synthesizer]
@@ -45,9 +48,9 @@ flowchart TB
   PROJ[(Projection log)]
 
   C_NFLV & C_LIVE & C_ODDS & C_STAD & C_WX & C_AVAIL & C_INTEL --> STAGED
-  STAGED --> A_EFF & A_USE & A_SCH & A_AVI & A_ENV & A_MKT
+  STAGED --> A_EFF & A_USE & A_PEF & A_SCH & A_AVI & A_ENV & A_MKT
 
-  C_NFLV --> A_EFF & A_USE & A_SCH & A_AVI & A_ENV
+  C_NFLV --> A_EFF & A_USE & A_PEF & A_SCH & A_AVI & A_ENV
   C_AVAIL --> A_AVI
   C_INTEL --> A_AVI
   C_STAD --> A_ENV
@@ -56,9 +59,11 @@ flowchart TB
   C_LIVE --> A_MKT
   A_USE --> A_AVI
 
-  A_EFF & A_USE & A_SCH & A_AVI & A_ENV & A_MKT --> SIGNALS
+  A_EFF & A_SCH & A_AVI & A_ENV & A_MKT --> SIGNALS
+  A_USE & A_PEF --> PLAYER
   SIGNALS --> SYN
   SIGNALS --> UI
+  PLAYER -. P7 step 9, license-blocked .-> UI
   SYN --> UI
   SYN --> NAR --> UI
   C_LIVE --> UI
@@ -72,6 +77,9 @@ flowchart TB
   DISP -.-> L2
   DISP -.-> SYN
   DISP -.-> GRADE
+  DISP -.-> RET
+  RET -.-> STAGED
+  RET -.-> PLAYER
   AUD -.-> L1
   AUD -.-> L2
   SPINE -.-> L1
@@ -117,12 +125,31 @@ flowchart TB
       Efficiency and the synthesizer are deferred until at least one full live season is
       graded **and** a pattern (e.g. the weeks 1–4 β_def gap) holds up at
       non-exploratory status. See `docs/phases/P5.md`.
+  - **Retention** (`pipeline/orchestration/retention.py`, P7, not built yet) enforces the
+    storage policies that keep the free tier's 500 MB cap out of reach (arithmetic in
+    `docs/phases/P7.md`, "Storage design"). It's the only job that deletes data, and it
+    has a dry-run mode.
+    - **L2:** staged nflverse player tables keep `season >= current - 1`. `team_week`,
+      `depth`, and `participation_player_season` are exempt.
+    - **L4:** once a season is complete, the player tables keep only each player's
+      latest-week row for it. Team-level `signals` keep full history.
+    - Like the grader, it may read `games` scores, here only to decide that a season is
+      complete.
 
 - **L1 Collectors** fetch, validate, and store. They never compute metrics. Cut by
   source, one collector per source family.
 
 - **L2 Analysts** read only stored tables (never external sources) and write only to the
-  `signals` table. Cut by sector. **Usage/role** is built in Phase 7 (with Scheme/Intel),
+  `signals` table, with **one exception: player detail** (amended 2026-09-25, P7).
+  - Usage and role, and Player efficiency, write their per-player rows to their own wide
+    tables, `player_usage_week` and `player_eff_week`. The contract is in
+    `docs/signals.md`, "Player tables".
+  - **Team-level and game-level signals stay in `signals`.** That covers everything the
+    synthesizer/model reads, so the single-shape contract still holds there.
+  - Why: one wide row per player-week is ~28× smaller than one `signals` row per metric,
+    and the naive shape would exceed the free tier on its first season's backfill.
+  - No other analyst writes a player table, and nothing in L2 reads one yet.
+  - Cut by sector. **Usage/role** is built in Phase 7 (with Scheme/Intel),
   after Availability impact (Phase 3) — so Availability impact's redistribution logic
   reads raw snap shares (from the nflverse bulk collector's `snaps` table) rather than
   Usage's target/carry shares when it's first built. Once Usage exists in Phase 7, its
@@ -149,7 +176,10 @@ flowchart TB
     - A week view and a game view: the matchup card plus the signals behind it.
     - `/method`, with the backtest report in a provenance frame, and `/sources`.
     - Freshness shows through `as_of` stamps, not auditor badges.
-    - The player view moved to P7. Signal cross-reference/filters are deferred to v2.
+    - The player view moved to P7 (step 9). It will read the player tables through new
+      `web` views, which takes its own migration, a P6 §2 update, and an L3 amendment
+      here. It's blocked until the PFR/NGS license clauses are quoted and approved
+      (`docs/phases/P7.md` open item 2). Signal cross-reference/filters are deferred to v2.
   - **Matchup narrator** (optional, Phase 8): on-demand prose from one card's signals,
     cached per game per day. Cannot introduce numbers not already on the card.
 
@@ -166,12 +196,13 @@ daily, **T3** weekly, **OD** on demand.
 | ID spine | T2 | 1 | Canonical keys via nflreadpy `load_schedules`, `load_teams`, `load_players`, `load_ff_playerids`. |
 | Auditor | T0 | 1 (skeleton) | Freshness/row-count/schema/null checks; alerts; staleness status for UI. |
 | Grader | T2 | 5 | Grades locked projections (errors, coverage, picks, CLV) and summarizes them with n/CI/verdict; reporting-only, feedback deferred. |
+| Retention | T3 | 7 | Deletes staged nflverse player seasons older than `current - 1` (L2) and collapses completed seasons' player-table rows to each player's final row (L4); dry-run first. |
 
 ### L1 Collectors
 
 | Collector | Source(s) | Reliability | Tier | Phase | Stores |
 |---|---|---|---|---|---|
-| nflverse bulk | nflreadpy: pbp, player stats, snap counts, NGS, PFR advanced, FTN charting, depth charts | Open data | T2 | 2 | Aggregates only (player_week, team_week, snaps, ngs, ftn, pfr_advstats, depth). **Never raw pbp in Postgres.** `load_team_stats`/`load_rosters` verified but not staged — see `docs/phases/P2.md` deviations. |
+| nflverse bulk | nflreadpy: pbp, player stats, snap counts, NGS, PFR advanced, FTN charting, depth charts; participation (P7) | Open data | T2 | 2, extended 7 | Aggregates only (player_week, team_week, snaps, ngs, ftn, pfr_advstats, depth; P7 adds player_game_pbp and participation_player_season). **Never raw pbp in Postgres**, and never participation's per-play 22-ID rows either. Participation is `season - 1` only (post-season release). `load_team_stats`/`load_rosters` verified but not staged — see `docs/phases/P2.md` deviations. Staged player seasons roll off under the L0 retention job. |
 | Live game | ESPN scoreboard/game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
 | Odds | The Odds API free tier + ESPN embedded lines | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Stadiums reference | `reference/stadiums.csv` (hand-reviewed; coords + field bearing from OpenStreetMap, roof type cited per row) | Hand-maintained | T3 | 4 | stadiums (coords, roof_type, field_bearing, known_names, tz) |
@@ -179,7 +210,7 @@ daily, **T3** weekly, **OD** on demand.
 | Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, injury_presence |
 | Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 7 | news_items (deduped URL+hash), news_tags (rule-based) |
 
-### L2 Analysts (all write to `signals`)
+### L2 Analysts (all write to `signals`, except the two player-table writers marked below)
 
 | Analyst | Phase | Signals |
 |---|---|---|
@@ -187,8 +218,9 @@ daily, **T3** weekly, **OD** on demand.
 | Availability impact | 3 | Snap-share redistribution, replacement depth-order delta (depth-chart order only, not a quality estimate), OL/secondary cluster counts, practice-trend risk (a designation-change ordinal, injury-category only, requires 2+ distinct days of data — neither ESPN nor Sleeper exposes real Wed/Thu/Fri participation data), and an availability_category label distinguishing injury from non-injury unavailability (exempt/suspension/COVID). Uses raw snap shares (from the nflverse bulk collector's `snaps` table) as the redistribution baseline, since Usage/role (Phase 7) isn't built yet at this phase. |
 | Market | 4 | Open vs. current line, movement velocity, implied team totals, key-number crossings. No "sharp money" claims. Per game, same rolling window as Environment. market_status separates movement / single capture / lookahead-only / awaiting / missed. Open = the earliest capture from the game's own week's targets, never a lookahead poll from the prior week, with an on-time/late/fallback basis. Current = the latest pre-kickoff capture. Spread/total open, current, move, and per-day rate, with a book-set-changed guard and book counts at both ends. Cross-book range, key crossings (3/7/10/14, strictly through), a per-book key straddle, implied team totals, and proportionally de-vigged moneyline win probability. See `docs/signals.md`. |
 | Environment | 4 | Per game, for every game kicking off in a rolling window (−24h..+7d) rather than the dispatcher's week: weather_status (distinguishes forecast / indoor / awaiting / missed / venue unresolved / not tracked), headline weather from the latest pre-kickoff snapshot (wind speed as the base shape, along-field/crosswind split only ≥8 mph at venues with a field bearing; temperature, precip, snow, lead time, HRRR-domain confidence, grid elevation as altitude), roof and surface codes, and per-team rest days/differential, travel miles, and timezone shift (home venue tz vs. game venue tz, wrapped to ±12h). See `docs/signals.md`. |
-| Usage and role | 7 | Snap share, target share, air-yards share, red-zone/goal-line share, carry share, WoW deltas. |
-| Scheme | 7 | Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled). |
+| Usage and role | 7 | **Writes `player_usage_week`, not `signals`.** Snap share (every player who takes a snap), target share, air-yards share, red-zone/goal-line/end-zone share, carry share, WoW deltas; season-to-date, per-game, last-4. |
+| Player efficiency | 7 | **Writes `player_eff_week`, not `signals`.** Per-player receiving/rushing/passing/defense rates (EPA/SR per target/carry/dropback, YAC-oe, separation, rush by gap, FTN charting splits, PFR nearest-defender allowed stats, pressures); season-to-date prior-blended, per-game, last-4. Participation `_hist` priors. |
+| Scheme | 7 | Team-level, in `signals`. Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled), run defense by gap, coverage-proxy splits, and participation-derived man/zone/shell tendencies (`_hist`, multi-season, labeled with their span). |
 
 ### L3 Synthesis and sheet
 
@@ -244,3 +276,11 @@ minutes.
   substitute for real participation data. NFL.com injury-report scraping (the one source
   that could supply real participation data) stays deliberately out of scope; see
   `docs/sources.md`'s Availability section.
+- **Player detail leaves `signals` (2026-09-25, P7).**
+  - Usage and Player efficiency write wide player tables instead of one `signals` row
+    per metric.
+  - Why: measured at 453 B per `signals` row, every-player/every-metric detail costs
+    ~335 MB/season in `signals` vs. ~19 MB wide. Team-level signals are unchanged.
+  - An L0 retention job is added, and participation (historical, 2016–2025) is staged as
+    a prior.
+  - Full research: `docs/phases/P7.md`.

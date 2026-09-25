@@ -15,7 +15,13 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
 ## Layer rules (non-negotiable)
 - **L1 collectors** (`pipeline/collectors/`) fetch, validate, store. Never compute metrics.
 - **L2 analysts** (`pipeline/analysts/`) read only stored tables, never external sources.
-  Write only to `signals`.
+  Write only to `signals`, with **one exception: player detail**.
+  - Usage and Player efficiency write their per-player rows to their own wide tables
+    (`player_usage_week`, `player_eff_week`; contract in `docs/signals.md`, "Player
+    tables"), because one `signals` row per player-metric doesn't fit the free tier.
+  - **Team- and game-level signals stay in `signals`.** The single-shape contract still
+    holds for everything the model reads.
+  - No other analyst writes a player table without amending this rule first.
 - **L3** (`pipeline/synthesis/`, `/web`) reads `signals`, plus the spine's `games` table
   for **identity and schedule only**: `game_id, season, week, home_team, away_team,
   gameday, gametime, location`. Never scores, lines, results, or any other `games` column
@@ -29,10 +35,19 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
     `web/lib/db.ts`. Grants and RLS enforce this (migration `0026`); widening what anon
     can read is a new migration plus a `docs/phases/P6.md` Â§2 update, never a view tweak.
     The backtest report and model file reach the app only as build-time content.
+  - The player tables are **not** readable by L3 or `/web` yet. The web player view
+    (P7 step 9) brings its own migration and amends this rule. It's blocked until the
+    PFR/NGS license clauses are quoted and approved (`docs/phases/P7.md` open item 2).
 - **L0** (`pipeline/orchestration/`) decides what runs, owns canonical keys, detects
   breakage, grades projections. The grader is the one scheduled job that reads `games`
   scores and lines, after the game. It writes only `projection_grades`/`grade_summary`,
   and no pipeline job reads those yet.
+  - The retention job (`pipeline/orchestration/retention.py`, P7) is the only job that
+    deletes data.
+    - Staged nflverse player tables keep `[season-1, season]`.
+    - Completed seasons' player-table rows collapse to each player's final row.
+    - Team-level `signals` and `team_week` keep full history.
+    - Policies and arithmetic: `docs/phases/P7.md`, "Storage design".
 
 ## Canonical keys
 - `season` int, `week` int, `season_type` text (`REG`/`POST`)
@@ -47,6 +62,13 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
 
 ## Data contracts
 - `signals` table shape and the signal registry: `docs/signals.md`
+- Player tables (`player_usage_week`, `player_eff_week`): one as-of row per player-week
+  holding `_std`/`_game`/`_l4`/`_pct` per metric. Contract in `docs/signals.md`, "Player
+  tables". Participation-derived values end in `_hist` and are multi-season history,
+  never current-season behavior.
+- Storage budget: Supabase free tier is read-only at 500 MB database size. Cost any new
+  table or signal family in MB/season before building it (`docs/phases/P7.md` has the
+  measured row costs).
 - `agent_runs` table: `id, agent, started_at, finished_at, status, rows_written,
   source_version, error, meta jsonb`
 - `Collector`: `should_run(ctx) -> bool` â†’ `fetch(ctx)` â†’ `validate(raw)` â†’

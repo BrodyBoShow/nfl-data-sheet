@@ -25,6 +25,66 @@ Unique on (`season`, `week`, `game_id`, `team`, `player_id`, `sector`, `signal`)
 nulls handled deliberately (`NULLS NOT DISTINCT` or coalesced keys). Upserts replace the
 latest value.
 
+## Player tables (P7): the one exception to the single shape
+
+**Everything team- or game-level lives in `signals`, in the shape above. That includes
+everything the model reads.** Player detail from the Usage and Player efficiency
+analysts is the one exception. It goes into wide per-analyst tables instead, because one
+row per player-week holding every metric is ~28× smaller than one `signals` row per
+metric (~19 vs. ~335 MB/season; arithmetic in `docs/phases/P7.md`, "Storage design").
+Player rows that other sectors already write to `signals` (Availability's per-player
+signals) stay there.
+
+| Table | Written by | Holds |
+|---|---|---|
+| `player_usage_week` | Usage and role (`usage.py`) | snap/target/air-yards/carry/RZ/GL/EZ shares and WoW deltas, for every player who takes a snap |
+| `player_eff_week` | Player efficiency (`player_efficiency.py`) | receiving, rushing, passing, and defense rate stats |
+
+Contract (the migrations in P7 step 3 implement it; nothing here is built yet):
+- **Key:** (`player_id`, `season`, `week`). Also `team` and `game_id` (the game this
+  row's per-game values come from), `as_of`, `inputs_version` (plain text, the same
+  convention as `signals`), and `content_hash` for `filter_changed`.
+- **As-of rows:** a row is written for week W only for players who played in week W. To
+  read "as of week W", take each player's latest row with `week <= W` in that season.
+  A player on bye or injured keeps their last row. No row is ever written for a player
+  with no inputs (missing stays missing).
+- **Columns per metric:** `<metric>_std` (season-to-date, prior-blended), `<metric>_game`
+  (this game), `<metric>_l4` (last 4 games played), all `real`. Plus `<metric>_pct`, a
+  `smallint` 0–100 league percentile of the `_std` value. A null means not sourced or no
+  sample, never zero-filled.
+- **Per family, not per metric:** a sample count and a `stability` (0–1, same meaning as
+  in `signals`) for each family: usage, receiving (targets), rushing (carries), passing
+  (dropbacks), defense (defensive snaps). The family's sample counts are themselves
+  `_std`/`_game`/`_l4` columns.
+- **League percentile population:** by default, players in the same position group with
+  a row as of that week whose family sample meets the metric's minimum. Each registry
+  entry states its own population and minimum.
+- **Retention (L4):** after a season completes, only each player's latest-week row for
+  that season is kept (`pipeline/orchestration/retention.py`). A past season reads as
+  final STD values, with no weekly history.
+- **Participation-derived columns** end in `_hist`: multi-season historical tendencies,
+  2016–2025, post-season release only. `inputs_version` names the season span, and the
+  UI shows the span next to the value. Never presented as current-season behavior.
+- **Honesty:** `_game`/`_l4` values for rotational players rest on a handful of plays
+  (`docs/phases/P7.md` sample-size table). Anything that displays them shows `stability`
+  beside them.
+- **Access:** anon can't read these tables until the web player-view migration lands
+  (P7 step 9, blocked on the PFR/NGS license quotes).
+
+Registry entries for player-table metrics use this template, grouped by table and family:
+
+```markdown
+### `<table>.<metric>` (`_std` / `_game` / `_l4` / `_pct`)
+- **Family:** usage | receiving | rushing | passing | defense
+- **Formula:** <exact calculation, per window>
+- **Filters:** <garbage time, min sample for _pct, situation splits>
+- **Source columns:** <staged table + columns>
+- **Sample:** <which family count it rests on>
+- **Prior blend:** <k_metric, prior source (last season / participation _hist), r>
+- **League pct population:** <position group + minimum sample>
+- **Added:** <phase, date>
+```
+
 ## Prior blending (efficiency sector)
 
 Every efficiency signal is a **three-way blend** of the current season's opponent-

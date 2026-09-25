@@ -19,6 +19,13 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   used by the P2 nflverse bulk collector) live-called 2026-09-17.
 - **License:** CC-BY 4.0 (nflverse); FTN charting data CC-BY-SA 4.0. Attribution required
   in UI footer.
+  - Participation is CC-BY-SA 4.0 with provider-specific attribution. It's quoted
+    verbatim under "P7 research" below.
+  - **PFR-sourced data (`snaps`, `pfr_advstats`) and NGS data (`ngs`) have no license
+    stated by nflverse** (checked 2026-09-25: release notes and nflreadr loader docs).
+    The providers' own terms haven't been read yet. Pending verbatim quotes for the user
+    to decide on. **This blocks displaying them in a web player view** (`docs/phases/P7.md`
+    open item 2), not collecting them.
 - **Reliability:** Open data, actively maintained.
 - **Freshness:** Play-by-play updates nightly after game days. NFL stat corrections land
   Mon–Wed, so the **Thursday re-pull is authoritative** for the prior week.
@@ -64,13 +71,20 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   (ID spine); `load_pbp`, `load_player_stats`, `load_snap_counts`, `load_nextgen_stats`,
   `load_ftn_charting`, `load_depth_charts`, `load_pfr_advstats` (bulk collector, P2 —
   `load_team_stats` and `load_rosters` were verified but aren't staged; see the
-  collector's docstring for why).
+  collector's docstring for why); `load_participation` (bulk collector, added P7; shape
+  live-checked 2026-09-25, fixture pending in P7 step 2).
 - **Staged tables span two phases' analysts, one collector.** The `player_week`,
   `team_week`, `ngs`, and `depth` staged tables (db/migrations/0006) feed the Phase 2
   Efficiency analyst; `snaps`, `ftn`, and `pfr_advstats` feed the Phase 7 Usage/role and
   Scheme analysts. They're all populated by the same `pipeline/collectors/nflverse_bulk.py`
   run rather than split across two collectors, since they share one source family and one
   freshness gate.
+  - **Retention (decided 2026-09-25, P7):** the staged player tables keep only
+    `[season-1, season]`, the same window the collector fetches. The L0 retention job
+    deletes older seasons, and backfills refetch them from nflverse via
+    `seasons_override`. `team_week` keeps full history (the backtest uses 2018+).
+    Measured 2025 full-season sizes: `ftn` 10.0 MB, `player_week` 7.0, `snaps` 6.5,
+    `pfr_advstats` 4.3, `ngs` 0.7, so ~29 MB/season that would otherwise never roll off.
 - **Verified shapes (ID spine, as of 2026-09-16):**
   - `load_schedules(seasons=[2025])` → 285 rows × 46 cols. Key columns: `game_id`,
     `season`, `game_type`, `week`, `gameday`, `away_team`/`home_team`,
@@ -190,6 +204,99 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `nflreadpy_nextgen_{passing,rushing,receiving}_sample.parquet`,
     `nflreadpy_pfr_advstats_{pass,rush,rec,def}_sample.parquet`. Regenerate with
     `uv run python scripts/make_nflverse_bulk_fixtures.py`.
+- **P7 research (live-checked 2026-09-25; participation fixture pending, P7 step 2):**
+  - **`load_participation(seasons=...)`** downloads
+    `pbp_participation/pbp_participation_<season>` (read via `inspect.getsource`).
+    - **nflreadpy caps seasons at `get_current_season(roster=True) - 1`** and raises
+      `ValueError` for the current season. The source comment reads "participation only
+      available on a historical basis from FTN".
+    - Release `pbp_participation` assets (GitHub API, 2026-09-25): `_2016`–`_2022`
+      (updated 2023-12-19), `_2023`/`_2024` (2025-09-04), `_2025` (2026-02-10), a
+      legacy `_old_2023`, and `timestamp.json` (2026-02-10). No 2026 file.
+    - The same `timestamp.json` freshness gate applies. It changes roughly once a year.
+  - **Participation shape:**
+    - 2025: 45,184 rows × 26 cols. 2022: 50,150 × 20 cols.
+    - Columns: `nflverse_game_id`, `old_game_id`, `play_id` (**Float64 in 2025, Int32 in
+      2022**; cast before joining), `possession_team`, `offense_formation`,
+      `offense_personnel`, `defenders_in_box`, `defense_personnel`,
+      `number_of_pass_rushers`, `players_on_play`/`offense_players`/`defense_players`
+      (`;`-separated gsis IDs), `n_offense`, `n_defense`, `ngs_air_yards`,
+      `time_to_throw`, `was_pressure`, `route`, `defense_man_zone_type`,
+      `defense_coverage_type`.
+    - 2023+ adds `offense/defense_names`, `_positions`, `_numbers`, in the same order as
+      the ID lists.
+  - **Participation fill rates** (non-null, non-empty):
+    - 2025: man/zone 49% (`ZONE_COVERAGE` 15,020, `MAN_COVERAGE` 7,035), coverage type
+      49%, `route` 42%, `time_to_throw` 43%, `ngs_air_yards` 0% (the dictionary says
+      it's NA from 2024 on).
+    - 2022: coverage fields ~38%, personnel ~76%.
+    - **Empty string `''`, not null, marks "none" for `route`/`defense_man_zone_type` in
+      2025.** Treat both as missing.
+    - `was_pressure` is `False` on non-pass plays too. Filter to dropbacks before using
+      it as a rate.
+    - Personnel strings changed format: 2022 reads `"1 RB, 1 TE, 3 WR"`; 2025 lists every
+      position (`"1 C, 2 G, 1 QB, 1 RB, 2 T, 1 TE, 3 WR"`).
+  - **Participation dictionary** (`nflverse/nflreadr/data-raw/dictionary_participation.csv`,
+    read 2026-09-25):
+    - `route`: "A string indicating the route the primary receiver on a play took". So
+      it's one route per play, the primary receiver's, not every receiver's.
+    - `defense_coverage_type`: one of `COVER_0`, `COVER_1`, `COVER_2`, `2_MAN`,
+      `COVER_3`, `COVER_4`, `COVER_6`, `COVER_9`, `COMBO`, `BLOWN`.
+  - **Participation license**, quoted verbatim from
+    https://github.com/nflverse/nflreadr/blob/main/R/load_participation.R (read
+    2026-09-25):
+    > Participation data prior to 2023 is from NFL NGS. Participation data from
+    > 2023 onwards is courtesy of FTN and is provided after all post-season games are
+    > completed. This data is released under the [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+    > Creative Commons license and attribution must be made to **FTN Data via nflverse** (from 2023 onwards)
+    > or **NFL NextGenStats via nflverse** (for 2022 and earlier)
+    - Decision (user, 2026-09-25): include participation as a prior, with this
+      attribution, the same as FTN.
+    - Anything derived from it is labeled a multi-season historical tendency
+      (`docs/signals.md`, `_hist`).
+  - **FTN charting license**, quoted verbatim from
+    https://github.com/nflverse/nflreadr/blob/main/R/load_ftn_charting.R (read
+    2026-09-25):
+    > FTN Data manually charts plays and has graciously provided a subset of their
+    > charting data to be published via the nflverse. Data is available from the 2022
+    > season onwards and is charted within 48 hours following each game. This data
+    > is released under the [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+    > Creative Commons license and attribution must be made to **FTN Data via nflverse**
+  - **FTN columns not yet staged** (per `dictionary_ftn_charting.csv`, all 29 already in
+    `tests/fixtures/nflreadpy_ftn_charting_sample.parquet`):
+    - Pre-snap and play flags: `starting_hash`, `qb_location`, `is_trick_play`,
+      `is_qb_out_of_pocket`, `is_qb_sneak`.
+    - Throw and catch flags: `is_interception_worthy`, `is_throw_away`,
+      `is_catchable_ball`, `is_contested_ball`, `is_created_reception`, `is_drop`,
+      `is_qb_fault_sack`.
+    - `read_thrown`: `0` first read (2023+ only; NA in 2022), `1`, `2`, `CHK`, `DES`,
+      `SD`.
+    - Play-level, so per-player only via a pbp join on passer/receiver/rusher id.
+  - **Correction:** `pfr_advstats` has **no time-to-throw and no offensive air-yards
+    column** in any stat_type (fixture column lists, 2026-09-25). Time to throw is
+    `ngs` passing `avg_time_to_throw` (unstaged) and participation `time_to_throw`. PFR
+    `def` carries air yards/YAC *allowed* (`def_adot`, `def_air_yards_completed`,
+    `def_yards_after_catch`).
+  - **NGS weekly rows are thresholded** (nflreadr: "NGS will only provide data for
+    players above a minimum number of pass/rush/rec attempts"). Measured 2025 REG, week
+    > 0:
+    - Rows per week: passing 29.8, rushing 31.6, receiving 67.4.
+    - Share of players with a row: 99% of starting QBs; 94% of starting and 47% of
+      rotational RBs; 70%/25% of WRs; 60%/13% of TEs.
+    - A missing NGS row is "below threshold," not zero. Store null.
+  - **pbp defender-credit columns** (fixture, 2026-09-25): `pass_defense_1/2_player_id`,
+    `solo_tackle_1_player_id`, `assist_tackle_1_player_id`, `interception_player_id`,
+    `qb_hit_1_player_id`, `sack_player_id`, `half_sack_1/2_player_id`.
+    - On the same row as `receiver_player_id`. In the fixture game, 13 of 81 pass plays
+      had a PD credit and 51 had a tackler.
+    - A credit isn't a coverage assignment (`docs/phases/P7.md`, "Coverage").
+  - **Checked, not used:**
+    - `load_ff_opportunity(stat_type="weekly")` gives 6,054 rows × 159 cols for 2025:
+      ffverse expected-vs-actual model outputs, not observations.
+    - `load_rosters_weekly` gives 46,849 × 36 for 2025.
+    - Neither license was read.
+  - **Coverage assignment:** no free source links a defender to the receiver they
+    covered on a snap. See `docs/phases/P7.md`, "Coverage: who covered whom".
 - **Verified live for the Efficiency analyst (P2, as of 2026):**
   - `load_pbp(seasons=[2023])`'s `fixed_drive_result` has exactly 10 distinct values:
     `Touchdown`, `Field goal`, `Punt`, `Turnover`, `Turnover on downs`, `Missed field
@@ -243,6 +350,8 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   - Participation (true personnel groupings) is only released after the postseason, not
     in-season. Approximate personnel from snap shares + FTN charting and label it as
     approximate.
+    - The participation release itself (2016–2025) is used only as a multi-season
+      historical prior, never as current-season behavior. See "P7 research" above.
   - The player crosswalk is split across two sources (`load_players` has PFR/PFF/ESPN;
     `load_ff_playerids` adds Sleeper) — the ID spine collector must join both, not just one.
     `load_ff_playerids()`'s Sleeper coverage specifically lags current-season
