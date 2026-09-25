@@ -22,6 +22,9 @@ const Brief = z.object({
   value: numOrNull,
   stability: numOrNull,
   sample_n: intOrNull,
+  // Not on card_version 1 briefs yet. Parsed when present, so a synthesizer that starts
+  // carrying it brings the Rank column back without a code change (P6.md §4).
+  league_pct: numOrNull.optional(),
 });
 
 const Pairing = z.object({

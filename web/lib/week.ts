@@ -49,13 +49,14 @@ export interface WeekDay {
   rows: WeekRow[];
 }
 
-interface Context {
+export interface Context {
   now: Date;
   today: string; // ET calendar day
   fitSeasons: readonly number[];
 }
 
-function noCardReason(g: Game, ctx: Context): { reason: string; warn: boolean } {
+/** Why a game has no card. Shared by the week and game views, so they say the same. */
+export function noCardReason(g: Game, ctx: Context): { reason: string; warn: boolean } {
   if (ctx.fitSeasons.includes(g.season)) {
     return { reason: "no card · in-sample season (used to fit the model)", warn: false };
   }

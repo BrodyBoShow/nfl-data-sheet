@@ -22,6 +22,7 @@ export interface BacktestSummary {
   spread_edge_corr: { r: number; ci: number[]; n: number; validated: boolean };
   validated_buckets: string[];
   buckets: Record<string, { n_games: number; spread: EdgeValidation; total: EdgeValidation }>;
+  stability_floor: number; // lowest model-input stability of any backtested game
   sources: Record<string, { path: string; sha256_12: string }>;
 }
 

@@ -201,6 +201,43 @@ table.data .group-label {
   max-width: 90ch;
 }
 
+/* Game view: lines beside environment/availability at ≥960px, one column below.
+   (Media queries can't read custom properties; 960px is the §4 breakpoint.) */
+.game-top {
+  display: grid;
+  /* minmax(0, …): an auto track grows to its widest table and pushes the page sideways
+     on phones. Tables scroll inside their own .table-scroll instead. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 var(--space-6);
+}
+@media (min-width: 960px) {
+  .game-top {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+/* Long row labels and descriptive values wrap; numbers never do. */
+table.lines-table tbody th,
+table.env-table td {
+  white-space: normal;
+}
+/* Uppercasing would turn "β" into capital Beta (Β), which reads as a Latin B. */
+table.data thead th.keep-case {
+  text-transform: none;
+}
+table.data caption {
+  caption-side: top;
+  text-align: left;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+table.data tr.model-row th,
+table.data tr.model-row td {
+  border-top: var(--hairline);
+}
+details.raw-signals > summary {
+  cursor: pointer;
+}
+
 /* Validation / state tag: hairline border in --warn, 2px radius max. */
 .tag {
   display: inline-block;
@@ -208,6 +245,7 @@ table.data .group-label {
   border-radius: var(--radius-tag);
   color: var(--warn);
   padding: 0 var(--space-1);
+  text-decoration: none;
   font-size: var(--t-cap-size);
   line-height: var(--t-cap-lh);
   font-weight: 500;

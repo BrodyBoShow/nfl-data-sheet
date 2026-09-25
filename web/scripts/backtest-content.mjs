@@ -128,6 +128,12 @@ export function buildSummary(reportMd, coefficients) {
     }
   }
   if (!Object.keys(buckets).length) throw new ContentError("calibration has no buckets");
+  // The lowest input stability of any backtested game: the bottom of the lowest bucket's
+  // stability_range. The game view dims context values below it (P6.md §5).
+  const floors = Object.values(cal.buckets).map((b) => b?.stability_range?.[0]);
+  if (!floors.every((f) => typeof f === "number" && f > 0 && f < 1)) {
+    throw new ContentError("a calibration bucket has no stability_range in (0, 1)");
+  }
   const fitSeasons = coefficients.fit_seasons;
   if (!Array.isArray(fitSeasons) || !fitSeasons.every(Number.isInteger)) {
     throw new ContentError("model_coefficients.json has no fit_seasons list");
@@ -150,5 +156,6 @@ export function buildSummary(reportMd, coefficients) {
     },
     validated_buckets: validatedBuckets,
     buckets,
+    stability_floor: Math.min(...floors),
   };
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { FlipMarker } from "@/components/marks";
 import { formatFixed, formatLine, formatSpread } from "@/lib/format";
 import type { RowStatus, WeekDay, WeekRow } from "@/lib/week";
 
@@ -15,21 +16,6 @@ const ROOF: Record<number, string> = {
 };
 
 const DASH = <span className="null">—</span>;
-
-// The model favors the other team from the market (option A, user decision
-// 2026-09-24). It's a word, so it carries meaning without color, in secondary ink. It
-// sits before the value so the numbers stay right-aligned. It carries no number and
-// looks the same for a 0.2-point flip and a 10-point one (§8 Q1).
-function FlipMarker() {
-  return (
-    <span
-      className="flip t-small ink-2"
-      title="The model and the market favor different teams. How far apart they are isn't marked."
-    >
-      flipped
-    </span>
-  );
-}
 
 function Status({ s }: { s: RowStatus }) {
   switch (s.kind) {

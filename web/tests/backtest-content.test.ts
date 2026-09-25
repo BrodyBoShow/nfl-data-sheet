@@ -29,6 +29,7 @@ describe("buildSummary on the committed report", () => {
     expect(s.spread_edge_corr).toEqual({ r: -0.032, ci: [-0.08, 0.016], n: 1615, validated: false });
     expect(s.validated_buckets).toEqual([]);
     expect(Object.keys(s.buckets).sort()).toEqual(["high", "low", "mid"]);
+    expect(s.stability_floor).toBe(0.2262); // low bucket's stability_range[0]
   });
 
   it("produces the status line figures (step 4 done-when)", () => {
@@ -58,6 +59,11 @@ describe("buildSummary fails loudly instead of misreading", () => {
     ["report and coefficients disagreeing on seasons", () => summarize(report, { ...coefficients, calibration: { ...coefficients.calibration, test_seasons: [2021, 2022] } }), /disagree: report seasons/],
     ["coefficients without calibration", () => summarize(report, { model_version: "x" }), /no calibration block/],
     ["coefficients without fit_seasons", () => summarize(report, { ...coefficients, fit_seasons: undefined }), /no fit_seasons/],
+    [
+      "a bucket without a stability_range",
+      () => summarize(report, { ...coefficients, calibration: { ...coefficients.calibration, buckets: { ...coefficients.calibration.buckets, low: { ...coefficients.calibration.buckets.low, stability_range: undefined } } } }),
+      /no stability_range/,
+    ],
   ];
   it.each(broken)("throws on %s", (_, run, message) => {
     expect(run).toThrow(message);
