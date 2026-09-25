@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm test && npm run build",
+  "ignoreCommand": "sh scripts/vercel-ignore-build.sh"
+}
