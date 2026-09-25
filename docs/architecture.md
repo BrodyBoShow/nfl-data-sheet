@@ -63,7 +63,7 @@ flowchart TB
   A_USE & A_PEF --> PLAYER
   SIGNALS --> SYN
   SIGNALS --> UI
-  PLAYER -. P7 step 9, license-blocked .-> UI
+  PLAYER -. P7 step 9 .-> UI
   SYN --> UI
   SYN --> NAR --> UI
   C_LIVE --> UI
@@ -178,10 +178,13 @@ flowchart TB
     - Freshness shows through `as_of` stamps, not auditor badges.
     - The player view moved to P7 (step 9). It will read the player tables through new
       `web` views, which takes its own migration, a P6 §2 update, and an L3 amendment
-      here. It's blocked until the PFR/NGS license clauses are quoted and approved
-      (`docs/phases/P7.md` open item 2). Signal cross-reference/filters are deferred to v2.
+      here. PFR/NGS values display with attribution (SRL credit on `/sources` and next to
+      each PFR-derived value; NGS likewise), per the position in `docs/sources.md`.
+      Signal cross-reference/filters are deferred to v2.
   - **Matchup narrator** (optional, Phase 8): on-demand prose from one card's signals,
-    cached per game per day. Cannot introduce numbers not already on the card.
+    cached per game per day. Cannot introduce numbers not already on the card. It
+    can't be built until `docs/phases/P8.md`'s start blocker (Sports Reference's AI
+    clause) is decided.
 
 ## Piece-by-piece spec
 

@@ -69,7 +69,8 @@ Contract (the migrations in P7 step 3 implement it; nothing here is built yet):
   (`docs/phases/P7.md` sample-size table). Anything that displays them shows `stability`
   beside them.
 - **Access:** anon can't read these tables until the web player-view migration lands
-  (P7 step 9, blocked on the PFR/NGS license quotes).
+  (P7 step 9). Every PFR- or NGS-derived column carries attribution wherever it's shown
+  (`docs/sources.md`, nflverse bulk → License).
 
 Registry entries for player-table metrics use this template, grouped by table and family:
 

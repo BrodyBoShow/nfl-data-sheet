@@ -24,9 +24,33 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   - **PFR-sourced data (`snaps`, `pfr_advstats`) and NGS data (`ngs`) have no license
     stated by nflverse** (checked 2026-09-25: release notes and nflreadr loader docs).
     We fetch both from nflverse's GitHub releases, not from the providers' sites. The
-    providers' own terms are quoted below, verbatim, for the user to decide on. **No
-    interpretation is recorded here. This blocks displaying them in a web player view**
-    (`docs/phases/P7.md` open item 2), not collecting them.
+    providers' own terms are quoted below, verbatim. The user's position on them follows
+    directly.
+  - **Position on displaying PFR and NGS data (user decision, 2026-09-25).** This is a
+    considered position with its reasoning, recorded so it can be revisited. The user
+    isn't a lawyer and it isn't legal advice.
+    - **Basis: provenance.** We fetch nflverse's GitHub release assets
+      (`nflverse/nflverse-data`, tags `snap_counts`, `pfr_advstats`, `nextgen_stats`),
+      **never the providers' own sites**. No collector requests pro-football-reference.com,
+      sports-reference.com, or nextgenstats.nfl.com, and none may start to. The
+      providers' terms quoted below govern use of their sites. We don't use their
+      sites.
+    - **Sports Reference:** display with explicit credit. It goes on `/sources` and next
+      to every PFR-derived value, in line with §5's "should explicitly credit SRL as the
+      source of the data to the maximum extent possible".
+    - **NFL Next Gen Stats:** display with attribution, the same way. Plainly: the NFL's
+      §1.3 is restrictive ("solely for your own individual non-commercial and
+      informational purposes only"; "systematic retrieval … prohibited absent our
+      express prior written consent"). This position **relies on the provenance
+      argument, not on any grant.** So **a takedown request from the NFL or Sports
+      Reference is honored immediately, not argued with**: remove the values from the
+      web views first, then revisit.
+    - **The site stays non-commercial:** no ads, no subscriptions, no paywall. Open-Meteo's
+      free-tier terms already require this.
+    - **Not covered:** feeding PFR-derived values to an LLM. See `docs/phases/P8.md`,
+      "Start blocker".
+    - **Unblocks** the P7 web player view (step 9), which must carry the attribution
+      above.
   - **Sports Reference (Pro Football Reference)**,
     https://www.sports-reference.com/termsofuse.html. The page reads "Effective Date:
     October 1, 2004" and "Last Updated: May 19, 2023"; read 2026-09-25.

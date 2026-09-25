@@ -36,8 +36,10 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`�
     can read is a new migration plus a `docs/phases/P6.md` §2 update, never a view tweak.
     The backtest report and model file reach the app only as build-time content.
   - The player tables are **not** readable by L3 or `/web` yet. The web player view
-    (P7 step 9) brings its own migration and amends this rule. It's blocked until the
-    PFR/NGS license clauses are quoted and approved (`docs/phases/P7.md` open item 2).
+    (P7 step 9) brings its own migration and amends this rule. PFR/NGS display is
+    approved with attribution on a provenance basis. We fetch only nflverse release
+    assets, never the providers' sites, and honor any takedown immediately
+    (`docs/sources.md`, nflverse bulk → License).
 - **L0** (`pipeline/orchestration/`) decides what runs, owns canonical keys, detects
   breakage, grades projections. The grader is the one scheduled job that reads `games`
   scores and lines, after the game. It writes only `projection_grades`/`grade_summary`,
