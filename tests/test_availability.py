@@ -50,6 +50,18 @@ def test_validate_raw_subtree_is_compact_no_logos_or_links():
         assert "headshot" not in raw_str
 
 
+def test_validate_raw_does_not_repeat_the_rows_own_columns():
+    validated = AvailabilityCollector().validate(_load_raw())
+    assert validated["rows"]
+    for row in validated["rows"]:
+        for key in ("designation", "body_part", "notes", "team"):
+            assert key not in row["raw"], (row["source"], key)
+    espn = next(r for r in validated["rows"] if r["source"] == "espn")
+    assert {"type", "details", "source", "athlete"} <= set(espn["raw"])
+    sleeper = next(r for r in validated["rows"] if r["source"] == "sleeper")
+    assert set(sleeper["raw"]) == {"practice_participation", "practice_description", "status"}
+
+
 def test_validate_falls_back_to_unmatched_id_when_extraction_fails():
     validated = AvailabilityCollector().validate(_load_raw())
     espn_rows = [r for r in validated["rows"] if r["source"] == "espn"]

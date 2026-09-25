@@ -87,20 +87,17 @@ def _extract_espn_source_player_id(athlete: dict[str, Any]) -> tuple[str, bool]:
 
 def _espn_raw_subtree(
     *,
-    designation: str | None,
-    body_part: str | None,
-    notes: str | None,
     inj: dict[str, Any],
     athlete: dict[str, Any],
     team: str | None,
 ) -> dict[str, Any]:
     """Compact trimmed subtree for reprocessing -- drops athlete.links/headshot/team.logos
     (the actual bloat, ~11.7KB/row average measured live) while keeping everything else,
-    including a stripped athlete stub, so parsing can be redone later without a re-fetch."""
+    including a stripped athlete stub, so parsing can be redone later without a re-fetch.
+    designation/body_part/notes are NOT repeated here: they're the row's own columns, and
+    the copy in raw matched them on 100% of rows (measured 2026-09-25) -- ~360 B/row of
+    pure duplication. Rows written before that date still carry the copies."""
     return {
-        "designation": designation,
-        "body_part": body_part,
-        "notes": notes,
         "type": inj.get("type"),
         "details": inj.get("details"),
         "source": inj.get("source"),
@@ -142,14 +139,7 @@ def _parse_espn_rows(espn_json: dict[str, Any]) -> tuple[list[dict[str, Any]], i
                     "designation": designation,
                     "body_part": body_part,
                     "notes": notes,
-                    "raw": _espn_raw_subtree(
-                        designation=designation,
-                        body_part=body_part,
-                        notes=notes,
-                        inj=inj,
-                        athlete=athlete,
-                        team=team,
-                    ),
+                    "raw": _espn_raw_subtree(inj=inj, athlete=athlete, team=team),
                 }
             )
     return rows, extraction_failed
@@ -178,14 +168,11 @@ def _parse_sleeper_rows(sleeper_json: dict[str, Any]) -> list[dict[str, Any]]:
                 "notes": notes,
                 "self_gsis": self_gsis,
                 "self_espn": self_espn,
+                # Only what the row's columns don't already hold (see _espn_raw_subtree).
                 "raw": {
-                    "designation": designation,
-                    "body_part": body_part,
-                    "notes": notes,
                     "practice_participation": p.get("practice_participation"),
                     "practice_description": p.get("practice_description"),
                     "status": p.get("status"),
-                    "team": team,
                 },
             }
         )

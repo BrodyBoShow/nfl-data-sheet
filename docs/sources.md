@@ -594,6 +594,29 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `Cache-Control: max-age=9`. Untrimmed per-injury payload averages ~11.7KB (mostly
     `athlete.team.logos`/`.links` bloat) — the collector stores a trimmed ~716B/row
     subtree instead (see `injuries.raw`).
+    - Since 2026-09-25, `raw` no longer repeats `designation`/`body_part`/`notes`
+      (ESPN) or `designation`/`body_part`/`notes`/`team` (Sleeper). Those are the row's
+      own columns, and the copies matched on 100% of rows. That saves ~360 B per ESPN
+      row and ~79 B per Sleeper row. Older rows keep the copies.
+  - **ESPN returns at most 25 entries per team, the 25 most recently updated** (verified
+    live 2026-09-25).
+    - 32 blocks × exactly 25 = 800, the same total on every poll since at least
+      2026-09-22 (per `agent_runs.meta`: changed + first_seen + skipped_unchanged = 800
+      on every run). Each block is sorted by `date` descending.
+    - Mix on the day checked: 599 `Active`, 125 `Questionable`, 39 `Out`, 26
+      `Injured Reserve`, 11 `Doubtful`. The oldest entry kept per team ranged
+      2026-08-31 to 2026-09-22.
+    - No pagination field in the response (top-level keys: `timestamp`, `status`,
+      `season`, `injuries`). Whether a query parameter lifts the cap is **unverified**.
+    - Consequence: a player whose ESPN status hasn't been updated recently falls out of
+      the window. The collector then marks them cleared after two consecutive absences.
+      In 2026-09-18..25, 47 of ESPN's 281 clears were of players ESPN had as IR, Out, or
+      Questionable, and Sleeper still listed 39 of those as injured at the time.
+      `availability_impact._resolve_current_state` never lets an ESPN clear override an
+      active Sleeper designation, so the exposure is the ~8 without a Sleeper row.
+    - The outage guard (`is_source_outage`, 50%) can't see this: the feed is always
+      full-size. This is the mechanism behind "ESPN drops IR/PUP players once they're old
+      news" below.
   - **Sleeper**: `GET https://api.sleeper.app/v1/players/nfl`, no auth. Full dump,
     ~14.6MB, 12,228 players (verified count) keyed by Sleeper's own player id. No
     documented rate limit; CDN-cached (`s-maxage=600`) — the ≤1/day cap is a courtesy
