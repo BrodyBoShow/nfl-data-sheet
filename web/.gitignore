@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+# Build-time copies of docs/backtest_report.md and model_coefficients.json (step 4).
+content/
+.env*.local

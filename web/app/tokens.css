@@ -1,0 +1,122 @@
+/*
+ * Design tokens: docs/phases/P6.md §4, decided once and defined only here.
+ * No other file introduces a color, font size, or spacing constant.
+ */
+
+:root {
+  /* Palette. No green/red, no team colors, no indigo/purple, no gradients. */
+  --bg: #f7f6f2;
+  --bg-alt: #efede6;
+  --ink: #16181a;
+  --ink-2: #5b5f63;
+  --ink-3: #8c9094;
+  --rule: #d6d3ca;
+  --link: #1d4f73;
+  --warn: #8a5300; /* pipeline state only: stale, missing, not validated, not projected */
+
+  /* Type. Plex Sans for UI and prose, Plex Mono for numbers, team codes, signal names. */
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  /* The six sizes (size / line-height). No other sizes. */
+  --t-cap-size: 11px;
+  --t-cap-lh: 14px;
+  --t-small-size: 12px;
+  --t-small-lh: 16px;
+  --t-base-size: 13px;
+  --t-base-lh: 18px;
+  --t-prose-size: 15px;
+  --t-prose-lh: 22px;
+  --t-head-size: 16px;
+  --t-head-lh: 20px;
+  --t-title-size: 20px;
+  --t-title-lh: 24px;
+
+  /* Density and layout. Spacing is a 4px scale. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --row-h: 24px;
+  --cell-pad-y: 2px;
+  --cell-pad-x: 8px;
+  --gutter: 16px;
+  --max-w: 1120px;
+  --radius-tag: 2px;
+  --hairline: 1px solid var(--rule);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101112;
+    --bg-alt: #17191b;
+    --ink: #e4e2dc;
+    --ink-2: #9a9ea2;
+    --ink-3: #6a6e72;
+    --rule: #2a2d30;
+    --link: #8db7d6;
+    --warn: #d9a13b;
+    color-scheme: dark;
+  }
+}
+
+/* Type roles. Weights 400/500/600 only. */
+.t-cap {
+  font-size: var(--t-cap-size);
+  line-height: var(--t-cap-lh);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.t-small {
+  font-size: var(--t-small-size);
+  line-height: var(--t-small-lh);
+}
+.t-base {
+  font-size: var(--t-base-size);
+  line-height: var(--t-base-lh);
+}
+.t-prose {
+  font-size: var(--t-prose-size);
+  line-height: var(--t-prose-lh);
+}
+.t-head {
+  font-size: var(--t-head-size);
+  line-height: var(--t-head-lh);
+  font-weight: 600;
+}
+.t-title {
+  font-size: var(--t-title-size);
+  line-height: var(--t-title-lh);
+  font-weight: 600;
+}
+
+/* Numbers: tabular, lining, right-aligned where they sit in a column. */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Null is "—" in --ink-3, never 0. */
+.null {
+  color: var(--ink-3);
+}
+
+.ink-2 {
+  color: var(--ink-2);
+}
+.ink-3 {
+  color: var(--ink-3);
+}
+.warn {
+  color: var(--warn);
+}

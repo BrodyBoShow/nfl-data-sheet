@@ -1,0 +1,162 @@
+/*
+ * Element defaults and the page shell. Uses tokens.css only. The only literals are 0,
+ * 1px hairlines, and the 2px link underline offset. docs/phases/P6.md §4.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--t-base-size);
+  line-height: var(--t-base-lh);
+  font-weight: 400;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+/* Shell: max width, left-aligned, 16px gutters. The page never scrolls sideways;
+   wide tables scroll inside their own .table-scroll container. */
+.shell {
+  width: 100%;
+  max-width: var(--max-w);
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+.site-header {
+  border-bottom: var(--hairline);
+}
+.header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--gutter);
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+.wordmark {
+  color: var(--ink);
+  text-decoration: none;
+}
+.site-nav {
+  display: flex;
+  gap: var(--gutter);
+}
+.site-nav a {
+  color: var(--ink-2);
+}
+
+/* One line in the header rule, like a terminal status bar. Wraps on narrow screens
+   rather than overflowing. */
+.status-line {
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-2);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+main.shell {
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-6);
+}
+
+/* Header and footer rules both run the full width; their content sits in .shell. */
+.site-footer {
+  border-top: var(--hairline);
+}
+.footer-row {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-4);
+  color: var(--ink-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--gutter);
+}
+
+/* Section: a 1px rule plus a --t-cap label. No boxes, no shadows. */
+.section {
+  border-top: var(--hairline);
+  padding-top: var(--space-2);
+  margin-top: var(--space-4);
+}
+.section-label {
+  color: var(--ink-2);
+  margin-bottom: var(--space-1);
+}
+
+/* Tables: 24px rows, 2px 8px cells, --t-cap head with a bottom rule, no zebra. */
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+table.data {
+  border-collapse: collapse;
+  font-size: var(--t-base-size);
+  line-height: var(--t-base-lh);
+}
+table.data th,
+table.data td {
+  height: var(--row-h);
+  padding: var(--cell-pad-y) var(--cell-pad-x);
+  text-align: left;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+table.data thead th {
+  font-size: var(--t-cap-size);
+  line-height: var(--t-cap-lh);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  border-bottom: var(--hairline);
+}
+table.data tr.group th {
+  background: var(--bg-alt);
+  font-size: var(--t-cap-size);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+table.data .sticky {
+  position: sticky;
+  left: 0;
+  background: var(--bg);
+}
+
+/* Validation / state tag: hairline border in --warn, 2px radius max. */
+.tag {
+  display: inline-block;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-tag);
+  color: var(--warn);
+  padding: 0 var(--space-1);
+  font-size: var(--t-cap-size);
+  line-height: var(--t-cap-lh);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
