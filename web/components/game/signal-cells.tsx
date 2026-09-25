@@ -42,7 +42,7 @@ export function LowStabilityNote({ show }: { show: boolean }) {
   if (!show) return null;
   return (
     <p className="legend t-small ink-2" data-low-stability-note>
-      Grey values: stability below {formatFixed(backtest.stability_floor, 2)}, the lowest input stability in the
+      Grey numbers: stability below {formatFixed(backtest.stability_floor, 2)}, the lowest input stability in the
       model&apos;s backtest. Mostly league average; see n and Stab.
     </p>
   );

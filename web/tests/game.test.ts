@@ -167,7 +167,7 @@ describe("context blocks", () => {
     const h = pairingHtml(rows);
     const dimmed = [...h.matchAll(/<td class="num ink-3" data-low-stability="true" title="([^"]*)"/g)];
     expect(dimmed).toHaveLength(1);
-    expect(dimmed[0]![1]).toContain("Stability 0.02: about 98% of this value is the league average");
+    expect(dimmed[0]![1]).toContain("Stability 0.02: about 98% of this number is the league average");
     const first = /<tr><th scope="row"[\s\S]*?<\/tr>/.exec(h)![0];
     const tds = [...first.matchAll(/<td class="([^"]*)"/g)].map((m) => m[1]);
     expect(tds).toEqual(["num ink-3", "num", "num", "num", "num", "num"]);

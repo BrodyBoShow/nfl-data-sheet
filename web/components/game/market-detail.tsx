@@ -21,19 +21,21 @@ const OPEN_BASIS: Record<number, string> = {
   3: "no opener line; open is a later own-week capture",
 };
 
-/** A home-negative spread move as distance and direction, e.g. "1.5 toward GB". */
+/** A home-negative spread move as distance and direction, e.g. "moved 1.5 toward GB".
+ *  "moved" keeps it from reading like the model's edge ("2.3 toward ATL"), which is a
+ *  different quantity and always carries its validation tag (§5). */
 function spreadMove(x: number | null, home: string, away: string): string | null {
   if (x === null) return null;
   const shown = formatLine(Math.abs(x));
   if (Number(shown) === 0) return "none";
-  return `${shown} toward ${x < 0 ? home : away}`;
+  return `moved ${shown} toward ${x < 0 ? home : away}`;
 }
 
 function totalMove(x: number | null): string | null {
   if (x === null) return null;
   const shown = formatLine(Math.abs(x));
   if (Number(shown) === 0) return "none";
-  return `${shown} ${x > 0 ? "higher" : "lower"}`;
+  return `moved ${shown} ${x > 0 ? "higher" : "lower"}`;
 }
 
 export function MarketDetail({ card }: { card: Card }) {

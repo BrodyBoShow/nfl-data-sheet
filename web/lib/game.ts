@@ -26,7 +26,7 @@ export function isLowStability(stability: number | null | undefined, floor = bac
 export function lowStabilityTitle(stability: number, floor = backtest.stability_floor): string {
   const league = Math.round((1 - stability) * 100);
   return (
-    `Stability ${formatFixed(stability, 2)}: about ${league}% of this value is the league average. ` +
+    `Stability ${formatFixed(stability, 2)}: about ${league}% of this number is the league average. ` +
     `Dimmed below ${formatFixed(floor, 2)}, the lowest input stability in the model's backtest.`
   );
 }

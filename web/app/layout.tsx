@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   title: { default: "NFL Data Sheet", template: "%s · NFL Data Sheet" },
   description:
     "Read-only NFL reference: team efficiency, market, and environment signals, and " +
-    "per-game matchup cards with their backtest record attached.",
+    "per-game matchup cards with their backtest results attached.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -51,6 +51,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <div className="shell footer-row t-small">
             <Link href="/method">Method and backtest</Link>
             <Link href="/sources">Sources and licenses</Link>
+            <span>
+              Data: nflverse (CC BY 4.0), The Odds API, Open-Meteo (CC BY 4.0), © OpenStreetMap contributors.
+            </span>
             <span>Not affiliated with the NFL.</span>
             <span className="mono">page built {formatEtStamp(new Date())}</span>
           </div>

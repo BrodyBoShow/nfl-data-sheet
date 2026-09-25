@@ -238,6 +238,78 @@ details.raw-signals > summary {
   cursor: pointer;
 }
 
+/* Prose (/method, /sources): --t-prose body, spaced paragraphs, readable measure. */
+.prose > p,
+.prose > ul,
+.prose > .table-scroll,
+.report-body > * {
+  margin-top: var(--space-2);
+  max-width: 75ch;
+}
+.prose > .table-scroll,
+.report-body > .table-scroll {
+  max-width: 100%;
+}
+.prose ul,
+.report-body ul,
+.report-body ol {
+  padding-left: var(--space-6);
+}
+.prose table.data,
+.report-body table.data {
+  font-size: var(--t-base-size);
+  line-height: var(--t-base-lh);
+}
+.prose > p.formula {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.report-body code,
+.prose code {
+  font-family: var(--font-mono);
+  font-size: var(--t-small-size);
+  /* Long paths (e.g. .cache/backtest/…parquet) would push the page sideways on phones. */
+  overflow-wrap: anywhere;
+}
+
+/* The backtest report is a generated artifact, not app content: a --rule boundary on
+   the left, a provenance heading and an app-authored preface above it. Its headings are
+   demoted to h3–h6 at build time and take the existing type roles. */
+.report-frame {
+  border-left: var(--hairline);
+  padding-left: var(--space-4);
+}
+.report-preface {
+  color: var(--ink-2);
+  margin-top: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: var(--hairline);
+}
+.report-preface > p + p {
+  margin-top: var(--space-2);
+}
+.report-preface > p {
+  max-width: 75ch;
+}
+.report-body h3,
+.report-body h4 {
+  font-size: var(--t-head-size);
+  line-height: var(--t-head-lh);
+  font-weight: 600;
+  margin-top: var(--space-6);
+}
+.report-body h5,
+.report-body h6 {
+  font-size: var(--t-cap-size);
+  line-height: var(--t-cap-lh);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  margin-top: var(--space-4);
+}
+
 /* Validation / state tag: hairline border in --warn, 2px radius max. */
 .tag {
   display: inline-block;
