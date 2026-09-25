@@ -299,14 +299,25 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     > If the Service is used to promote bookmakers or gambling services, users are
     > encouraged to display appropriate responsible gambling messaging (e.g., "Gamble
     > Responsibly. 18+") on their customer-facing platforms.
-  - **Decision:** open for the user; see `docs/phases/P6.md` step 1.
-    - Displaying the consensus lines and the derived movement signals on the site is the
-      "Calculating and displaying values you derive from our data" item.
-    - The terms have no separate "derived data" clause.
-    - The part that needs a decision is the `web` schema (migration 0026). It's a
-      PostgREST API readable by anyone holding the anon key, and it returns market-sector
-      signals in bulk. That's adjacent to "offering our data through your own API ...
-      intended to serve as a source of raw data for others".
+  - **Decision (user, 2026-09-24): (a), leave the `web` schema as is.**
+    - The question: migration 0026's `web` schema is a PostgREST API that returns
+      market-sector signals in bulk to anyone holding the anon key. That's adjacent to
+      "offering our data through your own API ... intended to serve as a source of raw
+      data for others".
+    - **What it exposes is derived aggregates, not the feed.** It serves consensus
+      spread, movement, book range, straddle, and implied totals. The raw per-book feed
+      stays in a staged table (`odds_snapshots`) that anon can't read.
+    - **Why that's allowed.** A full dump of the `web` schema isn't a substitute for The
+      Odds API. It's our analysis of it, which their terms explicitly permit under
+      "Calculating and displaying values you derive from our data".
+    - **Nothing is offered to others.** The key is server-only, and the API is
+      undocumented and unadvertised.
+    - **Option (b) was rejected.** It would have had the server read through a direct
+      Postgres connection instead of the REST API. That swaps an anon key scoped to five
+      read-only views for a live Postgres credential on the web server. It enlarges the
+      security surface to shrink a theoretical licensing one.
+    - **Revisit this decision if** the key is ever used client-side (shipped in the
+      browser bundle), or if the `web` schema is ever documented publicly.
 - **Reliability:** Credit-limited.
 - **Freshness:** T1.
 - **Params/shape/limits:**
