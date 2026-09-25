@@ -607,7 +607,24 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
       `Injured Reserve`, 11 `Doubtful`. The oldest entry kept per team ranged
       2026-08-31 to 2026-09-22.
     - No pagination field in the response (top-level keys: `timestamp`, `status`,
-      `season`, `injuries`). Whether a query parameter lifts the cap is **unverified**.
+      `season`, `injuries`).
+    - **No parameter lifts the cap** (probed live 2026-09-25): `limit=50`,
+      `limit=1000`, `page=2`, `size=50`, and `limit=50&page=2` all return HTTP 200 with
+      the same 32 × 25 = 800. `team=12` returns 25 empty team blocks plus a `team` key,
+      i.e. not a per-team filter.
+    - **ESPN's core API does carry the full list, and hasn't been adopted.** It's
+      unofficial, like the rest of ESPN.
+      - `GET https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/teams/<id>/injuries`
+        is a paginated collection (`count`, `pageIndex`, `pageSize` default 25,
+        `pageCount`). `limit=100` returns it in one page: KC `count=50`, BUF
+        `count=57`.
+      - The items are only `$ref` links, one GET each, to
+        `.../seasons/2026/athletes/<id>/injuries/<id>`, with keys `athlete`, `date`,
+        `id`, `longComment`, `shortComment`, `source`, `status`, `team`, `type`.
+      - KC's 50 records span 2024-08-23..2026-09-24 (41 `Active`, 6 IR, 2 Questionable,
+        1 Out), so it's an injury history, not a current list.
+      - Adopting it would take ~1,700 requests per poll plus its own verification pass
+        and fixture.
     - Consequence: a player whose ESPN status hasn't been updated recently falls out of
       the window. The collector then marks them cleared after two consecutive absences.
       In 2026-09-18..25, 47 of ESPN's 281 clears were of players ESPN had as IR, Out, or
