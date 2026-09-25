@@ -1,0 +1,426 @@
+{
+  "game_id": "2026_03_ARI_SF",
+  "season": 2026,
+  "week": 3,
+  "kickoff": "2026-09-27T20:05:00+00:00",
+  "projection_status": 1,
+  "locked": false,
+  "card": {
+    "edge": {
+      "at_lock": null,
+      "vs_current": {
+        "flags": {
+          "single_book_market": false,
+          "spread_key_straddle": false,
+          "market_lookahead_only": false,
+          "total_within_book_range": false,
+          "spread_within_book_range": false
+        },
+        "total": 2.873030187027254,
+        "spread": 2.4123566130967014,
+        "summary": "model favors ARI by 2.4 more than market",
+        "flag_notes": {
+          "spread_key_straddle": null
+        },
+        "market_total": 48,
+        "market_spread": -8.5
+      }
+    },
+    "lock": {
+      "locked": false,
+      "locked_at": null,
+      "locks_from": "2026-09-27T14:05:00+00:00",
+      "kickoff_at_lock": null,
+      "lock_lead_hours": null
+    },
+    "market": {
+      "teams": {
+        "SF": {
+          "win_prob_novig": {
+            "value": 0.773584905660377,
+            "sample_n": 9
+          },
+          "implied_team_total": {
+            "value": 28.25,
+            "sample_n": 9
+          }
+        },
+        "ARI": {
+          "win_prob_novig": {
+            "value": 0.226415094339623,
+            "sample_n": 9
+          },
+          "implied_team_total": {
+            "value": 19.75,
+            "sample_n": 9
+          }
+        }
+      },
+      "status": 1,
+      "signals": {
+        "total_move": {
+          "value": 0,
+          "sample_n": 9
+        },
+        "total_open": {
+          "value": 48,
+          "sample_n": 9
+        },
+        "market_status": {
+          "value": 1,
+          "sample_n": null
+        },
+        "total_current": {
+          "value": 48,
+          "sample_n": 9
+        },
+        "spread_home_move": {
+          "value": 0,
+          "sample_n": 9
+        },
+        "spread_home_open": {
+          "value": -8.5,
+          "sample_n": 9
+        },
+        "total_book_range": {
+          "value": 0.5,
+          "sample_n": 9
+        },
+        "market_open_basis": {
+          "value": 1,
+          "sample_n": null
+        },
+        "spread_book_range": {
+          "value": 0.5,
+          "sample_n": 9
+        },
+        "total_move_per_day": {
+          "value": 0,
+          "sample_n": 9
+        },
+        "spread_home_current": {
+          "value": -8.5,
+          "sample_n": 9
+        },
+        "spread_key_straddle": {
+          "value": 0,
+          "sample_n": 9
+        },
+        "spread_move_per_day": {
+          "value": 0,
+          "sample_n": 9
+        },
+        "spread_key_crossings": {
+          "value": 0,
+          "sample_n": null
+        },
+        "total_book_count_open": {
+          "value": 9,
+          "sample_n": null
+        },
+        "market_open_lead_hours": {
+          "value": 124.030584645833,
+          "sample_n": null
+        },
+        "spread_book_count_open": {
+          "value": 9,
+          "sample_n": null
+        },
+        "total_book_set_changed": {
+          "value": 0,
+          "sample_n": null
+        },
+        "spread_book_set_changed": {
+          "value": 0,
+          "sample_n": null
+        },
+        "market_own_week_captures": {
+          "value": 2,
+          "sample_n": null
+        },
+        "total_book_count_current": {
+          "value": 9,
+          "sample_n": null
+        },
+        "market_current_lead_hours": {
+          "value": 69.3787022583333,
+          "sample_n": null
+        },
+        "spread_book_count_current": {
+          "value": 9,
+          "sample_n": null
+        }
+      },
+      "in_model": false
+    },
+    "context": {
+      "in_model": false,
+      "environment": {
+        "game": {
+          "surface_code": 1,
+          "weather_status": 3,
+          "venue_roof_code": 4
+        },
+        "teams": {
+          "SF": {
+            "rest_days": 7,
+            "rest_diff": 0,
+            "travel_miles": 0,
+            "tz_shift_hours": 0,
+            "tz_offset_diff_raw_hours": 0
+          },
+          "ARI": {
+            "rest_days": 7,
+            "rest_diff": 0,
+            "travel_miles": 607.929486869716,
+            "tz_shift_hours": 0,
+            "tz_offset_diff_raw_hours": 0
+          }
+        }
+      },
+      "availability": {
+        "SF": {
+          "ol_cluster_count": 2,
+          "secondary_cluster_count": 3
+        },
+        "ARI": {
+          "ol_cluster_count": 1,
+          "secondary_cluster_count": 3
+        }
+      },
+      "efficiency_pairings": {
+        "away_offense": [
+          {
+            "base": "epa_per_play_down1",
+            "subject": {
+              "team": "ARI",
+              "value": -0.031697583697651,
+              "signal": "epa_per_play_down1_off",
+              "sample_n": 45,
+              "player_id": null,
+              "stability": 0.606832
+            },
+            "opponent": {
+              "team": "SF",
+              "value": -0.0148976984461117,
+              "signal": "epa_per_play_down1_def",
+              "sample_n": 29,
+              "player_id": null,
+              "stability": 0.493291
+            }
+          },
+          {
+            "base": "epa_per_play_down2",
+            "subject": {
+              "team": "ARI",
+              "value": 0.137648226654092,
+              "signal": "epa_per_play_down2_off",
+              "sample_n": 38,
+              "player_id": null,
+              "stability": 0.598152
+            },
+            "opponent": {
+              "team": "SF",
+              "value": 0.0308912100444785,
+              "signal": "epa_per_play_down2_def",
+              "sample_n": 26,
+              "player_id": null,
+              "stability": 0.460987
+            }
+          },
+          {
+            "base": "epa_per_play_down3",
+            "subject": {
+              "team": "ARI",
+              "value": -0.0479765755324077,
+              "signal": "epa_per_play_down3_off",
+              "sample_n": 22,
+              "player_id": null,
+              "stability": 0.500068
+            },
+            "opponent": {
+              "team": "SF",
+              "value": 0.00157998716013496,
+              "signal": "epa_per_play_down3_def",
+              "sample_n": 17,
+              "player_id": null,
+              "stability": 0.388806
+            }
+          }
+        ],
+        "home_offense": [
+          {
+            "base": "epa_per_play_down1",
+            "subject": {
+              "team": "SF",
+              "value": 0.0473160300814099,
+              "signal": "epa_per_play_down1_off",
+              "sample_n": 43,
+              "player_id": null,
+              "stability": 0.607091
+            },
+            "opponent": {
+              "team": "ARI",
+              "value": 0.0249868900708547,
+              "signal": "epa_per_play_down1_def",
+              "sample_n": 45,
+              "player_id": null,
+              "stability": 0.578632
+            }
+          },
+          {
+            "base": "epa_per_play_down2",
+            "subject": {
+              "team": "SF",
+              "value": 0.274342495742994,
+              "signal": "epa_per_play_down2_off",
+              "sample_n": 31,
+              "player_id": null,
+              "stability": 0.575003
+            },
+            "opponent": {
+              "team": "ARI",
+              "value": 0.0262082593642349,
+              "signal": "epa_per_play_down2_def",
+              "sample_n": 33,
+              "player_id": null,
+              "stability": 0.506446
+            }
+          },
+          {
+            "base": "epa_per_play_down3",
+            "subject": {
+              "team": "SF",
+              "value": 0.273499549090078,
+              "signal": "epa_per_play_down3_off",
+              "sample_n": 13,
+              "player_id": null,
+              "stability": 0.442893
+            },
+            "opponent": {
+              "team": "ARI",
+              "value": 0.0465293470922642,
+              "signal": "epa_per_play_down3_def",
+              "sample_n": 15,
+              "player_id": null,
+              "stability": 0.37
+            }
+          }
+        ]
+      }
+    },
+    "identity": {
+      "week": 3,
+      "season": 2026,
+      "game_id": "2026_03_ARI_SF",
+      "kickoff": "2026-09-27T20:05:00+00:00",
+      "neutral": false,
+      "location": "Home",
+      "away_team": "ARI",
+      "home_team": "SF",
+      "outside_fit_scope": false
+    },
+    "projection": {
+      "total": 50.873030187027254,
+      "pts_away": 22.392693400061976,
+      "pts_home": 28.480336786965275,
+      "margin_home": 6.087643386903299,
+      "spread_home": -6.087643386903299,
+      "decomposition": {
+        "away": {
+          "hfa": -0.7161667400653887,
+          "alpha": 22.864693402634376,
+          "terms": [
+            {
+              "beta": 36.587553582615044,
+              "role": "offense",
+              "team": "ARI",
+              "value": 0.0301629319499835,
+              "signal": "epa_per_play_off",
+              "centered": 0.011982992739677675,
+              "sample_n": 106,
+              "stability": 0.560999,
+              "week_mean": 0.018179939210305824,
+              "contribution": 0.438428388943044
+            },
+            {
+              "beta": 20.701592603324052,
+              "role": "opponent_defense",
+              "team": "SF",
+              "value": 0.00877582184341506,
+              "signal": "epa_per_play_def",
+              "centered": -0.009383898870604947,
+              "sample_n": 74,
+              "stability": 0.435182,
+              "week_mean": 0.018159720714020007,
+              "contribution": -0.1942616514500563
+            }
+          ],
+          "points": 22.392693400061976
+        },
+        "home": {
+          "hfa": 0.7161667400653887,
+          "alpha": 22.864693402634376,
+          "terms": [
+            {
+              "beta": 36.587553582615044,
+              "role": "offense",
+              "team": "SF",
+              "value": 0.159333616764617,
+              "signal": "epa_per_play_off",
+              "centered": 0.14115367755431116,
+              "sample_n": 87,
+              "stability": 0.546596,
+              "week_mean": 0.018179939210305834,
+              "contribution": 5.164467740901526
+            },
+            {
+              "beta": 20.701592603324052,
+              "role": "opponent_defense",
+              "team": "ARI",
+              "value": 0.00535920329907166,
+              "signal": "epa_per_play_def",
+              "centered": -0.012800517414948347,
+              "sample_n": 96,
+              "stability": 0.477162,
+              "week_mean": 0.018159720714020007,
+              "contribution": -0.26499109663601544
+            }
+          ],
+          "points": 28.480336786965275
+        }
+      },
+      "model_version": "p5-v1",
+      "efficiency_fingerprint": "bdb237411fd8a9e3"
+    },
+    "uncertainty": {
+      "edge_note": {
+        "total": "Difference vs. market, not shown to beat the closing line historically.",
+        "spread": "Difference vs. market, not shown to beat the closing line historically."
+      },
+      "stabilities": {
+        "away_def": 0.477162,
+        "away_off": 0.560999,
+        "home_def": 0.435182,
+        "home_off": 0.546596
+      },
+      "low_stability": true,
+      "outcome_noise": {
+        "note": "NFL results typically land about 13 points from any pregame projection, the model's or the market's. This is game-outcome noise, not this projection's uncertainty, and it barely changes with input stability.",
+        "total_rms": 13.17124271316772,
+        "margin_rms": 13.256791601257936
+      },
+      "stability_min": 0.435182,
+      "edge_validated": {
+        "total": false,
+        "spread": false
+      },
+      "stability_bucket": "low"
+    },
+    "card_version": 1,
+    "projection_status": 1,
+    "projection_status_label": "projected"
+  },
+  "as_of": "2026-09-24T22:42:37.138288+00:00",
+  "inputs_version": "efficiency:pbp@2026-09-24 10:12:29 EDT,stats_player@2026-09-24 10:14:09 EDT,snap_counts@2026-09-24 08:50:29 EDT,depth_charts@2026-09-24 08:42:14 EDT;model@p5-v1#bdb237411fd8a9e3;market:odds_open@2026-09-22T16:03:09.895275+00:00,odds_current@2026-09-24T22:42:16.671870+00:00"
+}

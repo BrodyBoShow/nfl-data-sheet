@@ -1,0 +1,26 @@
+[
+  {
+    "season": 2019,
+    "week": 1,
+    "first_gameday": "2019-09-05",
+    "last_gameday": "2019-09-09",
+    "n_games": 16,
+    "n_cards": 0
+  },
+  {
+    "season": 2026,
+    "week": 3,
+    "first_gameday": "2026-09-24",
+    "last_gameday": "2026-09-28",
+    "n_games": 16,
+    "n_cards": 16
+  },
+  {
+    "season": 2026,
+    "week": 4,
+    "first_gameday": "2026-10-01",
+    "last_gameday": "2026-10-05",
+    "n_games": 16,
+    "n_cards": 0
+  }
+]

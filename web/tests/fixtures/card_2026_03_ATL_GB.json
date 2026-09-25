@@ -1,0 +1,441 @@
+{
+  "game_id": "2026_03_ATL_GB",
+  "season": 2026,
+  "week": 3,
+  "kickoff": "2026-09-25T00:15:00+00:00",
+  "projection_status": 1,
+  "locked": true,
+  "card": {
+    "edge": {
+      "at_lock": {
+        "total": -3.70888,
+        "spread": 2.34971,
+        "market_total": 44.5,
+        "market_spread": -6.5
+      },
+      "vs_current": {
+        "flags": {
+          "single_book_market": false,
+          "spread_key_straddle": false,
+          "market_lookahead_only": false,
+          "total_within_book_range": false,
+          "spread_within_book_range": false
+        },
+        "total": -2.208883997211643,
+        "spread": 0.34970550884161966,
+        "summary": "model favors ATL by 0.3 more than market",
+        "flag_notes": {
+          "spread_key_straddle": null
+        },
+        "market_total": 43,
+        "market_spread": -4.5
+      }
+    },
+    "lock": {
+      "locked": true,
+      "locked_at": "2026-09-24T19:28:23.953633+00:00",
+      "kickoff_at_lock": "2026-09-25T00:15:00+00:00",
+      "lock_lead_hours": 4.77668
+    },
+    "market": {
+      "teams": {
+        "GB": {
+          "win_prob_novig": {
+            "value": 0.684138246738384,
+            "sample_n": 9
+          },
+          "implied_team_total": {
+            "value": 23.75,
+            "sample_n": 9
+          }
+        },
+        "ATL": {
+          "win_prob_novig": {
+            "value": 0.315861753261616,
+            "sample_n": 9
+          },
+          "implied_team_total": {
+            "value": 19.25,
+            "sample_n": 9
+          }
+        }
+      },
+      "status": 1,
+      "signals": {
+        "total_move": {
+          "value": -1.5,
+          "sample_n": 9
+        },
+        "total_open": {
+          "value": 44.5,
+          "sample_n": 9
+        },
+        "market_status": {
+          "value": 1,
+          "sample_n": null
+        },
+        "total_current": {
+          "value": 43,
+          "sample_n": 9
+        },
+        "spread_home_move": {
+          "value": 2,
+          "sample_n": 9
+        },
+        "spread_home_open": {
+          "value": -6.5,
+          "sample_n": 9
+        },
+        "total_book_range": {
+          "value": 0.5,
+          "sample_n": 9
+        },
+        "market_open_basis": {
+          "value": 1,
+          "sample_n": null
+        },
+        "spread_book_range": {
+          "value": 0.5,
+          "sample_n": 9
+        },
+        "total_move_per_day": {
+          "value": -0.658714730898893,
+          "sample_n": 9
+        },
+        "spread_home_current": {
+          "value": -4.5,
+          "sample_n": 9
+        },
+        "spread_key_straddle": {
+          "value": 0,
+          "sample_n": 9
+        },
+        "spread_move_per_day": {
+          "value": 0.87828630786519,
+          "sample_n": 9
+        },
+        "spread_key_crossings": {
+          "value": 0,
+          "sample_n": null
+        },
+        "total_book_count_open": {
+          "value": 9,
+          "sample_n": null
+        },
+        "market_open_lead_hours": {
+          "value": 56.1972513125,
+          "sample_n": null
+        },
+        "spread_book_count_open": {
+          "value": 9,
+          "sample_n": null
+        },
+        "total_book_set_changed": {
+          "value": 0,
+          "sample_n": null
+        },
+        "spread_book_set_changed": {
+          "value": 0,
+          "sample_n": null
+        },
+        "market_own_week_captures": {
+          "value": 2,
+          "sample_n": null
+        },
+        "total_book_count_current": {
+          "value": 9,
+          "sample_n": null
+        },
+        "market_current_lead_hours": {
+          "value": 1.545368925,
+          "sample_n": null
+        },
+        "spread_book_count_current": {
+          "value": 9,
+          "sample_n": null
+        }
+      },
+      "in_model": false
+    },
+    "context": {
+      "in_model": false,
+      "environment": {
+        "game": {
+          "surface_code": 1,
+          "temperature_f": 57.78,
+          "weather_status": 1,
+          "wind_speed_mph": 2.94,
+          "precip_total_in": 0,
+          "venue_roof_code": 4,
+          "snowfall_total_in": 0,
+          "venue_elevation_m": 190,
+          "wind_gust_max_mph": 8.7,
+          "weather_lead_hours": 1.54,
+          "precip_prob_max_pct": 2,
+          "wind_direction_mode": 1,
+          "apparent_temperature_f": 57.04,
+          "weather_forecast_domain": 1,
+          "weather_model_regime_break": 0
+        },
+        "teams": {
+          "GB": {
+            "rest_days": 4,
+            "rest_diff": 0,
+            "travel_miles": 0,
+            "tz_shift_hours": 0,
+            "tz_offset_diff_raw_hours": 0
+          },
+          "ATL": {
+            "rest_days": 4,
+            "rest_diff": 0,
+            "travel_miles": 767.752474304415,
+            "tz_shift_hours": -1,
+            "tz_offset_diff_raw_hours": -1
+          }
+        }
+      },
+      "availability": {
+        "GB": {
+          "ol_cluster_count": 2,
+          "secondary_cluster_count": 1
+        },
+        "ATL": {
+          "secondary_cluster_count": 2
+        }
+      },
+      "efficiency_pairings": {
+        "away_offense": [
+          {
+            "base": "epa_per_play_down1",
+            "subject": {
+              "team": "ATL",
+              "value": -0.0556658747209937,
+              "signal": "epa_per_play_down1_off",
+              "sample_n": 41,
+              "player_id": null,
+              "stability": 0.574736
+            },
+            "opponent": {
+              "team": "GB",
+              "value": 0.0398019276834421,
+              "signal": "epa_per_play_down1_def",
+              "sample_n": 52,
+              "player_id": null,
+              "stability": 0.607549
+            }
+          },
+          {
+            "base": "epa_per_play_down2",
+            "subject": {
+              "team": "ATL",
+              "value": -0.0176627668019931,
+              "signal": "epa_per_play_down2_off",
+              "sample_n": 30,
+              "player_id": null,
+              "stability": 0.538468
+            },
+            "opponent": {
+              "team": "GB",
+              "value": -0.166461344258526,
+              "signal": "epa_per_play_down2_def",
+              "sample_n": 40,
+              "player_id": null,
+              "stability": 0.544833
+            }
+          },
+          {
+            "base": "epa_per_play_down3",
+            "subject": {
+              "team": "ATL",
+              "value": -0.27940251782408,
+              "signal": "epa_per_play_down3_off",
+              "sample_n": 19,
+              "player_id": null,
+              "stability": 0.456701
+            },
+            "opponent": {
+              "team": "GB",
+              "value": 0.214545470546786,
+              "signal": "epa_per_play_down3_def",
+              "sample_n": 32,
+              "player_id": null,
+              "stability": 0.50061
+            }
+          }
+        ],
+        "home_offense": [
+          {
+            "base": "epa_per_play_down1",
+            "subject": {
+              "team": "GB",
+              "value": -0.0612017537181072,
+              "signal": "epa_per_play_down1_off",
+              "sample_n": 47,
+              "player_id": null,
+              "stability": 0.619237
+            },
+            "opponent": {
+              "team": "ATL",
+              "value": 0.0583322120247244,
+              "signal": "epa_per_play_down1_def",
+              "sample_n": 43,
+              "player_id": null,
+              "stability": 0.56957
+            }
+          },
+          {
+            "base": "epa_per_play_down2",
+            "subject": {
+              "team": "GB",
+              "value": 0.184595418076591,
+              "signal": "epa_per_play_down2_off",
+              "sample_n": 38,
+              "player_id": null,
+              "stability": 0.603635
+            },
+            "opponent": {
+              "team": "ATL",
+              "value": 0.0141286682201543,
+              "signal": "epa_per_play_down2_def",
+              "sample_n": 35,
+              "player_id": null,
+              "stability": 0.518059
+            }
+          },
+          {
+            "base": "epa_per_play_down3",
+            "subject": {
+              "team": "GB",
+              "value": -0.146894069687905,
+              "signal": "epa_per_play_down3_off",
+              "sample_n": 19,
+              "player_id": null,
+              "stability": 0.485023
+            },
+            "opponent": {
+              "team": "ATL",
+              "value": -0.0450710607263774,
+              "signal": "epa_per_play_down3_def",
+              "sample_n": 22,
+              "player_id": null,
+              "stability": 0.43125
+            }
+          }
+        ]
+      }
+    },
+    "identity": {
+      "week": 3,
+      "season": 2026,
+      "game_id": "2026_03_ATL_GB",
+      "kickoff": "2026-09-25T00:15:00+00:00",
+      "neutral": false,
+      "location": "Home",
+      "away_team": "ATL",
+      "home_team": "GB",
+      "outside_fit_scope": false
+    },
+    "projection": {
+      "total": 40.79111600278836,
+      "pts_away": 18.320410755814986,
+      "pts_home": 22.470705246973367,
+      "margin_home": 4.15029449115838,
+      "spread_home": -4.15029449115838,
+      "decomposition": {
+        "away": {
+          "hfa": -0.7161667400653887,
+          "alpha": 22.864693402634376,
+          "terms": [
+            {
+              "beta": 36.587553582615044,
+              "role": "offense",
+              "team": "ATL",
+              "value": -0.0903392726739076,
+              "signal": "epa_per_play_off",
+              "centered": -0.10851921188421342,
+              "sample_n": 91,
+              "stability": 0.514321,
+              "week_mean": 0.01817993921030582,
+              "contribution": -3.9704524795568137
+            },
+            {
+              "beta": 20.701592603324052,
+              "role": "opponent_defense",
+              "team": "GB",
+              "value": 0.0250353546582394,
+              "signal": "epa_per_play_def",
+              "centered": 0.006875633944219393,
+              "sample_n": 126,
+              "stability": 0.525276,
+              "week_mean": 0.018159720714020007,
+              "contribution": 0.14233657280281595
+            }
+          ],
+          "points": 18.320410755814986
+        },
+        "home": {
+          "hfa": 0.7161667400653887,
+          "alpha": 22.864693402634376,
+          "terms": [
+            {
+              "beta": 36.587553582615044,
+              "role": "offense",
+              "team": "GB",
+              "value": -0.0104596015323328,
+              "signal": "epa_per_play_off",
+              "centered": -0.028639540742638622,
+              "sample_n": 106,
+              "stability": 0.568073,
+              "week_mean": 0.01817993921030582,
+              "contribution": -1.0478507315027772
+            },
+            {
+              "beta": 20.701592603324052,
+              "role": "opponent_defense",
+              "team": "ATL",
+              "value": 0.0151500892611424,
+              "signal": "epa_per_play_def",
+              "centered": -0.0030096314528776074,
+              "sample_n": 103,
+              "stability": 0.489241,
+              "week_mean": 0.018159720714020007,
+              "contribution": -0.0623041642236225
+            }
+          ],
+          "points": 22.470705246973367
+        }
+      },
+      "model_version": "p5-v1",
+      "efficiency_fingerprint": "bdb237411fd8a9e3"
+    },
+    "uncertainty": {
+      "edge_note": {
+        "total": "Difference vs. market, not shown to beat the closing line historically.",
+        "spread": "Difference vs. market, not shown to beat the closing line historically."
+      },
+      "stabilities": {
+        "away_def": 0.489241,
+        "away_off": 0.514321,
+        "home_def": 0.525276,
+        "home_off": 0.568073
+      },
+      "low_stability": true,
+      "outcome_noise": {
+        "note": "NFL results typically land about 13 points from any pregame projection, the model's or the market's. This is game-outcome noise, not this projection's uncertainty, and it barely changes with input stability.",
+        "total_rms": 13.17124271316772,
+        "margin_rms": 13.256791601257936
+      },
+      "stability_min": 0.489241,
+      "edge_validated": {
+        "total": false,
+        "spread": false
+      },
+      "stability_bucket": "low"
+    },
+    "card_version": 1,
+    "projection_status": 1,
+    "projection_status_label": "projected"
+  },
+  "as_of": "2026-09-24T22:42:37.138288+00:00",
+  "inputs_version": "efficiency:pbp@2026-09-24 10:12:29 EDT,stats_player@2026-09-24 10:14:09 EDT,snap_counts@2026-09-24 08:50:29 EDT,depth_charts@2026-09-24 08:42:14 EDT;model@p5-v1#bdb237411fd8a9e3;market:odds_current@2026-09-22T16:03:09.895275+00:00;market:odds_open@2026-09-22T16:03:09.895275+00:00,odds_current@2026-09-24T22:42:16.671870+00:00"
+}

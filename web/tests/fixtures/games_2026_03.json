@@ -1,0 +1,22 @@
+[
+  {
+    "game_id": "2026_03_ARI_SF",
+    "season": 2026,
+    "week": 3,
+    "home_team": "SF",
+    "away_team": "ARI",
+    "gameday": "2026-09-27",
+    "gametime": "16:05",
+    "location": "Home"
+  },
+  {
+    "game_id": "2026_03_ATL_GB",
+    "season": 2026,
+    "week": 3,
+    "home_team": "GB",
+    "away_team": "ATL",
+    "gameday": "2026-09-24",
+    "gametime": "20:15",
+    "location": "Home"
+  }
+]
