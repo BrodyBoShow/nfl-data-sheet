@@ -24,6 +24,11 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`โ
   pre-kickoff), and no signal carries that. Historical scores and lines are read only by
   the offline model-fitting/backtest scripts in `scripts/`, never by a scheduled L3 job.
   L3 never calls external sources.
+  - `/web` reads `signals` (no player rows), `matchup_cards`, and those `games` identity
+    columns, only through the `web` schema's views as anon, and only from
+    `web/lib/db.ts`. Grants and RLS enforce this (migration `0026`); widening what anon
+    can read is a new migration plus a `docs/phases/P6.md` ยง2 update, never a view tweak.
+    The backtest report and model file reach the app only as build-time content.
 - **L0** (`pipeline/orchestration/`) decides what runs, owns canonical keys, detects
   breakage, grades projections. The grader is the one scheduled job that reads `games`
   scores and lines, after the game. It writes only `projection_grades`/`grade_summary`,

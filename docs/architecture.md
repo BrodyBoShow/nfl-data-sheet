@@ -131,7 +131,11 @@ flowchart TB
 
 - **L3 Synthesis and sheet** reads `signals`, plus the spine's `games` table for identity
   and schedule only (`game_id, season, week, home_team, away_team, gameday, gametime,
-  location`), and never calls external sources. The web app reads only our database.
+  location`), and never calls external sources. The web app reads only our database:
+  `signals` (team and game scope, never player rows), `matchup_cards`, and those eight
+  `games` identity columns. It reads them only through the `web` schema's views, as anon.
+  Grants and RLS enforce that (migration `0026`, `docs/phases/P6.md` §2); the views are
+  convenience. Scores and lines are unreadable to it at the grant level.
   - **Why `games` is allowed (amended 2026-09-23, P5):** the spine is canonical keys owned
     by L0, not staged source data. A card has to know which teams play, where, and when
     it kicks off (projections lock pre-kickoff), and no signal carries that. Scores,
@@ -141,8 +145,11 @@ flowchart TB
   - **Matchup synthesizer**: joins signals per game, projects spread/total, compares to
     market, writes edge cards, locks projections pre-kickoff into `projection_log`
     (immutable).
-  - **Data sheet web app**: Next.js on Vercel — game view, player view, signal
-    cross-reference/filters, matchup cards with sample sizes and staleness badges.
+  - **Data sheet web app** (v1, P6): Next.js on Vercel, read-only.
+    - A week view and a game view: the matchup card plus the signals behind it.
+    - `/method`, with the backtest report in a provenance frame, and `/sources`.
+    - Freshness shows through `as_of` stamps, not auditor badges.
+    - The player view moved to P7. Signal cross-reference/filters are deferred to v2.
   - **Matchup narrator** (optional, Phase 8): on-demand prose from one card's signals,
     cached per game per day. Cannot introduce numbers not already on the card.
 
@@ -188,7 +195,7 @@ daily, **T3** weekly, **OD** on demand.
 | Piece | Phase | Job |
 |---|---|---|
 | Matchup synthesizer | 5 | Adjusted efficiency → points regression, backtested vs. historical closing lines (`docs/backtest_report.md`). **T1.** Per game, same −24h..+7d window as Environment and Market. Writes one `matchup_cards` row per game until kickoff, then the card freezes. Locks the projection into `projection_log` on the first run within 6h of kickoff; a DB trigger makes that row immutable. Edges are vs. Market's current consensus, flagged rather than adjusted; `edge_validated` is false (not shown to beat the close). Model file: `pipeline/synthesis/model_coefficients.json`, refit manually. |
-| Data sheet web app | 6 | Next.js + TypeScript on Vercel. |
+| Data sheet web app | 6 | Next.js 16 + TypeScript on Vercel Hobby (https://nfl-data-sheet.vercel.app). Server Components with time-based ISR (`revalidate = 600`). Reads `web.games`, `web.weeks`, `web.week_cards`, `web.cards` and `web.signals` as anon through one module, `web/lib/db.ts` (Q1–Q6). Routes: `/` (redirects to the current week), `/[season]/[week]`, `/game/[gameId]`, `/method`, `/sources`. An edge appears only on the game view, always with its validation tag, and the honesty suite (`web/tests/honesty.test.ts`) enforces that. The backtest report and model file are build-time content, never read at runtime. No player rows, grades or scores are exposed. Spec: `docs/phases/P6.md`. |
 | Matchup narrator | 8, optional | Cached prose per game per day, numbers-locked to the card. |
 
 ## Dispatcher calendar (ET)
