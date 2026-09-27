@@ -1,13 +1,29 @@
+import re
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
+from pipeline.collectors import nflverse_bulk
 from pipeline.collectors.nflverse_bulk import (
+    _FTN_COLS,
     _NGS_ALL_METRIC_COLS,
+    _PARTICIPATION_COLS,
     _PFR_ALL_METRIC_COLS,
+    _PGP_PASSER_COLS,
+    _PGP_PASSER_FTN_COLS,
+    _PGP_RECEIVER_COLS,
+    _PGP_RECEIVER_FTN_COLS,
+    _PGP_RUSHER_COLS,
+    _PGP_RUSHER_FTN_COLS,
+    _PLAYER_GAME_PBP_COLS,
+    _PLAYER_WEEK_COLS,
     NflverseBulkCollector,
+    _aggregate_participation_player_season,
+    _aggregate_player_game_pbp,
     _aggregate_team_week,
     _build_depth,
     _build_ftn,
@@ -15,10 +31,14 @@ from pipeline.collectors.nflverse_bulk import (
     _build_pfr_advstats,
     _build_player_week,
     _build_snaps,
+    _garbage_time_expr,
+    _player_play_scope,
 )
+from pipeline.core.base import RunContext
 from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
 
 FIXTURES = Path(__file__).parent / "fixtures"
+MIGRATIONS = Path(__file__).parent.parent / "db" / "migrations"
 
 _NGS_TYPES = ("passing", "rushing", "receiving")
 _PFR_TYPES = ("pass", "rush", "rec", "def")
@@ -39,6 +59,7 @@ def _load_raw() -> dict:
             st: pl.read_parquet(FIXTURES / f"nflreadpy_pfr_advstats_{st}_sample.parquet")
             for st in _PFR_TYPES
         },
+        "participation": pl.read_parquet(FIXTURES / "nflreadpy_participation_sample.parquet"),
     }
 
 
@@ -52,6 +73,8 @@ def test_validate_produces_every_staged_table():
         "pfr_advstats",
         "ftn",
         "depth",
+        "player_game_pbp",
+        "participation_player_season",
     }
     for df in validated.values():
         assert df.height > 0
@@ -109,6 +132,11 @@ def test_ngs_stacks_stat_types_with_nulls_for_other_types():
     assert passing_rows["completion_percentage_above_expectation"].null_count() == 0
     assert passing_rows["avg_separation"].null_count() == passing_rows.height
     assert set(ngs.columns) >= set(_NGS_ALL_METRIC_COLS)
+    # Counts stay ints across the stat_type concat (Int32 at source), not floats.
+    for count_col in ("attempts", "rush_attempts", "targets"):
+        assert ngs.schema[count_col] == pl.Int64
+    assert passing_rows["attempts"].null_count() == 0
+    assert passing_rows["targets"].null_count() == passing_rows.height
 
 
 def test_pfr_advstats_stacks_stat_types_with_nulls_for_other_types():
@@ -349,3 +377,543 @@ def test_depth_keeps_only_latest_snapshot_per_team():
     assert ari_row["player_id"] == "00-new"
     assert ari_row["as_of"] == datetime(2026, 2, 1, tzinfo=UTC)
     assert depth.filter(pl.col("team") == "KC").height == 1
+
+
+# --- P7: migration contract (0027-0030) ----------------------------------------------------
+# The migrations define exactly what the collector must produce, so these parse the SQL
+# rather than restating the column lists.
+
+_SQL_TO_POLARS = {"int": {pl.Int32, pl.Int64}, "double": {pl.Float64}, "text": {pl.String}}
+_BOOKKEEPING_COLS = {"content_hash", "updated_at"}
+
+
+def _sql_without_comments(name: str) -> str:
+    (path,) = MIGRATIONS.glob(f"{name}_*.sql")
+    return "\n".join(line.split("--")[0] for line in path.read_text().splitlines())
+
+
+def _created_columns(name: str) -> dict[str, str]:
+    sql = _sql_without_comments(name)
+    body = sql[sql.index("(", sql.index("CREATE TABLE")) + 1 : sql.index("PRIMARY KEY")]
+    cols = {}
+    for line in body.splitlines():
+        parts = line.strip().rstrip(",").split()
+        if parts:
+            cols[parts[0]] = parts[1]
+    return {c: t for c, t in cols.items() if c not in _BOOKKEEPING_COLS}
+
+
+def _added_columns(name: str) -> dict[str, dict[str, str]]:
+    sql = _sql_without_comments(name)
+    return {
+        table: dict(re.findall(r"ADD COLUMN (\w+) (\w+)", block))
+        for table, block in re.findall(r"ALTER TABLE (\w+)(.*?);", sql, re.S)
+    }
+
+
+def _assert_dtypes_match(df: pl.DataFrame, sql_cols: dict[str, str]) -> None:
+    wrong = {
+        c: (t, df.schema[c]) for c, t in sql_cols.items() if df.schema[c] not in _SQL_TO_POLARS[t]
+    }
+    assert not wrong, wrong
+
+
+def test_player_game_pbp_columns_are_exactly_migration_0028():
+    sql_cols = _created_columns("0028")
+    assert set(_PLAYER_GAME_PBP_COLS) == set(sql_cols)
+    assert len(_PLAYER_GAME_PBP_COLS) == len(set(_PLAYER_GAME_PBP_COLS))
+    df, _ = _aggregate_player_game_pbp(_pbp(), _ftn())
+    assert df.columns == _PLAYER_GAME_PBP_COLS
+    _assert_dtypes_match(df, sql_cols)
+
+
+def test_participation_player_season_columns_are_exactly_migration_0029():
+    sql_cols = _created_columns("0029")
+    assert set(_PARTICIPATION_COLS) == set(sql_cols)
+    df, _ = _aggregate_participation_player_season(_participation(), _pbp())
+    assert df.columns == _PARTICIPATION_COLS
+    _assert_dtypes_match(df, sql_cols)
+
+
+def test_widened_columns_are_staged_per_migrations_0027_and_0030():
+    added = _added_columns("0027") | _added_columns("0030")
+    raw = _load_raw()
+    built = {
+        "ngs": _build_ngs(raw["ngs"]),
+        "pfr_advstats": _build_pfr_advstats(raw["pfr_advstats"]),
+        "ftn": _build_ftn(raw["ftn_charting"]),
+        "player_week": _build_player_week(raw["player_stats"]),
+    }
+    staged = {
+        "ngs": set(_NGS_ALL_METRIC_COLS),
+        "pfr_advstats": set(_PFR_ALL_METRIC_COLS),
+        "ftn": set(_FTN_COLS),
+        "player_week": set(_PLAYER_WEEK_COLS),
+    }
+    assert set(added) == set(built)
+    for table, cols in added.items():
+        assert set(cols) <= staged[table], (table, set(cols) - staged[table])
+        # FTN booleans are `boolean` in SQL; everything else maps through _SQL_TO_POLARS.
+        typed = {c: t for c, t in cols.items() if t != "boolean"}
+        _assert_dtypes_match(built[table], typed)
+        for c in set(cols) - set(typed):
+            assert built[table].schema[c] == pl.Boolean, c
+
+
+# --- P7: player_game_pbp -------------------------------------------------------------------
+
+
+def _pbp() -> pl.DataFrame:
+    return pl.read_parquet(FIXTURES / "nflreadpy_pbp_sample.parquet")
+
+
+def _ftn() -> pl.DataFrame:
+    return pl.read_parquet(FIXTURES / "nflreadpy_ftn_charting_sample.parquet")
+
+
+def _participation() -> pl.DataFrame:
+    return pl.read_parquet(FIXTURES / "nflreadpy_participation_sample.parquet")
+
+
+def _pgp(pbp: pl.DataFrame | None = None, ftn: pl.DataFrame | None = None) -> pl.DataFrame:
+    return _aggregate_player_game_pbp(
+        _pbp() if pbp is None else pbp, _ftn() if ftn is None else ftn
+    )[0]
+
+
+def _role_totals(df: pl.DataFrame) -> tuple[int, int, int]:
+    row = df.select(pl.col("dropbacks").sum(), pl.col("carries").sum(), pl.col("targets").sum())
+    return row.row(0)
+
+
+def test_player_game_pbp_play_scope_matches_the_fixtures_measured_counts():
+    # Independent anchors (docs/phases/P7.md step 3, fixture gap): the game has 128 in-scope
+    # scrimmage plays, every one either a dropback (84) or a designed run (44); of 73 non-sack
+    # pass attempts, 3 have no receiver, leaving 70 targets.
+    assert _role_totals(_pgp()) == (84, 44, 70)
+
+
+def _clone_play(pbp: pl.DataFrame, play_id: float, new_id: float, change: dict) -> pl.DataFrame:
+    return pbp.filter(pl.col("play_id") == play_id).with_columns(
+        pl.lit(new_id, dtype=pl.Float64).alias("play_id"),
+        *[pl.lit(v, dtype=pbp.schema[k]).alias(k) for k, v in change.items()],
+    )
+
+
+_EXCLUDED_PLAYS = {
+    "two_point_attempt": {"two_point_attempt": 1.0},
+    "qb_kneel": {"qb_kneel": 1.0},
+    "qb_spike": {"qb_spike": 1.0},
+    "no_play": {"play_type": "no_play"},
+    "play_deleted": {"play_deleted": 1.0},
+    "null_epa": {"epa": None},
+}
+
+
+@pytest.mark.parametrize("change", _EXCLUDED_PLAYS.values(), ids=_EXCLUDED_PLAYS.keys())
+def test_player_game_pbp_excludes_non_scrimmage_plays(change):
+    """Each clone is a real in-scope play (a completed target and a designed run) with
+    exactly one flag changed, so only that flag can be what keeps it out."""
+    pbp = _pbp()
+    scoped = _player_play_scope(pbp)
+    target_play = scoped.filter(
+        (pl.col("complete_pass") == 1) & pl.col("receiver_id").is_not_null()
+    )["play_id"][0]
+    run_play = scoped.filter(pl.col("rush") == 1)["play_id"][0]
+    baseline = _pgp(pbp)
+
+    def with_clones(change: dict) -> pl.DataFrame:
+        clones = [
+            _clone_play(pbp, target_play, 90001.0, change),
+            _clone_play(pbp, run_play, 90002.0, change),
+        ]
+        return _pgp(pl.concat([pbp, *clones], how="vertical"))
+
+    # Control: unchanged clones ARE counted, so the clone mechanism itself can't be what
+    # makes the excluded version disappear.
+    assert _role_totals(with_clones({})) == (85, 45, 71)
+    assert_frame_equal(with_clones(change), baseline)
+
+
+def test_player_game_pbp_includes_garbage_time():
+    pbp = _pbp()
+    garbage = _player_play_scope(pbp).filter(_garbage_time_expr().fill_null(False))
+    assert garbage.height == 6  # real Q3/Q4 plays in the fixture game
+
+    without = pbp.join(garbage.select("play_id"), on="play_id", how="anti")
+    full, less = _role_totals(_pgp(pbp)), _role_totals(_pgp(without))
+    assert (full[0] + full[1]) - (less[0] + less[1]) == 6
+
+    # Cross-check against the scope that does exclude it: team_week drops the same 6.
+    assert _aggregate_team_week(pbp)["garbage_time_plays_excluded"].sum() == 6
+
+
+_ROLE_COLS = {
+    "passer": _PGP_PASSER_COLS + _PGP_PASSER_FTN_COLS,
+    "rusher": _PGP_RUSHER_COLS + _PGP_RUSHER_FTN_COLS,
+    "receiver": _PGP_RECEIVER_COLS + _PGP_RECEIVER_FTN_COLS,
+}
+
+
+def test_player_game_pbp_absent_roles_are_null_not_zero():
+    df = _pgp()
+    for row in df.to_dicts():
+        held = {role: row[cols[0]] is not None for role, cols in _ROLE_COLS.items()}
+        assert any(held.values()), row["player_id"]
+        for role, cols in _ROLE_COLS.items():
+            values = [row[c] for c in cols]
+            if held[role]:
+                # The fixture game is FTN-charted, so a held role has every column.
+                assert None not in values, (row["player_id"], role)
+            else:
+                assert values == [None] * len(values), (row["player_id"], role)
+
+    # A pure receiver: every passer and rusher column NULL.
+    receiver = df.filter(pl.col("player_id") == "00-0031236").to_dicts()[0]
+    assert receiver["targets"] == 4
+    assert all(receiver[c] is None for c in _ROLE_COLS["passer"] + _ROLE_COLS["rusher"])
+    # A QB who was never targeted: receiver columns NULL, while a held role's zero is 0.
+    qb = df.filter(pl.col("player_id") == "00-0035228").to_dicts()[0]
+    assert all(qb[c] is None for c in _ROLE_COLS["receiver"])
+    assert qb["interceptions"] == 0
+    # Scrambles are dropbacks, never carries (rusher_id is null on them).
+    assert qb["scrambles"] == 3
+    assert qb["carries"] == 4
+
+
+def test_play_id_join_rejects_a_fractional_pbp_play_id():
+    pbp = _pbp().with_columns(
+        pl.when(pl.col("play_id") == 115.0)
+        .then(115.5)
+        .otherwise(pl.col("play_id"))
+        .alias("play_id")
+    )
+    with pytest.raises(ValueError, match="non-integer"):
+        _aggregate_player_game_pbp(pbp, _ftn())
+
+
+def test_play_id_join_rejects_an_unexpected_ftn_play_id_dtype():
+    ftn = _ftn().with_columns(pl.col("nflverse_play_id").cast(pl.String))
+    with pytest.raises(ValueError, match="dtype"):
+        _aggregate_player_game_pbp(_pbp(), ftn)
+
+
+def test_play_id_join_rejects_duplicated_ftn_plays():
+    ftn = pl.concat([_ftn(), _ftn().head(1)], how="vertical")
+    with pytest.raises(ValueError, match="duplicated"):
+        _aggregate_player_game_pbp(_pbp(), ftn)
+
+
+def test_player_game_pbp_ignores_play_id_dtype_differences():
+    baseline = _pgp()
+    as_int_pbp = _pgp(pbp=_pbp().with_columns(pl.col("play_id").cast(pl.Int32)))
+    as_float_ftn = _pgp(ftn=_ftn().with_columns(pl.col("nflverse_play_id").cast(pl.Float64)))
+    assert_frame_equal(as_int_pbp, baseline)
+    assert_frame_equal(as_float_ftn, baseline)
+
+
+_FTN_COLS_ALL_ROLES = _PGP_PASSER_FTN_COLS + _PGP_RUSHER_FTN_COLS + _PGP_RECEIVER_FTN_COLS
+
+
+def test_uncharted_game_gets_null_ftn_columns_and_full_pbp_columns():
+    """pbp fresh, FTN not caught up: the game's pbp columns are written and every ftn_*
+    column is NULL -- never 0, which would read as 'charted, no play action'."""
+    baseline = _pgp()
+    df, meta = _aggregate_player_game_pbp(_pbp(), _ftn().head(0))
+    pbp_cols = [c for c in _PLAYER_GAME_PBP_COLS if c not in _FTN_COLS_ALL_ROLES]
+    assert_frame_equal(df.select(pbp_cols), baseline.select(pbp_cols))
+    assert df.select(_FTN_COLS_ALL_ROLES).null_count().sum_horizontal().item() == (
+        df.height * len(_FTN_COLS_ALL_ROLES)
+    )
+    assert meta["pgp_ftn_uncharted_games"] == 1
+    assert meta["pgp_ftn_unmatched_plays"] == 0
+
+
+def test_partially_charted_game_uses_charted_plays_as_the_ftn_denominator():
+    pbp = _pbp()
+    dropped = _player_play_scope(pbp)["play_id"].head(20).cast(pl.Int32)
+    ftn = _ftn().filter(~pl.col("nflverse_play_id").is_in(dropped.implode()))
+    df, meta = _aggregate_player_game_pbp(pbp, ftn)
+
+    assert _role_totals(df) == (84, 44, 70)  # pbp columns unaffected
+    charted = df.select(
+        pl.col("ftn_charted_dropbacks").sum() + pl.col("ftn_charted_carries").sum()
+    ).item()
+    assert charted == 128 - 20
+    assert df.filter(pl.col("ftn_charted_dropbacks") > pl.col("dropbacks")).height == 0
+    assert meta["pgp_ftn_unmatched_plays"] == 20
+    assert meta["pgp_ftn_unmatched_example_games"] == ["2025_01_ARI_NO"]
+    assert meta["pgp_ftn_uncharted_games"] == 0
+
+
+# --- P7: participation_player_season -------------------------------------------------------
+
+
+def _pps(participation: pl.DataFrame) -> tuple[pl.DataFrame, dict]:
+    return _aggregate_participation_player_season(participation, _pbp())
+
+
+def _labeled_pass_dropbacks(df: pl.DataFrame) -> int:
+    return df.select(
+        pl.col("pass_dropbacks_man").sum() + pl.col("pass_dropbacks_zone").sum()
+    ).item()
+
+
+def _relabel(participation: pl.DataFrame, play_ids: pl.Series, label: str | None) -> pl.DataFrame:
+    return participation.with_columns(
+        pl.when(pl.col("play_id").is_in(play_ids.implode()))
+        .then(pl.lit(label, dtype=pl.String))
+        .otherwise(pl.col("defense_man_zone_type"))
+        .alias("defense_man_zone_type")
+    )
+
+
+def _dropback_play_ids(n: int) -> pl.Series:
+    return _player_play_scope(_pbp()).filter(pl.col("qb_dropback") == 1)["play_id"].head(n)
+
+
+def test_participation_counts_on_field_plays_and_labeled_dropbacks():
+    df, meta = _pps(_participation())
+    totals = df.select(pl.all().exclude("player_id", "season").sum()).to_dicts()[0]
+    assert totals["off_snaps"] == 128 * 11  # every in-scope play, 11 on offense
+    assert totals["off_dropbacks"] == 84 * 11
+    assert _labeled_pass_dropbacks(df) == 84  # all 84 fixture dropbacks are labeled
+    assert totals["targets_man"] + totals["targets_zone"] == 70
+    assert meta["participation_rows_without_pbp"] == 0
+    assert meta["participation_scope_plays_without_participation"] == 0
+
+
+def test_participation_empty_string_and_null_labels_are_unlabeled_not_coverage():
+    baseline, _ = _pps(_participation())
+    plays = _dropback_play_ids(10)
+    as_empty, _ = _pps(_relabel(_participation(), plays, ""))  # the 2025 form
+    as_null, _ = _pps(_relabel(_participation(), plays, None))  # the 2022 form
+
+    assert _labeled_pass_dropbacks(as_empty) == _labeled_pass_dropbacks(baseline) - 10
+    assert as_empty["off_dropbacks"].sum() == baseline["off_dropbacks"].sum()
+    assert_frame_equal(as_empty, as_null)
+
+
+def test_participation_unknown_label_counts_as_neither_and_is_reported():
+    baseline, _ = _pps(_participation())
+    df, meta = _pps(_relabel(_participation(), _dropback_play_ids(5), "COVER_X"))
+    assert _labeled_pass_dropbacks(df) == _labeled_pass_dropbacks(baseline) - 5
+    assert meta["participation_unknown_coverage_plays"] == 5
+    assert meta["participation_unknown_coverage_labels"] == ["COVER_X"]
+
+
+def test_participation_empty_player_list_yields_no_blank_player_id():
+    # 2022 has plays with offense_players == '' (n_offense 0), which split to [''].
+    baseline, _ = _pps(_participation())
+    play = _dropback_play_ids(1)
+    participation = _participation().with_columns(
+        pl.when(pl.col("play_id").is_in(play.implode()))
+        .then(pl.lit(""))
+        .otherwise(pl.col("offense_players"))
+        .alias("offense_players")
+    )
+    df, _ = _pps(participation)
+    assert df.filter(pl.col("player_id") == "").height == 0
+    assert df["off_snaps"].sum() == baseline["off_snaps"].sum() - 11
+
+
+def test_participation_does_not_read_route_or_was_pressure():
+    baseline, _ = _pps(_participation())
+    df, _ = _pps(_participation().drop("route", "was_pressure"))
+    assert_frame_equal(df, baseline)
+
+
+def test_participation_handles_the_2022_int32_play_id():
+    baseline, _ = _pps(_participation())
+    as_int, _ = _pps(_participation().with_columns(pl.col("play_id").cast(pl.Int32)))
+    assert_frame_equal(as_int, baseline)
+    # The real 2022 fixture (different schema, a game not in the pbp fixture) goes through
+    # the same path; none of its rows match pbp, and that's counted, not guessed.
+    participation_2022 = pl.read_parquet(FIXTURES / "nflreadpy_participation_2022_sample.parquet")
+    df, meta = _pps(participation_2022)
+    assert df.height == 0
+    assert meta["participation_rows_without_pbp"] == participation_2022.height
+
+
+# --- P7: two-tag freshness ------------------------------------------------------------------
+
+
+class _FakeNflverse:
+    """Stands in for the network (timestamp.json, nflreadpy) and the DB (source_freshness,
+    upserts). Loaders return the fixtures whatever seasons are asked for, and record the
+    call so a test can see what was fetched."""
+
+    def __init__(self, monkeypatch, live: dict[str, str]):
+        self.live = dict(live)
+        self.freshness: dict[str, str] = {}
+        self.calls: list[tuple[str, list[int] | int]] = []
+        self.upserted: dict[str, int] = {}
+        raw = _load_raw()
+
+        def loader(name: str, frame):
+            def load(seasons, stat_type=None):
+                self.calls.append((name, seasons))
+                return frame[stat_type] if stat_type else frame
+
+            return load
+
+        fake_nfl = SimpleNamespace(
+            load_pbp=loader("load_pbp", raw["pbp"]),
+            load_player_stats=loader("load_player_stats", raw["player_stats"]),
+            load_snap_counts=loader("load_snap_counts", raw["snap_counts"]),
+            load_ftn_charting=loader("load_ftn_charting", raw["ftn_charting"]),
+            load_depth_charts=loader("load_depth_charts", raw["depth_charts"]),
+            load_nextgen_stats=loader("load_nextgen_stats", raw["ngs"]),
+            load_pfr_advstats=loader("load_pfr_advstats", raw["pfr_advstats"]),
+            load_participation=loader("load_participation", raw["participation"]),
+        )
+
+        def upsert(conn, table, rows, conflict_cols, update_cols):
+            self.upserted[table] = self.upserted.get(table, 0) + len(rows)
+            return len(rows)
+
+        monkeypatch.setattr(nflverse_bulk, "nfl", fake_nfl)
+        monkeypatch.setattr(nflverse_bulk, "_fetch_timestamp", lambda tag: self.live[tag])
+        monkeypatch.setattr(nflverse_bulk, "get_last_value", lambda c, k: self.freshness.get(k))
+        monkeypatch.setattr(
+            nflverse_bulk, "set_last_value", lambda c, k, v: self.freshness.__setitem__(k, v)
+        )
+        monkeypatch.setattr(nflverse_bulk, "filter_changed", lambda c, t, pk, rows: rows)
+        monkeypatch.setattr(nflverse_bulk, "upsert_rows", upsert)
+        monkeypatch.setattr(nflverse_bulk, "_resolve_pfr_player_ids", lambda c, ids: {})
+
+    def fetched(self, name: str) -> list:
+        return [seasons for called, seasons in self.calls if called == name]
+
+    def cycle(self, collector: NflverseBulkCollector, season: int = 2026) -> set[str] | None:
+        """One run as Collector.run drives it. Returns what was stored, or None if skipped."""
+        self.calls.clear()
+        self.upserted.clear()
+        ctx = RunContext(
+            season=season,
+            week=3,
+            season_type="REG",
+            now=datetime(2026, 9, 27, tzinfo=UTC),
+            settings=None,  # type: ignore[arg-type]
+            conn=None,  # type: ignore[arg-type]
+        )
+        if not collector.should_run(ctx):
+            return None
+        validated = collector.validate(collector.fetch(ctx))
+        collector.store(ctx, validated)
+        return set(validated)
+
+
+_TAGS = (
+    "pbp",
+    "stats_player",
+    "snap_counts",
+    "ftn_charting",
+    "depth_charts",
+    "nextgen_stats",
+    "pfr_advstats",
+    "pbp_participation",
+)
+_CORE = {
+    "team_week",
+    "player_week",
+    "snaps",
+    "ftn",
+    "depth",
+    "ngs",
+    "pfr_advstats",
+    "player_game_pbp",
+}
+
+
+@pytest.fixture
+def fake(monkeypatch) -> _FakeNflverse:
+    fake = _FakeNflverse(monkeypatch, {tag: "t1" for tag in _TAGS})
+    assert fake.cycle(NflverseBulkCollector()) == _CORE | {"participation_player_season"}
+    return fake
+
+
+def test_freshness_first_run_records_tag_keys_and_built_from_keys(fake):
+    for tag in _TAGS:
+        assert fake.freshness[f"nflverse:{tag}"] == "t1"
+    assert fake.freshness["nflverse:player_game_pbp"] == "pbp@t1;ftn_charting@t1;seasons=2025,2026"
+    assert (
+        fake.freshness["nflverse:participation_player_season"]
+        == "pbp_participation@t1;seasons=2025"
+    )
+    assert fake.cycle(NflverseBulkCollector()) is None  # nothing moved: skipped
+
+
+@pytest.mark.parametrize("moved", ["ftn_charting", "pbp"])
+def test_freshness_either_player_game_pbp_tag_rebuilds_it_from_both(fake, moved):
+    fake.live[moved] = "t2"
+    stored = fake.cycle(NflverseBulkCollector())
+    assert stored == _CORE  # participation's own tag didn't move
+    assert fake.fetched("load_pbp") == [[2025, 2026]]
+    assert fake.fetched("load_ftn_charting") == [[2025, 2026]]  # both, fresh, same run
+    assert fake.fetched("load_participation") == []
+    pbp_ts, ftn_ts = ("t2", "t1") if moved == "pbp" else ("t1", "t2")
+    assert fake.freshness["nflverse:player_game_pbp"] == (
+        f"pbp@{pbp_ts};ftn_charting@{ftn_ts};seasons=2025,2026"
+    )
+
+
+def test_freshness_scoped_team_week_run_cannot_hide_new_pbp_from_player_game_pbp(fake):
+    fake.live["pbp"] = "t2"
+    assert fake.cycle(NflverseBulkCollector(datasets={"team_week"})) == {"team_week"}
+    assert fake.freshness["nflverse:pbp"] == "t2"  # team_week owns the tag key
+
+    # Every tag key now matches live, but player_game_pbp was built from pbp@t1.
+    stored = fake.cycle(NflverseBulkCollector())
+    assert stored is not None and "player_game_pbp" in stored
+    assert fake.freshness["nflverse:player_game_pbp"].startswith("pbp@t2;")
+
+
+def test_freshness_scoped_player_game_pbp_run_leaves_the_owners_stale(fake):
+    fake.live["pbp"] = "t2"
+    fake.live["ftn_charting"] = "t2"
+    stored = fake.cycle(NflverseBulkCollector(datasets={"player_game_pbp"}))
+    assert stored == {"player_game_pbp"}
+    assert fake.freshness["nflverse:pbp"] == "t1"
+    assert fake.freshness["nflverse:ftn_charting"] == "t1"
+
+    stored = fake.cycle(NflverseBulkCollector())
+    assert stored is not None and {"team_week", "ftn"} <= stored
+
+
+def test_freshness_participation_alone_fetches_season_minus_one_pbp_only(fake):
+    fake.live["pbp_participation"] = "t2"
+    stored = fake.cycle(NflverseBulkCollector())
+    assert stored == {"participation_player_season"}
+    assert fake.fetched("load_participation") == [[2025]]
+    assert fake.fetched("load_pbp") == [[2025]]
+    assert fake.fetched("load_ftn_charting") == []
+    assert set(fake.upserted) == {"participation_player_season"}  # team_week not rebuilt
+
+
+def test_freshness_season_rollover_refetches_participation_without_a_tag_change(fake):
+    stored = fake.cycle(NflverseBulkCollector(), season=2027)
+    assert stored is not None and "participation_player_season" in stored
+    assert fake.fetched("load_participation") == [[2026]]
+    assert (
+        fake.freshness["nflverse:participation_player_season"]
+        == "pbp_participation@t1;seasons=2026"
+    )
+
+
+def test_forced_run_builds_everything_and_records_nothing(monkeypatch):
+    fake = _FakeNflverse(monkeypatch, {tag: "t1" for tag in _TAGS})
+    collector = NflverseBulkCollector()
+    ctx = RunContext(
+        season=2026,
+        week=3,
+        season_type="REG",
+        now=datetime(2026, 9, 27, tzinfo=UTC),
+        settings=None,  # type: ignore[arg-type]
+        conn=None,  # type: ignore[arg-type]
+    )
+    validated = collector.validate(collector.fetch(ctx))  # no should_run, as with force
+    result = collector.store(ctx, validated)
+    assert set(validated) == _CORE | {"participation_player_season"}
+    assert fake.freshness == {}
+    assert result.meta["pgp_ftn_unmatched_plays"] == 0

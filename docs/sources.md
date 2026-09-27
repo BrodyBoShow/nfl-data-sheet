@@ -136,6 +136,16 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     Release, so there is **no `timestamp.json` for it**. Gate this one with an HTTP
     `HEAD` request's `Last-Modified`/`ETag` header instead, or just accept refetching it
     every ID-spine run — it's small (~a few hundred KB) and ID spine is only T2.
+  - **Tables built from more than one tag (P7, 2026-09-27).** `source_freshness` keys:
+    - `nflverse:<tag>` holds the tag's last-consumed `last_updated`. The analysts read it
+      for `inputs_version`. Only the single-tag table that owns the tag advances it.
+    - `nflverse:player_game_pbp` and `nflverse:participation_player_season` hold what
+      each table was built from, e.g. `pbp@<ts>;ftn_charting@<ts>;seasons=2025,2026`.
+      Each table is due whenever its string differs from live.
+      - That makes `player_game_pbp` rebuild when *either* `pbp` or `ftn_charting` moves,
+        even after a scoped run advanced one of the tag keys.
+      - It makes participation refetch at the season rollover.
+      - Rationale and the one-tag-fresh cases: `docs/phases/P7.md`, step 4.
 - **Functions to use:** `load_schedules`, `load_teams`, `load_players`, `load_ff_playerids`
   (ID spine); `load_pbp`, `load_player_stats`, `load_snap_counts`, `load_nextgen_stats`,
   `load_ftn_charting`, `load_depth_charts`, `load_pfr_advstats` (bulk collector, P2 —
