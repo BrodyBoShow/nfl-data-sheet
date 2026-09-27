@@ -40,22 +40,31 @@ signals) stay there.
 | `player_usage_week` | Usage and role (`usage.py`) | snap/target/air-yards/carry/RZ/GL/EZ shares and WoW deltas, for every player who takes a snap |
 | `player_eff_week` | Player efficiency (`player_efficiency.py`) | receiving, rushing, passing, and defense rate stats |
 
-Contract (the migrations in P7 step 3 implement it; nothing here is built yet):
-- **Key:** (`player_id`, `season`, `week`). Also `team` and `game_id` (the game this
-  row's per-game values come from), `as_of`, `inputs_version` (plain text, the same
-  convention as `signals`), and `content_hash` for `filter_changed`.
+Contract (implemented by migrations `0031_player_usage_week.sql` and
+`0032_player_eff_week.sql`, written 2026-09-26, **not applied**; the metrics are in the
+registry under "Player tables (Phase 7)" below):
+- **Key:** (`player_id`, `season`, `week`). Also `season_type`, `team`, `game_id` (the
+  game this row's per-game values come from), `position_group` (`players.position_group`),
+  `as_of`, `inputs_version` (plain text, the same convention as `signals`), and
+  `content_hash` for `filter_changed`.
 - **As-of rows:** a row is written for week W only for players who played in week W. To
   read "as of week W", take each player's latest row with `week <= W` in that season.
   A player on bye or injured keeps their last row. No row is ever written for a player
   with no inputs (missing stays missing).
+  - `player_usage_week`: every player with a snap in week W.
+  - `player_eff_week`: every player with a nonzero sample in at least one family in week
+    W.
 - **Columns per metric:** `<metric>_std` (season-to-date, prior-blended), `<metric>_game`
   (this game), `<metric>_l4` (last 4 games played), all `real`. Plus `<metric>_pct`, a
   `smallint` 0–100 league percentile of the `_std` value. A null means not sourced or no
   sample, never zero-filled.
+  - Usage metrics also carry `<metric>_wow` (`real`): this game's `_game` minus the
+    player's previous game's `_game`. Usage values are observed shares, not prior-blended.
 - **Per family, not per metric:** a sample count and a `stability` (0–1, same meaning as
   in `signals`) for each family: usage, receiving (targets), rushing (carries), passing
   (dropbacks), defense (defensive snaps). The family's sample counts are themselves
-  `_std`/`_game`/`_l4` columns.
+  `_std`/`_game`/`_l4` columns: `rec_targets_*`, `rush_carries_*`, `pass_dropbacks_*`,
+  `def_snaps_*`, and `usage_games_std`/`usage_games_l4` (`_game` would always be 1).
 - **League percentile population:** by default, players in the same position group with
   a row as of that week whose family sample meets the metric's minimum. Each registry
   entry states its own population and minimum.
@@ -65,6 +74,9 @@ Contract (the migrations in P7 step 3 implement it; nothing here is built yet):
 - **Participation-derived columns** end in `_hist`: multi-season historical tendencies,
   2016–2025, post-season release only. `inputs_version` names the season span, and the
   UI shows the span next to the value. Never presented as current-season behavior.
+  - A `_hist` column is one value, with no `_std`/`_game`/`_l4`/`_pct`. It's constant
+    within a season and not blended. `hist_span` holds its seasons (e.g. `2023-2025`),
+    and a per-family `<family>_hist_n` holds the labeled plays behind it.
 - **Honesty:** `_game`/`_l4` values for rotational players rest on a handful of plays
   (`docs/phases/P7.md` sample-size table). Anything that displays them shows `stability`
   beside them.
@@ -737,3 +749,292 @@ next week's games and wipe finished games' frozen rows. So it overrides
 signal_names>) AND game_id = ANY(<this run's window game_ids>)`. That is still limited to
 its own sector and signal names, so the registry test's guarantee holds. **`MarketAnalyst`
 does the same**, for the same reason (same per-game window).
+
+### Player tables (Phase 7)
+
+The metric registry for `player_usage_week` (migration `0031`) and `player_eff_week`
+(`0032`), drafted 2026-09-26 with the migrations (P7 step 3). Written, not applied, and no
+analyst code yet (step 6). The column lists are the registry: every metric below has its
+`_std`/`_game`/`_l4`/`_pct` columns (plus `_wow` for usage), and the migrations have no
+other metrics. The inputs are the staged tables `player_game_pbp` (`0028`),
+`participation_player_season` (`0029`), `player_week` (widened by `0030`), `snaps`,
+`ngs`, and `pfr_advstats` (widened by `0027`).
+
+**Player rates and team rates cover different plays.** Every player rate here
+**includes garbage time**. Every team Efficiency signal **excludes** it
+(`_garbage_time_expr`).
+- So a receiver's `epa_per_target` and his team's `epa_per_play_off` are computed over
+  different play sets. They aren't directly comparable, and the difference can't be
+  seen from the numbers.
+- The choice is deliberate (see "Play scope" below), but it must never be invisible.
+- **Anything that shows a player rate next to, or compared with, a team rate states that
+  the player rate includes garbage time and the team rate doesn't.** That covers the web
+  player view (P7 step 9), matchup cards, and any narration. This is a P7 done-when
+  item.
+
+Compact per-family tables stand in for one template block per metric, as in the
+Efficiency sector: the windows, blend, percentile, and null rules are shared, and only
+the numerator, denominator, and source differ.
+
+#### Rules shared by every player metric
+- **Play scope:** all scrimmage plays, garbage time **included** (`0028`'s header).
+  Team-level Efficiency excludes garbage time. The player tables can't, because
+  `player_week`, `ngs`, and `pfr_advstats` are all-play and can't be filtered, so every
+  player rate uses one scope. Two-point tries, kneels, spikes, and no-plays are out.
+- **Windows:** every window is `Σ numerator / Σ denominator` over its games, never a mean
+  of per-game rates. NGS averages are weighted by NGS's own count in that row
+  (`attempts`/`rush_attempts`/`targets`, staged by `0027`).
+  - `_game`: this row's game.
+  - `_l4`: the player's last 4 games played (a `snaps` row), this one included.
+  - `_std`: every game of the season through this row's week. POST weeks continue the
+    count.
+- **Nulls:** a window is null when its denominator is 0 there. That covers no targets,
+  no FTN-charted targets (FTN charts within 48h), no NGS row (NGS is thresholded: "below
+  threshold", not zero), and no PFR row. The family sample being nonzero doesn't make a
+  sub-denominator metric non-null.
+- **Source preference:** where nflverse (pbp, `player_week`, FTN) and PFR/NGS both carry
+  a quantity, nflverse is used. PFR and NGS are used only for what they alone have:
+  - PFR: contact yards, broken tackles, pressures, blitzes, combined/missed tackles,
+    nearest-defender allowed stats.
+  - NGS: separation, cushion, RYOE, time to line of scrimmage, time to throw,
+    aggressiveness, air yards to sticks.
+
+  That keeps the provenance-basis attribution surface (`docs/sources.md`, nflverse bulk
+  → License) as small as the metric set allows. The **Src** column below names each
+  metric's sources, and every PFR or NGS source carries its credit wherever the metric is
+  shown.
+  - `snaps` is PFR-sourced, so **every usage snap share and every defense per-snap rate
+    is PFR-derived** through its denominator.
+- **Mixed-source rates** (numerator and denominator from different providers) are marked
+  † below. Their attribution can disagree: a PFR pressure isn't guaranteed to sit on a
+  pbp dropback. Read them as approximate.
+- **Prior blend (`player_eff_week` `_std` only).** The same three-way form as the
+  Efficiency sector, with no QB/OL discount:
+  - `w_cur = n/(n+k)`, `w_prior = (1−w_cur)·r`, `w_league = 1−w_cur−w_prior`.
+  - `n` is the metric's own current-season denominator.
+  - The prior is the player's own raw season−1 ratio, recomputed from the staged tables,
+    which L2 retention keeps for `[season−1, season]`. It is never the previous
+    season's blended final row. It counts wherever he played, so a traded player keeps
+    his prior. With no season−1 sample, `w_prior = 0` and the weight goes to the league.
+  - The league value is the season-to-date `Σ/Σ` over the player's `position_group`.
+  - `_game`/`_l4` are raw, never blended.
+  - **`k` (a judgment constant) and `r` (estimated from player year-over-year pairs out
+    of nflverse history offline, like `scripts/estimate_reliability.py`, not from the
+    DB) are set per metric in step 6 and recorded here then.** Until then every entry
+    reads "k, r: step 6".
+- **Family `stability`:** `w_cur + w_prior` of the family's headline metric (receiving
+  `epa_per_target`, rushing `epa_per_carry`, passing `epa_per_dropback`, defense
+  `tackles_per_snap`). `usage_stability = games/(games + k_usage)`, with `k_usage` set in
+  step 6.
+- **`_pct`:** the rank of `_std`, `round(100 × (below + 0.5 × equal) / population)`.
+  - Population: the same `position_group` (`players.position_group`: QB/RB/WR/TE/OL/DL/
+    LB/DB/SPEC), among players whose row is the latest as of that week, and who meet the
+    family minimum:
+
+    | Family | Minimum |
+    |---|---|
+    | receiving | ≥ 3 targets per game played (guess) |
+    | rushing | ≥ 6 carries per game played (guess) |
+    | passing | ≥ 15 dropbacks per game played (guess) |
+    | defense | ≥ 20 defensive snaps per game played (guess) |
+    | usage | a non-null `_std` |
+
+    **These four minimums are guesses (labeled as such, 2026-09-26), not derived.**
+    - At step 6, derive each from a measured property of the data, the way P6's stability
+      floor was derived (the lowest model-input stability of any backtested game).
+    - One candidate: the per-game sample at which the family headline metric's
+      split-half reliability, measured on 2025, reaches the level the percentile needs.
+      Step 6 picks the method and records it.
+    - If a minimum can't be derived, the guess is kept and this entry keeps calling it a
+      guess.
+  - **Direction-neutral:** a high `stuff_rate_pct` is a high stuff rate. The display
+    decides which way is good.
+- **Stale rows:** `Analyst.run()`'s signals cleanup doesn't cover these tables. How a
+  player-week row that a rerun no longer produces gets removed is designed with the
+  analysts in step 6.
+
+#### Usage family (`player_usage_week`)
+- **Family:** usage. Sample: `usage_games_std`/`_l4` (games with a `snaps` row).
+- **Team denominators**, per team-game:
+  - Target, air-yard, carry, dropback, red-zone, end-zone, and goal-line totals are the
+    sum over the team's `player_game_pbp` rows in that game. Plays with no attributed
+    player (e.g. a throwaway, which has no `receiver_id`) are in no row.
+  - Team snaps per side are recovered from PFR's own percentages: the median of
+    `snaps ÷ pct` over the team's players with `pct ≥ 0.50` on that side, rounded. This
+    has to be derived because no stored column holds it.
+    - Using the max-snaps player fails: in 2025, 54 of 570 team-games had no defender at
+      100%, and 552 had no ST player at 100%.
+    - Null when nobody reaches 0.50. Verify the recovery against pbp play counts at step
+      6.
+- `_std`/`_l4` sum the player's and the team's values over the player's own games, so a
+  missed game doesn't dilute a share.
+- **Prior blend:** none (observed shares). **Pct population:** the same `position_group`
+  with a non-null `_std`.
+
+| Metric | Numerator / denominator | Src |
+|---|---|---|
+| `off_snap_share` | `snaps.offense_snaps` / team offense snaps | PFR |
+| `def_snap_share` | `snaps.defense_snaps` / team defense snaps | PFR |
+| `st_snap_share` | `snaps.st_snaps` / team ST snaps | PFR |
+| `target_share` | `targets` / team targets | pbp |
+| `air_yards_share` | `rec_air_yards_sum` / team `rec_air_yards_sum` (negative air yards count) | pbp |
+| `carry_share` | `carries` / team carries (designed runs) | pbp |
+| `dropback_share` | `dropbacks` / team dropbacks (QB splits) | pbp |
+| `rz_target_share` | `rz_targets` / team RZ targets (`yardline_100 ≤ 20`) | pbp |
+| `ez_target_share` | `ez_targets` / team end-zone targets (`air_yards ≥ yardline_100`) | pbp |
+| `rz_carry_share` | `rz_carries` / team RZ carries | pbp |
+| `gl_carry_share` | `gl_carries` / team goal-line carries (`yardline_100 ≤ 5`) | pbp |
+| `targets_per_off_snap` | `targets` / `snaps.offense_snaps` † (a per-snap rate, not per route: no free route data) | pbp, PFR |
+
+`<m>_wow = _game − previous game's _game`. It's null on a player's first game of the
+season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
+
+#### Receiving family (`player_eff_week`)
+- **Sample:** `rec_targets_*` = `player_game_pbp.targets`. **Minimum for pct:** 3 targets
+  per game played (a guess; derived at step 6).
+- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+
+| Metric | Numerator / denominator | Src |
+|---|---|---|
+| `epa_per_target` | `rec_epa_sum` / `targets` | pbp |
+| `rec_success_rate` | `rec_success` / `targets` | pbp |
+| `catch_rate` | `receptions` / `targets` | pbp |
+| `yards_per_target` | `rec_yards` / `targets` | pbp |
+| `rec_adot` | `rec_air_yards_sum` / `rec_air_yards_n` | pbp |
+| `yac_per_reception` | `rec_yac_sum` / `receptions` | pbp |
+| `yac_oe_per_reception` | `rec_yac_oe_sum` / `rec_yac_oe_n` (pbp's `xyac_mean_yardage` model, not NGS tracking) | pbp |
+| `rec_first_down_rate` | `rec_first_downs` / `targets` | pbp |
+| `rec_explosive_rate` | `rec_explosive` (20+ yd catches) / `targets` | pbp |
+| `deep_target_rate` | `deep_targets` (air ≥ 20) / `targets` | pbp |
+| `epa_per_target_left` / `_middle` / `_right` | `rec_epa_sum_<loc>` / `targets_<loc>`. A **field-location** split (`pass_location`), never slot/perimeter alignment | pbp |
+| `catchable_catch_rate` | `ftn_catchable_receptions` / `ftn_catchable_targets` | FTN |
+| `drop_rate` | `ftn_drops` / `ftn_catchable_targets` | FTN |
+| `contested_target_rate` | `ftn_contested_targets` / `ftn_charted_targets` | FTN |
+| `contested_catch_rate` | `ftn_contested_receptions` / `ftn_contested_targets` | FTN |
+| `created_reception_rate` | `ftn_created_receptions` / `ftn_charted_receptions` | FTN |
+| `screen_target_rate` | `ftn_screen_targets` / `ftn_charted_targets` | FTN |
+| `epa_per_target_play_action` | `ftn_pa_rec_epa_sum` / `ftn_pa_targets` | FTN, pbp |
+| `broken_tackles_per_reception` | `pfr_advstats.receiving_broken_tackles` (rec) / pbp `receptions` † | PFR, pbp |
+| `avg_separation` | `ngs.avg_separation`, target-weighted (receiving rows) | NGS |
+| `avg_cushion` | `ngs.avg_cushion`, target-weighted | NGS |
+
+**`_hist` (participation, FTN era):**
+- `epa_per_target_vs_man_hist`: `Σ rec_epa_sum_man / Σ targets_man`.
+- `target_rate_vs_man_hist`: `Σ targets_man / Σ off_dropbacks_man`. It's targets per
+  on-field dropback, not per route.
+- Zone likewise.
+- `rec_hist_n = Σ (off_dropbacks_man + off_dropbacks_zone)`.
+
+#### Rushing family (`player_eff_week`)
+- **Sample:** `rush_carries_*` = `player_game_pbp.carries`. Designed runs only;
+  scrambles are the passer's dropbacks. **Minimum for pct:** 6 carries per game played
+  (a guess; derived at step 6).
+- **Gap cells:** `run_location` left/middle/right × `run_gap` end/tackle/guard, with
+  `run_gap` null on middle (fixture-verified), gives 7 cells: `le lt lg mid rg rt re`.
+  Carries with a null `run_location` are in the family sample but in no cell, so the
+  gap shares can sum below 1. Cells average ~2.4 carries per game (P7 sample-size
+  table). `_game` cell values are trivia; read `_std` with `rush_stability`.
+- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+
+| Metric | Numerator / denominator | Src |
+|---|---|---|
+| `epa_per_carry` | `rush_epa_sum` / `carries` | pbp |
+| `rush_success_rate` | `rush_success` / `carries` | pbp |
+| `yards_per_carry` | `rush_yards` / `carries` | pbp |
+| `stuff_rate` | `rush_stuffs` (≤ 0 yd) / `carries` | pbp |
+| `rush_explosive_rate` | `rush_explosive` (10+ yd) / `carries` | pbp |
+| `rush_first_down_rate` | `rush_first_downs` / `carries` | pbp |
+| `gap_share_<cell>` (7) | `carries_<cell>` / `carries` | pbp |
+| `epa_per_carry_<cell>` (7) | `rush_epa_sum_<cell>` / `carries_<cell>` | pbp |
+| `rush_success_rate_<cell>` (7) | `rush_success_<cell>` / `carries_<cell>` | pbp |
+| `stacked_box_rate` | `ftn_stacked_box_carries` (box ≥ 8) / `ftn_charted_carries` | FTN |
+| `epa_per_carry_stacked_box` | `ftn_stacked_box_epa_sum` / `ftn_stacked_box_carries` | FTN, pbp |
+| `yards_before_contact_per_carry` | `Σ rushing_yards_before_contact / Σ carries`, both `pfr_advstats` rush | PFR |
+| `yards_after_contact_per_carry` | `Σ rushing_yards_after_contact / Σ carries`, both PFR | PFR |
+| `broken_tackles_per_carry` | `Σ rushing_broken_tackles / Σ carries`, both PFR | PFR |
+| `ryoe_per_carry` | `Σ ngs.rush_yards_over_expected / Σ ngs.rush_attempts` | NGS |
+| `avg_time_to_los` | `ngs.avg_time_to_los`, `rush_attempts`-weighted | NGS |
+
+No rushing `_hist`: participation has no rusher-level coverage field that fits.
+
+#### Passing family (`player_eff_week`)
+- **Sample:** `pass_dropbacks_*` = `player_game_pbp.dropbacks`, including sacks and
+  scrambles. **Minimum for pct:** 15 dropbacks per game played (a
+  guess; derived at step 6).
+- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+
+| Metric | Numerator / denominator | Src |
+|---|---|---|
+| `epa_per_dropback` | `dropback_epa_sum` / `dropbacks` | pbp |
+| `dropback_success_rate` | `dropback_success` / `dropbacks` | pbp |
+| `cpoe` | `cpoe_sum` / `cpoe_n` (pbp's model; NGS's CPOE not used) | pbp |
+| `pass_adot` | `pass_air_yards_sum` / `pass_air_yards_n` | pbp |
+| `sack_rate` | `sacks` / `dropbacks` | pbp |
+| `scramble_rate` | `scrambles` / `dropbacks` | pbp |
+| `int_rate` | `interceptions` / `pass_attempts` | pbp |
+| `deep_attempt_rate` | `deep_attempts` / `pass_attempts` | pbp |
+| `play_action_rate` | `ftn_pa_dropbacks` / `ftn_charted_dropbacks` | FTN |
+| `epa_per_dropback_play_action` | `ftn_pa_epa_sum` / `ftn_pa_dropbacks` | FTN, pbp |
+| `blitzed_rate` | `ftn_blitzed_dropbacks` (`n_blitzers > 0`) / `ftn_charted_dropbacks` | FTN |
+| `epa_per_dropback_vs_blitz` | `ftn_blitzed_epa_sum` / `ftn_blitzed_dropbacks` | FTN, pbp |
+| `out_of_pocket_rate` | `ftn_out_of_pocket_dropbacks` / `ftn_charted_dropbacks` | FTN |
+| `screen_rate` | `ftn_screen_attempts` / `ftn_charted_attempts` | FTN |
+| `throwaway_rate` | `ftn_throwaways` / `ftn_charted_attempts` | FTN |
+| `catchable_rate` | `ftn_catchable_attempts` / (`ftn_charted_attempts − ftn_throwaways`) | FTN |
+| `int_worthy_rate` | `ftn_int_worthy` / `ftn_charted_attempts` | FTN |
+| `qb_fault_sack_share` | `ftn_qb_fault_sacks` / `ftn_charted_sacks` | FTN |
+| `pressure_rate` | `pfr_advstats.times_pressured` (pass) / pbp `dropbacks` † | PFR, pbp |
+| `pressure_to_sack_rate` | `times_sacked / times_pressured`, both PFR pass | PFR |
+| `avg_time_to_throw` | `ngs.avg_time_to_throw`, `attempts`-weighted | NGS |
+| `aggressiveness` | `ngs.aggressiveness`, `attempts`-weighted | NGS |
+| `avg_air_yards_to_sticks` | `ngs.avg_air_yards_to_sticks`, `attempts`-weighted | NGS |
+
+**`_hist`:**
+- `epa_per_dropback_vs_man_hist`: `Σ pass_epa_sum_man / Σ pass_dropbacks_man`.
+- Zone likewise.
+- `pass_hist_n = Σ (pass_dropbacks_man + pass_dropbacks_zone)`.
+
+#### Defense family (`player_eff_week`)
+- **Sample:** `def_snaps_*` = `snaps.defense_snaps`. Every per-snap rate is per
+  *defensive snap*: not per pass rush, not per coverage snap, since neither exists in
+  a free in-season source. **Minimum for pct:** 20 defensive snaps per game played
+  (a guess; derived at step 6).
+- The PFR allowed stats are **PFR's nearest-defender charting on targeted plays, not
+  coverage assignments** (`docs/phases/P7.md`, "Coverage: who covered whom"). They have
+  no untargeted snaps and no receiver identity.
+- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+
+| Metric | Numerator / denominator | Src |
+|---|---|---|
+| `tackles_per_snap` | `pfr_advstats.def_tackles_combined` / `def_snaps` | PFR |
+| `missed_tackle_rate` | `def_missed_tackles` / (`def_tackles_combined + def_missed_tackles`), both PFR | PFR |
+| `tfl_per_snap` | `player_week.def_tackles_for_loss` / `def_snaps` † | nflverse, PFR |
+| `sacks_per_snap` | `player_week.def_sacks` (halves count 0.5) / `def_snaps` † | nflverse, PFR |
+| `qb_hits_per_snap` | `player_week.def_qb_hits` / `def_snaps` † | nflverse, PFR |
+| `pressures_per_snap` | `pfr_advstats.def_pressures` / `def_snaps` | PFR |
+| `blitzes_per_snap` | `def_times_blitzed` / `def_snaps` | PFR |
+| `forced_fumbles_per_snap` | `player_week.def_fumbles_forced` / `def_snaps` † | nflverse, PFR |
+| `pass_defended_per_snap` | `player_week.def_pass_defended` / `def_snaps` †. Per snap, not per PFR target, since the two providers attribute plays independently | nflverse, PFR |
+| `targets_per_snap` | `def_targets` / `def_snaps` (targeted as PFR's nearest defender) | PFR |
+| `completion_pct_allowed` | `def_completions_allowed` / `def_targets` | PFR |
+| `yards_per_target_allowed` | `def_yards_allowed` / `def_targets` | PFR |
+| `yac_allowed_per_completion` | `def_yards_after_catch` / `def_completions_allowed` | PFR |
+| `adot_allowed` | `def_adot`, `def_targets`-weighted | PFR |
+| `td_rate_allowed` | `def_receiving_td_allowed` / `def_targets` | PFR |
+| `int_rate_on_targets` | `def_ints` / `def_targets` | PFR |
+
+No defense `_hist`. The natural one, PFR targets per on-field coverage dropback, needs
+PFR rows for the `_hist` seasons, and L2 retention keeps `pfr_advstats` only for
+`[season−1, season]`.
+
+#### Considered, not built
+- **FTN `read_thrown`.** The code meanings for `1` and `2` aren't recorded in
+  `docs/sources.md`. Verify them against the nflreadr dictionary before any metric
+  uses it.
+- **PFR drops/bad throws** (`receiving_drop`, `passing_drops`, `passing_bad_throws`,
+  staged by `0027`): FTN's per-play `is_drop`/`is_catchable_ball` cover the same ground.
+- **NGS CPOE and NGS YAC-oe:** pbp's `cpoe`/`xyac` cover every player, where NGS covers
+  only those above its threshold.
+- **Passer rating allowed, WOPR, RACR:** composites of metrics already here.
+- **Route-based rates** (TPRR, YPRR): no free per-receiver route data. Participation's
+  `route` is the primary receiver's only.
