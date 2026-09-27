@@ -1,9 +1,9 @@
 """One-off script: pull each nflverse-bulk source live and save a trimmed fixture.
 
 Not part of the pipeline — run manually when a source's shape needs re-verifying.
-Usage: uv run python scripts/make_nflverse_bulk_fixtures.py [--only participation]
-(`--only participation` regenerates just the P7 participation fixtures, leaving the P2
-ones untouched.)
+Usage: uv run python scripts/make_nflverse_bulk_fixtures.py [--only participation|ftn]
+(`--only participation` / `--only ftn` regenerates just that fixture, leaving the others
+untouched.)
 """
 
 import argparse
@@ -33,13 +33,27 @@ def participation() -> None:
     print("participation 2022 sample:", (20, part_2022.width), "from full", part_2022.shape)
 
 
+def ftn() -> None:
+    """Every charted play of the SAME game as nflreadpy_pbp_sample.parquet, so the P7
+    player_game_pbp aggregation can test its pbp-to-FTN join (was head(20) of another game
+    until 2026-09-26)."""
+    pbp_game = pl.read_parquet(FIXTURES / "nflreadpy_pbp_sample.parquet")["game_id"][0]
+    ftn_full = nfl.load_ftn_charting(seasons=[2025])
+    sample = ftn_full.filter(pl.col("nflverse_game_id") == pbp_game)
+    sample.write_parquet(FIXTURES / "nflreadpy_ftn_charting_sample.parquet")
+    print(f"ftn_charting (game {pbp_game}):", sample.shape, "from full", ftn_full.shape)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--only", choices=["participation"])
+    parser.add_argument("--only", choices=["participation", "ftn"])
     args = parser.parse_args()
     FIXTURES.mkdir(parents=True, exist_ok=True)
     if args.only == "participation":
         participation()
+        return
+    if args.only == "ftn":
+        ftn()
         return
 
     pbp = nfl.load_pbp(seasons=[2025])
@@ -56,8 +70,7 @@ def main() -> None:
     snap_counts = nfl.load_snap_counts(seasons=[2025])
     snap_counts.head(20).write_parquet(FIXTURES / "nflreadpy_snap_counts_sample.parquet")
 
-    ftn = nfl.load_ftn_charting(seasons=[2025])
-    ftn.head(20).write_parquet(FIXTURES / "nflreadpy_ftn_charting_sample.parquet")
+    ftn()
 
     depth = nfl.load_depth_charts(seasons=[2025])
     depth.head(20).write_parquet(FIXTURES / "nflreadpy_depth_charts_sample.parquet")
@@ -79,7 +92,6 @@ def main() -> None:
     print("player_stats sample:", (20, player_stats.width), "from full", player_stats.shape)
     print("team_stats sample:", (20, team_stats.width), "from full", team_stats.shape)
     print("snap_counts sample:", (20, snap_counts.width), "from full", snap_counts.shape)
-    print("ftn_charting sample:", (20, ftn.width), "from full", ftn.shape)
     print("depth_charts sample:", (20, depth.width), "from full", depth.shape)
     print("rosters sample:", (20, rosters.width), "from full", rosters.shape)
 

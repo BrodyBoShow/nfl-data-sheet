@@ -272,7 +272,9 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     Named in this phase's collector scope but not consumed by any Phase 2 analyst yet.
   - Fixtures (trimmed): `tests/fixtures/nflreadpy_pbp_sample.parquet` (one full game, all
     372 cols), `nflreadpy_player_stats_sample.parquet`, `nflreadpy_team_stats_sample.parquet`,
-    `nflreadpy_snap_counts_sample.parquet`, `nflreadpy_ftn_charting_sample.parquet`,
+    `nflreadpy_snap_counts_sample.parquet`, `nflreadpy_ftn_charting_sample.parquet` (since
+    2026-09-26: every charted play of the pbp fixture's game `2025_01_ARI_NO`, 177 × 29,
+    so the P7 pbp⋈FTN join is testable; regenerate alone with `--only ftn`),
     `nflreadpy_depth_charts_sample.parquet`, `nflreadpy_rosters_sample.parquet`,
     `nflreadpy_nextgen_{passing,rushing,receiving}_sample.parquet`,
     `nflreadpy_pfr_advstats_{pass,rush,rec,def}_sample.parquet`. Regenerate with
