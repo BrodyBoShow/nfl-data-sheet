@@ -80,7 +80,12 @@ _RELIABILITY_ESTIMATED_ON = "2026-09-17"
 # each of the 20 base metrics needs. qb_sensitivity/ol_sensitivity scale how much the
 # offense-side QB-change/OL-continuity discount applies to that metric (0 = no effect,
 # 1 = full effect) -- e.g. a QB change shouldn't discount a pure rush split the way it
-# discounts a pass split. Defense never uses these (see _offense_discount's caller).
+# discounts a pass split. Defense signals aren't discounted directly, but the offense
+# discount still reaches defense ratings: the joint opponent-adjustment solve rates each
+# defense against its opponents' discounted offensive reference (_solve_ratings' defense
+# loop, the `_reference(..., offense_discount)` call). Measured 2026-09-28 (2026 wk 3):
+# it moved epa_per_play_def by up to 0.0074 and epa_per_play_pass_def by up to 0.28 of
+# the cross-team SD (docs/phases/P5.md, open item 1).
 _METRIC_CONFIG: list[MetricConfig] = [
     MetricConfig(
         "epa_per_play", "epa_sum", "plays", 200, 0.5, 0.5,
