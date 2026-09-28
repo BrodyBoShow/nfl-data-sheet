@@ -4,7 +4,15 @@ from pipeline.run import _JOBS, _parse_args, main
 
 def test_parse_args_seasons_and_datasets():
     argv = ["nflverse_bulk", "--force", "--seasons", "2018-2025", "--datasets", "team_week"]
-    assert _parse_args(argv) == ("nflverse_bulk", True, None, None, "2018-2025", "team_week")
+    assert _parse_args(argv) == (
+        "nflverse_bulk",
+        True,
+        None,
+        None,
+        "2018-2025",
+        "team_week",
+        False,
+    )
 
 
 def test_parse_args_rejects_unknown_job():

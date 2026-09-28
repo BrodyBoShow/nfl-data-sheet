@@ -125,14 +125,21 @@ flowchart TB
       Efficiency and the synthesizer are deferred until at least one full live season is
       graded **and** a pattern (e.g. the weeks 1–4 β_def gap) holds up at
       non-exploratory status. See `docs/phases/P5.md`.
-  - **Retention** (`pipeline/orchestration/retention.py`, P7, not built yet) enforces the
-    storage policies that keep the free tier's 500 MB cap out of reach (arithmetic in
-    `docs/phases/P7.md`, "Storage design"). It's the only job that deletes data, and it
-    has a dry-run mode.
-    - **L2:** staged nflverse player tables keep `season >= current - 1`. `team_week`,
-      `depth`, and `participation_player_season` are exempt.
-    - **L4:** once a season is complete, the player tables keep only each player's
-      latest-week row for it. Team-level `signals` keep full history.
+  - **Retention** (`pipeline/orchestration/retention.py`, P7 step 5, manual only, not in
+    the dispatcher) enforces the storage policies that keep the free tier's 500 MB cap
+    out of reach (arithmetic in `docs/phases/P7.md`, "Storage design"). It's the only job
+    that deletes data by age, on a season horizon. Other jobs delete only within their own
+    current scope, and rewrite it in the same run: analysts' stale `signals`,
+    Availability's `injury_presence`. It is a dry run by default, and deleting needs
+    `--delete`.
+    - **L2:** `ngs`, `ftn`, `pfr_advstats`, and `player_game_pbp` keep
+      `season >= current - 1`.
+      - `player_week` and `snaps` are exempt, because Efficiency's recompute paths read
+        them for season−1.
+      - `team_week`, `depth`, and `participation_player_season` are exempt too.
+    - **L4** (collapsing completed seasons of the player tables) is deferred to P7 step 7.
+      It would destroy point-in-time weekly player history. Team-level `signals` keep full
+      history.
     - Like the grader, it may read `games` scores, here only to decide that a season is
       complete.
 
@@ -199,7 +206,7 @@ daily, **T3** weekly, **OD** on demand.
 | ID spine | T2 | 1 | Canonical keys via nflreadpy `load_schedules`, `load_teams`, `load_players`, `load_ff_playerids`. |
 | Auditor | T0 | 1 (skeleton) | Freshness/row-count/schema/null checks; alerts; staleness status for UI. |
 | Grader | T2 | 5 | Grades locked projections (errors, coverage, picks, CLV) and summarizes them with n/CI/verdict; reporting-only, feedback deferred. |
-| Retention | T3 | 7 | Deletes staged nflverse player seasons older than `current - 1` (L2) and collapses completed seasons' player-table rows to each player's final row (L4); dry-run first. |
+| Retention | OD | 7 | Deletes staged nflverse player seasons older than `current - 1` (L2: `ngs`, `ftn`, `pfr_advstats`, `player_game_pbp`; `player_week`/`snaps` exempt). Dry run by default, `--delete` to delete. L4 collapse deferred to P7 step 7. Manual (`pipeline.run retention`) until it has a reviewed live dry run. |
 
 ### L1 Collectors
 

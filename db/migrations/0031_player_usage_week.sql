@@ -15,8 +15,10 @@
 --
 -- Not readable by anon: new tables start closed (0026's default privileges) and RLS is
 -- default-deny. The web player view (P7 step 9) brings its own grant migration.
--- Retention L4 (pipeline/orchestration/retention.py): a completed season keeps only each
--- player's latest row.
+-- Retention: nothing deletes from or collapses this table. L4 (keeping only each player's
+-- latest row of a completed season) is deferred to P7 step 7, because it would destroy
+-- point-in-time weekly history that can't be recomputed (docs/phases/P7.md, "Retention
+-- policies"). pipeline/orchestration/retention.py lists this table as not deleted.
 
 CREATE TABLE player_usage_week (
     player_id text NOT NULL REFERENCES players (player_id),

@@ -23,11 +23,12 @@ from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
 from pipeline.collectors.stadiums import StadiumsCollector
 from pipeline.collectors.weather import WeatherCollector
-from pipeline.core.base import Analyst, Collector, Grader, Synthesizer
+from pipeline.core.base import Analyst, Collector, Grader, Retention, Synthesizer
 from pipeline.orchestration.grader import ProjectionGrader
+from pipeline.orchestration.retention import StagedRetention
 from pipeline.synthesis.synthesizer import MatchupSynthesizer
 
-_JOBS: dict[str, Collector | Analyst | Synthesizer | Grader] = {
+_JOBS: dict[str, Collector | Analyst | Synthesizer | Grader | Retention] = {
     "id_spine": IdSpineCollector(),
     "nflverse_bulk": NflverseBulkCollector(),
     "efficiency": EfficiencyAnalyst(),
@@ -40,24 +41,29 @@ _JOBS: dict[str, Collector | Analyst | Synthesizer | Grader] = {
     "market": MarketAnalyst(),
     "synthesizer": MatchupSynthesizer(),
     "grader": ProjectionGrader(),
+    # Dry run: the registered instance never deletes. Only `--delete` builds one that does.
+    "retention": StagedRetention(),
 }
 
 _USAGE = (
     "usage: uv run python -m pipeline.run <job> [--force] [--season N] [--week N] "
-    "[--seasons START-END] [--datasets a,b,c]\n"
+    "[--seasons START-END] [--datasets a,b,c] [--delete]\n"
     "  --seasons: nflverse_bulk or id_spine (id_spine only widens its season-scoped "
     "games/schedules fetch -- teams/players/ff_playerids are unaffected, see "
     "IdSpineCollector.__init__)\n"
-    "  --datasets: nflverse_bulk only"
+    "  --datasets: nflverse_bulk only\n"
+    "  --delete: retention only; without it, retention is a dry run that deletes nothing"
 )
 
 
-_ParsedArgs = tuple[str, bool, "int | None", "int | None", "str | None", "str | None"]
+_ParsedArgs = tuple[str, bool, "int | None", "int | None", "str | None", "str | None", bool]
 
 
 def _parse_args(argv: list[str]) -> _ParsedArgs | None:
-    """Returns (job, force, season, week, seasons_range, datasets) or None on bad args."""
+    """Returns (job, force, season, week, seasons_range, datasets, delete) or None on bad
+    args."""
     force = False
+    delete = False
     season: int | None = None
     week: int | None = None
     seasons_range: str | None = None
@@ -69,6 +75,9 @@ def _parse_args(argv: list[str]) -> _ParsedArgs | None:
         arg = argv[i]
         if arg == "--force":
             force = True
+            i += 1
+        elif arg == "--delete":
+            delete = True
             i += 1
         elif arg == "--season" and i + 1 < len(argv):
             season = int(argv[i + 1])
@@ -88,7 +97,7 @@ def _parse_args(argv: list[str]) -> _ParsedArgs | None:
 
     if len(positional) != 1 or positional[0] not in _JOBS:
         return None
-    return positional[0], force, season, week, seasons_range, datasets
+    return positional[0], force, season, week, seasons_range, datasets, delete
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -99,10 +108,13 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE, file=sys.stderr)
         print(f"available jobs: {names}", file=sys.stderr)
         return 1
-    job_name, force, season_arg, week_arg, seasons_range, datasets_arg = parsed
+    job_name, force, season_arg, week_arg, seasons_range, datasets_arg, delete = parsed
 
     if datasets_arg and job_name != "nflverse_bulk":
         print("--datasets is only valid for the nflverse_bulk job", file=sys.stderr)
+        return 1
+    if delete and job_name != "retention":
+        print("--delete is only valid for the retention job", file=sys.stderr)
         return 1
     if seasons_range and job_name not in ("nflverse_bulk", "id_spine"):
         print("--seasons is only valid for the nflverse_bulk/id_spine jobs", file=sys.stderr)
@@ -123,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     elif isinstance(job, IdSpineCollector) and seasons_range:
         job = IdSpineCollector(seasons_override=seasons_override)
+    elif isinstance(job, StagedRetention) and delete:
+        job = StagedRetention(delete=True)
 
     season = season_arg if season_arg is not None else nfl.get_current_season()
     week = week_arg if week_arg is not None else nfl.get_current_week()

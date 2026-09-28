@@ -27,8 +27,11 @@
 -- entry of each metric names its source.
 --
 -- Not readable by anon (0026's default privileges; RLS default-deny). The web player view
--- (P7 step 9) brings its own grant migration. Retention L4: a completed season keeps only
--- each player's latest row.
+-- (P7 step 9) brings its own grant migration. Retention: nothing deletes from or collapses
+-- this table. L4 (keeping only each player's latest row of a completed season) is deferred
+-- to P7 step 7, because it would destroy point-in-time weekly history that can't be
+-- recomputed (docs/phases/P7.md, "Retention policies"). pipeline/orchestration/retention.py
+-- lists this table as not deleted.
 
 CREATE TABLE player_eff_week (
     player_id text NOT NULL REFERENCES players (player_id),

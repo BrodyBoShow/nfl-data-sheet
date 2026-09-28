@@ -45,9 +45,17 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
   scores and lines, after the game. It writes only `projection_grades`/`grade_summary`,
   and no pipeline job reads those yet.
   - The retention job (`pipeline/orchestration/retention.py`, P7) is the only job that
-    deletes data.
-    - Staged nflverse player tables keep `[season-1, season]`.
-    - Completed seasons' player-table rows collapse to each player's final row.
+    deletes data **by age**, on a season horizon. Other jobs delete only within their
+    own current scope, and rewrite it in the same run. Analysts clear their stale
+    `signals` via `delete_rows`, and Availability clears `injury_presence` rows.
+    - L2: staged `ngs`, `ftn`, `pfr_advstats`, `player_game_pbp` keep
+      `[season-1, season]`. `player_week` and `snaps` are **exempt** (constant
+      `L2_EXEMPT_RECOMPUTE_INPUTS`): Efficiency reads them for season-1, so deleting a
+      season silently changes what the backtest and backfill recompute paths produce.
+    - L4 (collapsing completed seasons of `player_usage_week`/`player_eff_week` to each
+      player's final row) is **deferred to P7 step 7, not built**. It would destroy
+      point-in-time weekly history that can't be recomputed. Nothing collapses those tables.
+    - A dry run by default; deleting needs `pipeline.run retention --delete`.
     - Team-level `signals` and `team_week` keep full history.
     - Policies and arithmetic: `docs/phases/P7.md`, "Storage design".
 

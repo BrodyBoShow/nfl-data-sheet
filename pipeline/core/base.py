@@ -277,6 +277,48 @@ class Synthesizer(ABC):
         )
 
 
+class Retention(ABC):
+    """L0: the retention job, the only job that deletes data by age, on a season horizon
+    (CLAUDE.md). Other jobs delete only within their own current scope, and rewrite it in
+    the same run. `delete` is False unless the caller passes it explicitly: a bare
+    instance, a bare CLI invocation, or any caller that forgets the argument plans and
+    reports and deletes nothing.
+
+    Same contract and `_execute` as `Grader`: inputs_ready(ctx) -> bool | str →
+    compute(ctx) -> Any → write(ctx, computed) -> WorkResult. `write` deletes only when
+    `self.delete` is True.
+    """
+
+    name: str
+
+    def __init__(self, *, delete: bool = False) -> None:
+        self.delete = delete
+
+    @abstractmethod
+    def inputs_ready(self, ctx: RunContext) -> bool | str:
+        """`False` skips as `skipped_fresh`; a string skips as that exact status."""
+
+    @abstractmethod
+    def compute(self, ctx: RunContext) -> Any:
+        """Read via ctx.conn and build the deletion plan. No writes."""
+
+    @abstractmethod
+    def write(self, ctx: RunContext, computed: Any) -> WorkResult:
+        """Report the plan; delete it via ctx.conn only if `self.delete`."""
+
+    def run(
+        self, *, season: int, week: int, season_type: str = "REG", force: bool = False
+    ) -> RunResult:
+        return _execute(
+            name=self.name,
+            season=season,
+            week=week,
+            season_type=season_type,
+            is_ready=(lambda ctx: True) if force else self.inputs_ready,
+            do_work=lambda ctx: self.write(ctx, self.compute(ctx)),
+        )
+
+
 class Grader(ABC):
     """L0: grades locked projections after the games are played. Reads
     `projection_log` (never modifies it) plus scores and lines from `games`, and writes

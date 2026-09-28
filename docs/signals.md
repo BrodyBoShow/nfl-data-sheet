@@ -68,9 +68,12 @@ registry under "Player tables (Phase 7)" below):
 - **League percentile population:** by default, players in the same position group with
   a row as of that week whose family sample meets the metric's minimum. Each registry
   entry states its own population and minimum.
-- **Retention (L4):** after a season completes, only each player's latest-week row for
-  that season is kept (`pipeline/orchestration/retention.py`). A past season reads as
-  final STD values, with no weekly history.
+- **Retention (L4): deferred to P7 step 7, not built.** The proposal is that after a
+  season completes, only each player's latest-week row for that season is kept. Nothing
+  currently collapses or deletes these tables: `pipeline/orchestration/retention.py` lists
+  both as not deleted. L4 would destroy point-in-time weekly history that can't be
+  recomputed, so it's decided at step 7 with measured table sizes (`docs/phases/P7.md`,
+  "Retention policies").
 - **Participation-derived columns** end in `_hist`: multi-season historical tendencies,
   2016–2025, post-season release only. `inputs_version` names the season span, and the
   UI shows the span next to the value. Never presented as current-season behavior.

@@ -82,8 +82,14 @@ def delete_rows(
     then upserts the fresh set — see `pipeline/analysts/availability_impact.py`.
     """
     with conn.cursor() as cur:
-        cur.execute(f"DELETE FROM {table} WHERE {where}", tuple(params))
+        cur.execute(delete_statement(table, where), tuple(params))
         return cur.rowcount
+
+
+def delete_statement(table: str, where: str) -> str:
+    """The exact SQL `delete_rows` runs, so a caller can EXPLAIN that same statement
+    without executing it (the retention job's dry run does)."""
+    return f"DELETE FROM {table} WHERE {where}"
 
 
 def _chunks(rows: list[dict[str, Any]], size: int) -> Iterable[list[dict[str, Any]]]:
