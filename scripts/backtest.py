@@ -17,9 +17,11 @@ closing lines. Writes docs/backtest_report.md. Reproduces from this one command.
   EfficiencyAnalyst.compute() with its metric config swapped. That's a scratch run:
   nothing is written to the database, and results are cached under .cache/backtest/.
   It then re-runs the walk-forward and reports both runs side by side.
-  - Before the scratch run, a parity check recomputes one stored week with the
-    production config. It must match the stored signals, which proves the scratch
-    path reproduces production.
+  - Before the scratch run, a parity check recomputes every stored fit week with the
+    production config, uncached (~75s for 124 weeks). It must match the stored signals
+    in every week not named in PARITY_EXEMPT_WEEKS. That proves the scratch path
+    reproduces production and that no season's inputs have gone missing. It reports
+    the worst mismatch and its week.
 
 Every model computation is imported from pipeline/synthesis/model.py and
 scripts/projection_history.py. Nothing is reimplemented (CLAUDE.md's
@@ -105,8 +107,19 @@ EDGE_BUCKETS: tuple[tuple[float, float | None], ...] = (
 )
 DIAGNOSTIC_EARLY_WEEKS = (1, 4)
 R_SENSITIVITY_SEASONS = [2018, 2019]
-PARITY_WEEK = (2021, 10)
 PARITY_TOLERANCE = 1e-9
+
+# Fit weeks the parity check skips, each with its reason. Empty today, by measurement:
+# every stored fit week (2019-2025, 124 weeks) was written by
+# scripts/backfill_efficiency.py on 2026-09-23, which never uses the depth-chart fallback
+# (_depth_fallback_allowed is live-week only), the same as this recompute. On 2026-09-28
+# all 124 matched, week 1 included, to max |Δvalue| 5e-16.
+# It stops being empty once a season whose signals were written LIVE enters the fit
+# window (2026, first fit in 2027). That season's week 1 used the depth fallback, which
+# no historical recompute can reproduce (docs/phases/P5.md, open item 1, residual gap).
+# Add such weeks here by name, with that reason, or re-backfill the season first. Never
+# widen PARITY_TOLERANCE instead.
+PARITY_EXEMPT_WEEKS: dict[tuple[int, int], str] = {}
 
 
 # --------------------------------------------------------------------------------------
@@ -252,28 +265,89 @@ def _scratch_efficiency(
     return pl.concat(parts)
 
 
-def _parity_check(
-    conn: psycopg.Connection, stored: pl.DataFrame, metrics: Sequence[MetricConfig]
+def _parity_compare(
+    scratch: pl.DataFrame,
+    stored: pl.DataFrame,
+    names: Sequence[str],
+    season_weeks: Sequence[tuple[int, int]],
 ) -> dict[str, Any]:
-    """Scratch-compute one stored week with the PRODUCTION config and compare it to the
-    stored signals. The scratch path must reproduce production exactly, or the
-    sensitivity comparison would measure the harness, not r."""
-    season, week = PARITY_WEEK
-    scratch = _scratch_efficiency(conn, [PARITY_WEEK], metrics)
+    """Compare a production-config recompute to the stored signals, week by week.
+
+    Fails a week on any unmatched row or |Δvalue| > PARITY_TOLERANCE, and fails if any
+    requested week produced no rows at all. Reports the worst |Δvalue| and |Δstability|
+    and the week each came from: a bare pass doesn't show its margin. Stability is
+    reported, not gated: `signals.stability` is `real` (float4), so stored values carry
+    ~1e-7 rounding."""
+    key = ["season", "week", "team", "signal"]
+    weeks = pl.DataFrame(
+        list(season_weeks), schema={"season": pl.Int64, "week": pl.Int64}, orient="row"
+    )
+    ref = stored.filter(pl.col("signal").is_in(list(names))).join(
+        weeks, on=["season", "week"], how="semi"
+    )
+    joined = scratch.join(
+        ref.select(*key, "value", "stability"),
+        on=key,
+        how="full",
+        suffix="_stored",
+        coalesce=True,
+    ).with_columns(
+        (pl.col("value").is_null() | pl.col("value_stored").is_null()).alias("_unmatched"),
+        (pl.col("value") - pl.col("value_stored")).abs().alias("_dv"),
+        (pl.col("stability") - pl.col("stability_stored")).abs().alias("_ds"),
+    )
+    per_week = joined.group_by("season", "week").agg(
+        pl.col("_unmatched").sum().alias("unmatched"),
+        pl.col("_dv").max().alias("dv"),
+        pl.col("_ds").max().alias("ds"),
+    )
+    over = (pl.col("unmatched") > 0) | (pl.col("dv") > PARITY_TOLERANCE)
+    failing = per_week.filter(over).sort("season", "week")
+    missing = sorted(set(season_weeks) - set(per_week.select("season", "week").rows()))
+
+    def worst(col: str) -> tuple[float | None, tuple[int, int] | None]:
+        top = per_week.filter(pl.col(col).is_not_null()).sort(col, descending=True)
+        if top.height == 0:
+            return None, None
+        row = top.row(0, named=True)
+        return _num(row[col]), (row["season"], row["week"])
+
+    max_value, worst_value_week = worst("dv")
+    max_stab, worst_stab_week = worst("ds")
+    failing_weeks = sorted(set(failing.select("season", "week").rows()) | set(missing))
+    return {
+        "weeks": len(season_weeks),
+        "rows": joined.height,
+        "unmatched": int(joined["_unmatched"].sum()),
+        "max_value_diff": max_value,
+        "worst_value_week": worst_value_week,
+        "max_stability_diff": max_stab,
+        "worst_stability_week": worst_stab_week,
+        "failing_weeks": failing_weeks,
+        "ok": not failing_weeks and max_value is not None,
+    }
+
+
+def _parity_check(
+    conn: psycopg.Connection,
+    stored: pl.DataFrame,
+    metrics: Sequence[MetricConfig],
+    season_weeks: Sequence[tuple[int, int]],
+) -> dict[str, Any]:
+    """Scratch-compute EVERY fit week with the PRODUCTION config and compare it to the
+    stored signals. The sensitivity run recomputes these same weeks with patched r, so its
+    output can't be compared to stored; this is a second, uncached pass. An uncached pass
+    is the point: it has to see today's inputs. It catches both a harness that doesn't
+    reproduce production and an input that's gone for some seasons, e.g. a retention
+    delete of player_week/snaps (docs/phases/P5.md, open item 2)."""
+    checked = [sw for sw in season_weeks if sw not in PARITY_EXEMPT_WEEKS]
+    scratch = _scratch_efficiency(conn, checked, metrics, progress=True)
     names = [f"{m.name}_{side}" for m in metrics for side in ("off", "def")]
-    ref = stored.filter(
-        (pl.col("season") == season) & (pl.col("week") == week) & pl.col("signal").is_in(names)
-    )
-    joined = scratch.join(ref, on=["season", "week", "team", "signal"], how="full",
-                          suffix="_stored")
-    unmatched = joined.filter(pl.col("value").is_null() | pl.col("value_stored").is_null())
-    max_value = _num(joined.select((pl.col("value") - pl.col("value_stored")).abs().max()).item())
-    max_stab = _num(
-        joined.select((pl.col("stability") - pl.col("stability_stored")).abs().max()).item()
-    )
-    ok = unmatched.height == 0 and max_value is not None and max_value <= PARITY_TOLERANCE
-    return {"week": PARITY_WEEK, "rows": joined.height, "unmatched": unmatched.height,
-            "max_value_diff": max_value, "max_stability_diff": max_stab, "ok": ok}
+    result = _parity_compare(scratch, stored, names, checked)
+    result["exempt"] = {
+        f"{s} wk{w}": why for (s, w), why in PARITY_EXEMPT_WEEKS.items() if (s, w) in season_weeks
+    }
+    return result
 
 
 def _r_sensitivity(
@@ -295,12 +369,21 @@ def _r_sensitivity(
         for b in PRIMARY_SPEC.bases
     ]
 
-    print("r sensitivity: parity check against stored signals ...", flush=True)
-    parity = _parity_check(conn, stored, prod_metrics)
-    if not parity["ok"]:
-        raise RuntimeError(f"scratch efficiency path does not reproduce production: {parity}")
-
     season_weeks = sorted(stored.select("season", "week").unique().rows())
+    print(f"r sensitivity: parity check, {len(season_weeks)} weeks vs. stored ...", flush=True)
+    parity = _parity_check(conn, stored, prod_metrics, season_weeks)
+    print(
+        f"  parity: max |Δvalue| {parity['max_value_diff']} "
+        f"(worst {parity['worst_value_week']}), ok={parity['ok']}",
+        flush=True,
+    )
+    if not parity["ok"]:
+        raise RuntimeError(
+            "scratch efficiency path does not reproduce production in "
+            f"{len(parity['failing_weeks'])} week(s), first {parity['failing_weeks'][:5]}: "
+            f"{parity}"
+        )
+
     key_src = json.dumps({"metrics": [m._asdict() for m in patched], "weeks": season_weeks},
                          sort_keys=True)
     key = hashlib.sha256(key_src.encode("utf-8")).hexdigest()[:12]
@@ -594,9 +677,14 @@ def _render(ctx: dict[str, Any]) -> str:
             "production `EfficiencyAnalyst.compute()` in a scratch run (nothing written; "
             f"cached at `{rs['cache']}`, reused: {_fmt(rs['reused_cache'])}).",
             "",
-            f"Parity check (production config, {p['week'][0]} week {p['week'][1]}, vs. "
+            f"Parity check (production config, every fit week: {p['weeks']} weeks, vs. "
             f"stored signals): {p['rows']} rows, {p['unmatched']} unmatched, max |Δvalue| "
-            f"{p['max_value_diff']:.2e}, max |Δstability| {p['max_stability_diff']:.2e}.",
+            f"{p['max_value_diff']:.2e} ({p['worst_value_week'][0]} week "
+            f"{p['worst_value_week'][1]}), max |Δstability| {p['max_stability_diff']:.2e} "
+            f"({p['worst_stability_week'][0]} week {p['worst_stability_week'][1]}; "
+            "`stability` is stored as float4). Exempt weeks: "
+            + ("; ".join(f"{w}: {why}" for w, why in p["exempt"].items()) or "none")
+            + ".",
             "",
         ]
         rows = []
