@@ -41,7 +41,7 @@ signals) stay there.
 | `player_eff_week` | Player efficiency (`player_efficiency.py`) | receiving, rushing, passing, and defense rate stats |
 
 Contract (implemented by migrations `0031_player_usage_week.sql` and
-`0032_player_eff_week.sql`, written 2026-09-26, **not applied**; the metrics are in the
+`0032_player_eff_week.sql`, written 2026-09-26, applied 2026-09-29; the metrics are in the
 registry under "Player tables (Phase 7)" below):
 - **Key:** (`player_id`, `season`, `week`). Also `season_type`, `team`, `game_id` (the
   game this row's per-game values come from), `position_group` (`players.position_group`),
@@ -756,8 +756,9 @@ does the same**, for the same reason (same per-game window).
 ### Player tables (Phase 7)
 
 The metric registry for `player_usage_week` (migration `0031`) and `player_eff_week`
-(`0032`), drafted 2026-09-26 with the migrations (P7 step 3). Written, not applied, and no
-analyst code yet (step 6). The column lists are the registry: every metric below has its
+(`0032`), drafted 2026-09-26 with the migrations (P7 step 3). Applied 2026-09-29. Step 6's
+decisions (minimums, gating, k structure, `k_usage`) are recorded here as of 2026-09-29.
+No analyst code yet. The column lists are the registry: every metric below has its
 `_std`/`_game`/`_l4`/`_pct` columns (plus `_wow` for usage), and the migrations have no
 other metrics. The inputs are the staged tables `player_game_pbp` (`0028`),
 `participation_player_season` (`0029`), `player_week` (widened by `0030`), `snaps`,
@@ -821,35 +822,111 @@ the numerator, denominator, and source differ.
     his prior. With no season−1 sample, `w_prior = 0` and the weight goes to the league.
   - The league value is the season-to-date `Σ/Σ` over the player's `position_group`.
   - `_game`/`_l4` are raw, never blended.
-  - **`k` (a judgment constant) and `r` (estimated from player year-over-year pairs out
-    of nflverse history offline, like `scripts/estimate_reliability.py`, not from the
-    DB) are set per metric in step 6 and recorded here then.** Until then every entry
-    reads "k, r: step 6".
+  - **`k` is per metric *and* per position group (decided 2026-09-29, user).** k0 varies
+    by up to ~500× across groups for the same metric, so one k per metric would be wrong
+    for some groups.
+    - **Where the data pins it,** `k` = the pooled k0 from
+      `scripts/estimate_player_reliability.py`. k0 is the sample at which a player's own
+      rate is half signal (one-way random effects, 2001–2025 or the source's span).
+    - **Elsewhere, `k` is pinned by judgment**, like Efficiency's `k_metric`.
+    - "Pins it" means the 90% bootstrap interval of k0 is finite and within 2×, and
+      r_corr's lower bound is above 0. That holds for 96 of 206 metric × group pairs
+      (P7 step 6).
+  - **`r` is estimated offline** from nflverse history by the same script, from
+    adjacent-season pairs of the same player in the same group. The DB holds only
+    `[season−1, season]`.
+  - **Not recorded yet: the values await the user's review of the 2026-09-29
+    estimation.** Two choices are open:
+    - **Which r.** `r_corr` is Efficiency's method: the pooled correlation of shrunk
+      season values. `r_slope` is the slope of next season's raw rate on this season's
+      shrunk value, which is the coefficient the blend multiplies. For teams, with large
+      samples, the two coincide. For players, `r_corr` is attenuated by both seasons'
+      noise. Example, WR `epa_per_target`: r_corr 0.22 (0.19–0.26), r_slope 0.79
+      (0.69–0.93).
+    - **Which prior.** The prior above is the *raw* season−1 ratio. Efficiency's prior
+      is a *shrunk* solve (`k_metric` pseudo-plays). With a raw prior, no constant r is
+      right, because the prior's own noise depends on its sample.
+  - Until then, every family entry below reads "k, r: per group, pending review".
 - **Family `stability`:** `w_cur + w_prior` of the family's headline metric (receiving
   `epa_per_target`, rushing `epa_per_carry`, passing `epa_per_dropback`, defense
-  `tackles_per_snap`). `usage_stability = games/(games + k_usage)`, with `k_usage` set in
-  step 6.
+  `tackles_per_snap`). `usage_stability = games/(games + k_usage)`, with **`k_usage` = 2
+  games (set 2026-09-29).**
+  - k0 in games is measured per season and per share (unweighted one-way ANOVA). Median
+    over seasons:
+    - target share: WR 0.99, TE 1.13, RB 2.13 (range 1.81–2.79)
+    - carry share, RB: 0.62
+    - offense snap share: WR/TE/RB/OL 0.41–0.60
+    - defense snap share: DL/LB/DB 0.40–0.55
+    - That's 25 seasons for the pbp shares and 13 for snaps.
+  - 2 is the largest median, rounded (RB target share). So `usage_stability` never
+    overstates how settled any share is. For snap shares it's conservative.
 - **`_pct`:** the rank of `_std`, `round(100 × (below + 0.5 × equal) / population)`.
   - Population: the same `position_group` (`players.position_group`: QB/RB/WR/TE/OL/DL/
-    LB/DB/SPEC), among players whose row is the latest as of that week, and who meet the
-    family minimum:
+    LB/DB/SPEC), among players whose row is the latest as of that week, and who meet
+    **that position group's** minimum for the family. Minimums are per position group,
+    not per family (decided 2026-09-29, user), because the population already is.
+  - "Per game played" means the family's season-to-date sample ≥ minimum × games played
+    to date. A game played is a `snaps` row.
+  - **Criterion (P7 step 6, 2026-09-29):** the low point in the position group's
+    per-game-played volume distribution, where incidental use gives way to a regular
+    role. It's a role gate, not a noise gate.
+    - A noise gate can't be set per game. For most headline rates, k0 (the sample at
+      which a player's own rate is half signal) is 90–380 units, so no single game's
+      volume gets a rate out of noise. `stability` carries the noise.
+    - Where the distribution has no low point, the number is a judgment call, labeled
+      as a guess.
 
-    | Family | Minimum |
-    |---|---|
-    | receiving | ≥ 3 targets per game played (guess) |
-    | rushing | ≥ 6 carries per game played (guess) |
-    | passing | ≥ 15 dropbacks per game played (guess) |
-    | defense | ≥ 20 defensive snaps per game played (guess) |
-    | usage | a non-null `_std` |
+    | Family | Group | Minimum per game played | Status |
+    |---|---|---|---|
+    | passing | QB | ≥ 15 dropbacks | **Derived** |
+    | rushing | QB | **none set** | Not derivable, decision pending |
+    | rushing | RB | ≥ 6 carries | Guess |
+    | rushing | other groups | ≥ 6 carries (the RB guess) | Guess |
+    | receiving | WR, TE, RB, others | ≥ 3 targets | Guess, and no data will derive it |
+    | defense | DB | ≥ 20 defensive snaps | Supported by 2025, not reproduced 2013–2025 |
+    | defense | DL, LB | ≥ 20 defensive snaps | Guess |
+    | usage | all | a non-null `_std` | — |
 
-    **These four minimums are guesses (labeled as such, 2026-09-26), not derived.**
-    - At step 6, derive each from a measured property of the data, the way P6's stability
-      floor was derived (the lowest model-input stability of any backtested game).
-    - One candidate: the per-game sample at which the family headline metric's
-      split-half reliability, measured on 2025, reaches the level the percentile needs.
-      Step 6 picks the method and records it.
-    - If a minimum can't be derived, the guess is kept and this entry keeps calling it a
-      guess.
+    - **Passing, QB: 15, derived.**
+      - In 2025, dropbacks per game played has a low point at 15–19: 2 of 77 QBs, vs 9
+        at 10–14 and 8 at 20–24.
+      - 2013–2025 (951 QB player-seasons) shows the same flat low at 12–20, about 0.9%
+        of player-seasons per dropback, vs 1.2% at 20–25 and about 4% at 30–40. 15 sits
+        inside it.
+      - QBs included at 2025 week 18 with a minimum of 10 / 15 / 20: 63 / 54 / 52 of 99
+        with a dropback. By week: 32/33 in week 1, 37/54 in week 4, 43/69 in week 8.
+    - **Rushing, QB: not derived. No minimum set, decision pending.**
+      - Designed-run carries per game played decline steadily across 768 QB
+        player-seasons (2013–2025), with no low point: 31% under 0.5, 28% at 0.5–1, 19%
+        at 1–1.5, 7% at 1.5–2, 5% at 2–2.5, and ≤ 2% per half-carry above that.
+      - The RB number (6) would exclude every QB. None averaged 5 or more per game
+        played in 2025, yet QB designed-run rates are the most reliable rushing rates
+        (EPA/carry k0 23, 19–34).
+    - **Rushing, RB: 6, a guess.** The data gives a range, not a point.
+      - 2025 per game: a dip at 4–7 carries (4.6–5.8% of player-games each, vs 11.7% at
+        1 and 13.6% at 12–14).
+      - 2013–2025 per game played (1,964 RB player-seasons): no low point. Density falls
+        steadily from 0–1 through 15–18.
+    - **Receiving, every group: 3, a guess, and a judgment call.** Targets per game (2025)
+      and per game played (2013–2025: WR 2,751, TE 1,546, RB 1,916 player-seasons)
+      decline steadily in every group. There's no empirical low point, so more data
+      won't change this.
+    - **Defense, DB: 20, supported by 2025 but not reproduced across seasons.**
+      - 2025 per game: a low point at 15–24 snaps (3.7–4.0% of player-games per 5-snap
+        bin, vs 9% at 1–4 and 10% at 60+).
+      - 2013–2025 per game played (4,867 DB player-seasons): flat from 10 to 50 snaps
+        (5.8–6.8% per 5-snap bin), then a peak at 55–65. So the multi-season data
+        doesn't show the 2025 low point (flagged 2026-09-29 for re-decision).
+      - Moot until the defense gate below clears.
+    - **Defense, DL and LB: 20, guesses.** DL is single-peaked (mode 15–25 per game
+      played). LB is flat from 0 to 65.
+  - **Defense rate percentiles are gated (decided 2026-09-29, user).** No defense-family
+    `_pct` ships until the P7 step 7 missing-row question is resolved: when a defender
+    with snaps has no `pfr_advstats` / `player_week` row, did he record zero, or is the
+    row just absent?
+    - Known bias until then: under the null rule, the per-snap denominator counts only
+      the games where the defender recorded a stat.
+    - Usage and offense-family rates are not gated.
   - **Direction-neutral:** a high `stuff_rate_pct` is a high stuff rate. The display
     decides which way is good.
 - **Stale rows:** `Analyst.run()`'s signals cleanup doesn't cover these tables. How a
@@ -894,8 +971,21 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
 
 #### Receiving family (`player_eff_week`)
 - **Sample:** `rec_targets_*` = `player_game_pbp.targets`. **Minimum for pct:** 3 targets
-  per game played (a guess; derived at step 6).
-- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+  per game played, every group. It's a guess and a judgment call: there's no empirical
+  low point (see the `_pct` rules above).
+- **k, r:** per group, pending review (see "Prior blend").
+  - Headline `epa_per_target`, 2001–2025, k0 with 90% interval:
+    - WR 177 (158–217), r_corr 0.22
+    - TE 141 (109–239), r_corr 0.24
+    - RB 189 (131–355), r_corr 0.11 (0.06–0.15)
+- **RB `epa_per_target` (decided 2026-09-29, user: kept, not special-cased).**
+  - 2025 alone showed no detectable between-RB signal (τ² ≤ 0 in 80% of bootstrap
+    draws).
+  - The multi-season re-check (2001–2025, 2,595 RB pairs) does find some: k0 189
+    (131–355), r_corr 0.11. That's the weakest of the three groups.
+  - Reassess once k and r are recorded, by checking whether RB stability actually lands
+    at or below the floor. With these values it may not.
+- **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
 |---|---|---|
@@ -930,14 +1020,28 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
 
 #### Rushing family (`player_eff_week`)
 - **Sample:** `rush_carries_*` = `player_game_pbp.carries`. Designed runs only;
-  scrambles are the passer's dropbacks. **Minimum for pct:** 6 carries per game played
-  (a guess; derived at step 6).
+  scrambles are the passer's dropbacks. **Minimum for pct:** RB and other groups, 6
+  carries per game played (a guess; the data gives a 4–7 range in 2025 only). QB: none
+  set, not derivable, decision pending. See the `_pct` rules above.
 - **Gap cells:** `run_location` left/middle/right × `run_gap` end/tackle/guard, with
   `run_gap` null on middle (fixture-verified), gives 7 cells: `le lt lg mid rg rt re`.
   Carries with a null `run_location` are in the family sample but in no cell, so the
   gap shares can sum below 1. Cells average ~2.4 carries per game (P7 sample-size
   table). `_game` cell values are trivia; read `_std` with `rush_stability`.
-- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+  - Across 2001–2025, most gap-cell EPA/success rates can't be pinned: k0's interval is
+    unbounded or r_corr's reaches 0.
+- **k, r:** per group, pending review.
+  - Headline `epa_per_carry`, 2001–2025: RB k0 215 (186–270), r_corr 0.17; QB (designed
+    runs) k0 23 (19–34), r_corr 0.19.
+- **RB `epa_per_carry` (decided 2026-09-29, user: kept, not special-cased).**
+  - 2025 alone showed essentially no between-RB signal: k0 ~4,500, with no signal in 45%
+    of bootstrap draws.
+  - The multi-season re-check (2001–2025, 2,556 RB pairs) finds k0 215 (186–270) and
+    r_corr 0.17 (0.12–0.22). The signal is real but thin.
+  - Reassess once k and r are recorded, by checking whether RB `rush_stability` lands
+    at or below the floor. With these values it may not: at 60 carries, w_cur is about
+    0.22.
+- **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
 |---|---|---|
@@ -962,9 +1066,17 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
 
 #### Passing family (`player_eff_week`)
 - **Sample:** `pass_dropbacks_*` = `player_game_pbp.dropbacks`, including sacks and
-  scrambles. **Minimum for pct:** 15 dropbacks per game played (a
-  guess; derived at step 6).
-- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+  scrambles. **Minimum for pct:** QB, 15 dropbacks per game played, **derived**
+  (2026-09-29): the low point at 15–19. See the `_pct` rules above. Other groups use the
+  same 15, which in practice excludes them.
+- **k, r:** QB, pending review.
+  - Headline `epa_per_dropback`, 2001–2025: k0 199 (177–231), r_corr 0.42 (0.36–0.47),
+    r_slope 0.81.
+  - 16 of 23 passing metrics can be pinned. The seven that can't are all FTN rates, with
+    3 season pairs: `blitzed_rate`, `catchable_rate`, `throwaway_rate`,
+    `int_worthy_rate`, `qb_fault_sack_share`, `epa_per_dropback_play_action`, and
+    `epa_per_dropback_vs_blitz`.
+- **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
 |---|---|---|
@@ -1000,12 +1112,25 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
 #### Defense family (`player_eff_week`)
 - **Sample:** `def_snaps_*` = `snaps.defense_snaps`. Every per-snap rate is per
   *defensive snap*: not per pass rush, not per coverage snap, since neither exists in
-  a free in-season source. **Minimum for pct:** 20 defensive snaps per game played
-  (a guess; derived at step 6).
+  a free in-season source. **Minimum for pct:** 20 defensive snaps per game played. DB is
+  supported by 2025 but not reproduced 2013–2025. DL and LB are guesses. See the `_pct`
+  rules above.
+- **Percentiles gated (decided 2026-09-29, user).** No defense `_pct` until P7 step 7
+  settles whether a missing `pfr_advstats` / `player_week` row means zero.
+  - Until then, the denominator counts only games where the defender recorded a stat,
+    which is a known upward bias on every per-snap rate.
+  - The values themselves are still written.
 - The PFR allowed stats are **PFR's nearest-defender charting on targeted plays, not
   coverage assignments** (`docs/phases/P7.md`, "Coverage: who covered whom"). They have
   no untargeted snaps and no receiver identity.
-- **k, r:** step 6. **Added:** P7, 2026-09-26 (drafted).
+- **k, r:** per group, pending review and the step 7 missing-row answer, which moves
+  them.
+  - `tackles_per_snap`, 2018–2025, missing read as zero vs present rows only:
+    - DL k0 322 vs 378
+    - LB 88 vs 93
+    - DB 322 vs 265
+  - `forced_fumbles_per_snap` and `int_rate_on_targets` can't be pinned in any group.
+- **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
 |---|---|---|
