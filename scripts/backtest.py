@@ -111,9 +111,10 @@ PARITY_TOLERANCE = 1e-9
 
 # Fit weeks the parity check skips, each with its reason. Empty today, by measurement:
 # every stored fit week (2019-2025, 124 weeks) was written by
-# scripts/backfill_efficiency.py on 2026-09-23, which never uses the depth-chart fallback
-# (_depth_fallback_allowed is live-week only), the same as this recompute. On 2026-09-28
-# all 124 matched, week 1 included, to max |Δvalue| 5e-16.
+# scripts/backfill_efficiency.py (2026-09-23, re-run 2026-09-30 after P7 step 7), which
+# never uses the depth-chart fallback (_depth_fallback_allowed is live-week only), the
+# same as this recompute. On 2026-09-30 all 124 matched, week 1 included, to max
+# |Δvalue| 5e-16.
 # It stops being empty once a season whose signals were written LIVE enters the fit
 # window (2026, first fit in 2027). That season's week 1 used the depth fallback, which
 # no historical recompute can reproduce (docs/phases/P5.md, open item 1, residual gap).
