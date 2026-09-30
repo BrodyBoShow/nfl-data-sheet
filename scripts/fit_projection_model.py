@@ -48,6 +48,7 @@ from pipeline.synthesis.model import (  # noqa: E402
     build_game_frame,
     efficiency_fingerprint,
     fit,
+    fit_inputs_hash,
     to_team_rows,
     walk_forward,
 )
@@ -101,6 +102,9 @@ def main() -> int:
         "fit_seasons": seasons,
         "fitted_on": datetime.now(UTC).date().isoformat(),
         "efficiency_fingerprint": efficiency_fingerprint(PRIMARY_SPEC),
+        # The synthesizer recomputes this from stored signals every run and refuses to
+        # project on a mismatch (pipeline/synthesis/model.py, fit_inputs_hash).
+        "fit_inputs_hash": fit_inputs_hash(signals, PRIMARY_SPEC, seasons),
         "n_games": full.n_games,
         "n_team_rows": full.n_rows,
         "games_dropped_incomplete_features": incomplete.height,

@@ -36,6 +36,7 @@ LOCKED_AT = KICKOFF - dt.timedelta(hours=2)
 NOW = KICKOFF + dt.timedelta(days=1)
 GID = "2026_03_KC_BUF"
 FP = "fingerprint-ok"
+FIH = "fit-inputs-ok"
 
 
 # --- fixtures -----------------------------------------------------------------------------
@@ -45,6 +46,7 @@ def _model() -> ModelFile:
     return ModelFile(
         model_version="p5-v1", spec_name="epa_per_play", bases=("epa_per_play",),
         fit_seasons=(2019, 2020, 2021, 2022, 2023, 2024, 2025), efficiency_fingerprint=FP,
+        fit_inputs_hash=FIH,
         coef={"alpha": 22.0, "beta_off:epa_per_play": 36.0, "beta_def:epa_per_play": 20.0,
               "gamma": 1.5},
         stability_cutpoints=(0.4, 0.7),
@@ -78,7 +80,7 @@ def _synth(now: dt.datetime, eff: list[dict] | None = None):
         games=[WindowGame(GID, 2026, 3, "BUF", "KC", KICKOFF, "Home")],
         efficiency_rows=_eff() if eff is None else eff, market_rows=_market(),
         environment_rows=[], availability_rows=[], model=_model(), live_fingerprint=FP,
-        locked={}, now=now,
+        live_fit_inputs_hash=FIH, locked={}, now=now,
     )
 
 

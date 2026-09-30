@@ -28,7 +28,7 @@ written again to either table, so its card freezes.
 
 | Code | Meaning | Precedence |
 |---|---|---|
-| 4 | model stale: live efficiency fingerprint doesn't match the file | checked first |
+| 4 | model stale: live fingerprint or fit-input hash differs from the file | checked first |
 | 5 | in-sample season: the season is in the file's `fit_seasons` | second |
 | 2 | awaiting efficiency: no efficiency rows at the game's (season, week) | third |
 | 3 | an input is null (a feature, a stability, or the game's location) | fourth |
@@ -76,6 +76,7 @@ from pipeline.synthesis.model import (
     ModelFile,
     build_game_frame,
     efficiency_fingerprint,
+    fit_inputs_hash,
     load_model_file,
     predict,
     stability_bucket,
@@ -113,7 +114,7 @@ _STATUS_LABELS = {
     STATUS_PROJECTED: "projected",
     STATUS_AWAITING_EFFICIENCY: "awaiting efficiency signals for this week",
     STATUS_INPUT_NULL: "a model input is missing",
-    STATUS_MODEL_STALE: "model stale: efficiency config changed since the fit",
+    STATUS_MODEL_STALE: "model stale: efficiency inputs changed since the fit",
     STATUS_IN_SAMPLE: "in-sample season: not projected",
 }
 
@@ -365,6 +366,7 @@ def _projection_block(
     return {
         "model_version": model.model_version,
         "efficiency_fingerprint": model.efficiency_fingerprint,
+        "fit_inputs_hash": model.fit_inputs_hash,
         "spread_home": pred["projected_spread_home"],
         "total": pred["projected_total"],
         "pts_home": pred["pts_home"],
@@ -506,12 +508,18 @@ def build_cards(
     availability_rows: Sequence[Mapping[str, Any]],
     model: ModelFile,
     live_fingerprint: str,
+    live_fit_inputs_hash: str,
     locked: Mapping[str, Mapping[str, Any]],
     now: dt.datetime,
 ) -> SynthesisResult:
-    """Everything the run writes, from already-loaded rows. No DB access."""
+    """Everything the run writes, from already-loaded rows. No DB access.
+
+    `live_fit_inputs_hash` is `fit_inputs_hash` over the stored fit-window signals as
+    they are now. A model file without one (pre-p5-v2) is stale."""
     model_stale = (
         model.efficiency_fingerprint != live_fingerprint
+        or model.fit_inputs_hash is None
+        or model.fit_inputs_hash != live_fit_inputs_hash
         or model.spec_name != PRIMARY_SPEC.name
         or model.bases != PRIMARY_SPEC.bases
     )
@@ -531,7 +539,9 @@ def build_cards(
 
     upcoming = [g for g in games if g.kickoff > now]
     preds = _predictions(upcoming, efficiency_rows, model) if not model_stale else {}
-    model_tag = f"model@{model.model_version}#{model.efficiency_fingerprint}"
+    model_tag = (
+        f"model@{model.model_version}#{model.efficiency_fingerprint}#{model.fit_inputs_hash}"
+    )
 
     cards: list[dict[str, Any]] = []
     locks: list[dict[str, Any]] = []
@@ -745,6 +755,26 @@ def _load_team_week_signals(
     return rows
 
 
+def _load_fit_signals(conn: psycopg.Connection, model: ModelFile) -> pl.DataFrame:
+    """The stored rows `fit_inputs_hash` covers: the spec's efficiency signals over the
+    model file's fit seasons. The same WHERE as scripts/projection_history.py's
+    `load_efficiency_signals`, which the fit script hashes."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT season, week, team, signal, value FROM signals "
+            "WHERE sector = 'efficiency' AND game_id IS NULL AND player_id IS NULL "
+            "AND season = ANY(%s) AND signal = ANY(%s)",
+            (list(model.fit_seasons), list(PRIMARY_SPEC.signal_names)),
+        )
+        rows = cur.fetchall()
+    return pl.DataFrame(
+        rows,
+        schema={"season": pl.Int64, "week": pl.Int64, "team": pl.Utf8, "signal": pl.Utf8,
+                "value": pl.Float64},
+        orient="row",
+    )
+
+
 def _load_locks(conn: psycopg.Connection, game_ids: list[str]) -> dict[str, dict[str, Any]]:
     cols = ("game_id", "locked_at", "kickoff", "lock_lead_hours", "card", "inputs_version",
             "edge_spread", "edge_total", "market_spread", "market_total")
@@ -798,6 +828,9 @@ class MatchupSynthesizer(Synthesizer):
             ),
             model=model,
             live_fingerprint=efficiency_fingerprint(PRIMARY_SPEC),
+            live_fit_inputs_hash=fit_inputs_hash(
+                _load_fit_signals(conn, model), PRIMARY_SPEC, model.fit_seasons
+            ),
             locked=_load_locks(conn, game_ids),
             now=ctx.now,
         )

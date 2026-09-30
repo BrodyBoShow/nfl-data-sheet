@@ -41,9 +41,17 @@ import numpy as np
 import polars as pl
 
 from pipeline.analysts.efficiency import _METRIC_CONFIG, OL_MIN_FACTOR, QB_CHANGE_DISCOUNT
+from pipeline.core.definitions import EFFICIENCY_DEFINITION, TEAM_INPUTS_DEFINITION
 from pipeline.core.team_aliases import normalize_team_abbr
 
-MODEL_VERSION = "p5-v1"
+# p5-v2 (2026-09-30): the re-fit on signals rebuilt with try plays excluded and the QB/OL
+# discounts firing, and the first version whose model file carries `fit_inputs_hash`.
+MODEL_VERSION = "p5-v2"
+
+# fit_inputs_hash rounding. A re-backfill that reproduces the same signals differs by
+# ~5e-16 in `value` (the backtest's parity check), so that mustn't move the hash. Measured
+# 2026-09-30 against a 124-week production recompute: 0 of 7,936 rows differ at 9 decimals.
+_FIT_HASH_VALUE_DECIMALS = 9
 
 # h for the home side at a home venue; the away side gets -HOME_H, both get 0 at a
 # neutral site. See the module docstring for why 0.5 (gamma = HFA in points of margin).
@@ -82,10 +90,18 @@ HFA_ONLY_SPEC = ModelSpec("hfa_only", ())
 
 
 def efficiency_fingerprint(spec: ModelSpec) -> str:
-    """Hash of every efficiency constant that sets the scale of this spec's features:
-    each base's full MetricConfig (k, sensitivities, reliability r) plus the QB/OL
-    discount constants. If any changes, features no longer sit on the scale the model
-    was fit on, and the synthesizer must refuse to project until a re-backfill + refit."""
+    """Hash of how this spec's features are defined, from code alone:
+    - each base's full MetricConfig (k, sensitivities, reliability r);
+    - the QB/OL discount constants;
+    - the definition labels of the code that builds and computes them
+      (`pipeline/core/definitions.py`, pinned to that source by tests/test_definitions.py).
+
+    If any of these changes, live features no longer sit on the scale the model was fit
+    on, and the synthesizer must refuse to project until a re-backfill + refit. It moves
+    the moment such code is deployed, before any re-backfill.
+
+    It can't see data-only changes: newly staged seasons, a re-backfill, upstream
+    revisions. `fit_inputs_hash` covers those."""
     configs = {m.name: m._asdict() for m in _METRIC_CONFIG if m.name in spec.bases}
     missing = sorted(set(spec.bases) - set(configs))
     if missing:
@@ -94,8 +110,50 @@ def efficiency_fingerprint(spec: ModelSpec) -> str:
         "metrics": configs,
         "QB_CHANGE_DISCOUNT": QB_CHANGE_DISCOUNT,
         "OL_MIN_FACTOR": OL_MIN_FACTOR,
+        "TEAM_INPUTS_DEFINITION": TEAM_INPUTS_DEFINITION,
+        "EFFICIENCY_DEFINITION": EFFICIENCY_DEFINITION,
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def fit_inputs_hash(signals: pl.DataFrame, spec: ModelSpec, seasons: Sequence[int]) -> str:
+    """Hash of the exact stored feature signals a fit reads: every `spec.signal_names`
+    row in `seasons`, as (season, week, team, signal, value).
+
+    `stability` is left out on purpose. It's a deterministic function of the same sample
+    sizes, k and r as `value`, so a real input change moves `value` too, and k/r are in
+    `efficiency_fingerprint`. And it can't be hashed robustly: it reads back from the
+    float4 column at ~6 significant digits, up to 5.3e-7 from a fresh compute. Measured
+    2026-09-30: 7,003 of 7,936 rows differ from a production recompute even at float4
+    precision, so any rounding grid flips somewhere across ~7.9k rows.
+
+    The fit script writes it to the model file. The synthesizer recomputes it from
+    `signals` every run and refuses to project on a mismatch. So any change to the fit
+    window's stored signals after the fit makes the model stale, whatever caused it:
+    a re-backfill after a definition change, newly staged inputs switching the QB/OL
+    discounts on, or r/k changes.
+
+    Rounded (see _FIT_HASH_*) so a re-backfill that reproduces the same values doesn't
+    move it. Row order doesn't matter. Extra rows outside the spec's signals or
+    `seasons` are ignored, so callers can pass a wider frame."""
+    rows = (
+        signals.filter(
+            pl.col("signal").is_in(list(spec.signal_names))
+            & pl.col("season").is_in(list(seasons))
+        )
+        .select("season", "week", "team", "signal", "value")
+        .sort("season", "week", "team", "signal")
+    )
+
+    def _value(v: float | None) -> str:
+        if v is None:
+            return "null"
+        return f"{round(float(v), _FIT_HASH_VALUE_DECIMALS):.{_FIT_HASH_VALUE_DECIMALS}f}"
+
+    digest = hashlib.sha256()
+    for season, week, team, signal, value in rows.iter_rows():
+        digest.update(f"{season}|{week}|{team}|{signal}|{_value(value)}\n".encode())
+    return digest.hexdigest()[:16]
 
 
 # --------------------------------------------------------------------------------------
@@ -346,6 +404,8 @@ class ModelFile:
     bases: tuple[str, ...]
     fit_seasons: tuple[int, ...]
     efficiency_fingerprint: str
+    # None for a file written before p5-v2; the synthesizer treats that as stale.
+    fit_inputs_hash: str | None
     coef: dict[str, float]
     stability_cutpoints: tuple[float, float]
     buckets: dict[str, BucketCalibration]
@@ -361,6 +421,7 @@ def load_model_file(path: Path = COEFFICIENTS_PATH) -> ModelFile:
         bases=tuple(data["spec"]["bases"]),
         fit_seasons=tuple(data["fit_seasons"]),
         efficiency_fingerprint=data["efficiency_fingerprint"],
+        fit_inputs_hash=data.get("fit_inputs_hash"),
         coef={name: float(c["value"]) for name, c in data["coefficients"].items()},
         stability_cutpoints=(float(c1), float(c2)),
         buckets={

@@ -29,6 +29,7 @@ from pipeline.synthesis.synthesizer import (
 UTC = dt.UTC
 KICKOFF = dt.datetime(2026, 9, 27, 17, 0, tzinfo=UTC)
 FP = "fingerprint-ok"
+FIH = "fit-inputs-ok"
 
 
 def _model(**overrides: Any) -> ModelFile:
@@ -38,6 +39,7 @@ def _model(**overrides: Any) -> ModelFile:
         bases=("epa_per_play",),
         fit_seasons=(2019, 2020, 2021, 2022, 2023, 2024, 2025),
         efficiency_fingerprint=FP,
+        fit_inputs_hash=FIH,
         coef={"alpha": 22.0, "beta_off:epa_per_play": 36.0,
               "beta_def:epa_per_play": 20.0, "gamma": 1.5},
         stability_cutpoints=(0.4, 0.7),
@@ -84,7 +86,7 @@ def _market(game_id: str = "2026_03_KC_BUF", status: float = 2.0, spread: float 
 def _build(now: dt.datetime, *, games: list[WindowGame] | None = None,
            eff: list[dict] | None = None, market: list[dict] | None = None,
            model: ModelFile | None = None, fingerprint: str = FP,
-           locked: dict | None = None) -> syn.SynthesisResult:
+           fit_inputs: str = FIH, locked: dict | None = None) -> syn.SynthesisResult:
     return build_cards(
         games=games if games is not None else [_game()],
         efficiency_rows=_eff() if eff is None else eff,
@@ -93,6 +95,7 @@ def _build(now: dt.datetime, *, games: list[WindowGame] | None = None,
         availability_rows=[],
         model=model or _model(),
         live_fingerprint=fingerprint,
+        live_fit_inputs_hash=fit_inputs,
         locked=locked or {},
         now=now,
     )
@@ -164,6 +167,30 @@ def test_model_stale_blocks_projection_and_lock():
     assert card["projection"] is None
     assert result.locks == []
     assert result.meta["model_stale"]
+
+
+def test_fit_inputs_changed_since_the_fit_blocks_projection_and_lock():
+    # The stored fit-window signals no longer hash to what the model was fit on, e.g. a
+    # re-backfill after the fit. The code-level fingerprint still matches.
+    result = _build(KICKOFF - dt.timedelta(hours=3), fit_inputs="rebuilt-since")
+    assert _card(result)["projection_status"] == STATUS_MODEL_STALE
+    assert result.locks == []
+    assert result.meta["model_stale"]
+
+
+def test_model_file_without_fit_inputs_hash_is_stale():
+    # A pre-p5-v2 file: it can't prove what it was fit on.
+    result = _build(KICKOFF - dt.timedelta(hours=3), model=_model(fit_inputs_hash=None))
+    assert _card(result)["projection_status"] == STATUS_MODEL_STALE
+    assert result.locks == []
+
+
+def test_projection_carries_both_hashes():
+    result = _build(KICKOFF - dt.timedelta(hours=3))
+    projection = _card(result)["projection"]
+    assert projection["efficiency_fingerprint"] == FP
+    assert projection["fit_inputs_hash"] == FIH
+    assert f"model@p5-v1#{FP}#{FIH}" in result.locks[0]["inputs_version"]
 
 
 def test_in_sample_season_never_locks():

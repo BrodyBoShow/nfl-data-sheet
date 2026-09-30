@@ -15,7 +15,7 @@ export interface ReportFrameView {
   heading: string;
   breakeven: string; // "52.4%"
   highest: WinRateBucket;
-  atOrAbove: WinRateBucket[]; // buckets at or above break-even (none today)
+  atOrAbove: WinRateBucket[]; // buckets at or above break-even (p5-v2: spread 2–3 pt only)
   preface: string[]; // app-authored sentences, in order
 }
 

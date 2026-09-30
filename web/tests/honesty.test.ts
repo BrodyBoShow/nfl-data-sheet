@@ -314,7 +314,9 @@ describe("the backtest report's frame", () => {
     const p = text(preface);
     expect(p).toContain("backtest win rates");
     expect(p).toContain("52.4% of decided games to break even (110 ÷ 210)");
-    expect(p).toContain("no bucket reaches it. the highest is 51.9%");
+    // p5-v2: one bucket clears break-even, so the preface lists it instead of "no bucket".
+    expect(p).toContain("1 of 10 buckets reach it: 52.6% (spread, 2–3 pt |edge|, 287 decided)");
+    expect(p).toContain("every bucket is shown, and the correlations above are the test");
     expect(p).toContain("evidence that the edge doesn't work");
     expect(p).toContain("not a record of anything this site has done");
     const order = ["data-report-provenance", "data-report-preface", "data-report-body"].map((a) => frame.indexOf(a));

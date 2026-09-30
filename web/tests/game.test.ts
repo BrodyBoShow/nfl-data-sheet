@@ -80,9 +80,13 @@ describe("lines block from real cards", () => {
 
 describe("every edge carries its validation status", () => {
   it("the tag reads NOT VALIDATED and its tooltip gives this bucket's backtest figures", () => {
-    const t = validationTag(locked, "spread");
+    // The fixture is a real p5-v1 lock. Figures show only for a card from the model the
+    // committed backtest describes, so this one is re-labelled to that model's version.
+    const current = { ...locked, projection: { ...locked.projection!, model_version: backtest.model_version } };
+    const t = validationTag(current, "spread");
     expect(t.validated).toBe(false);
-    expect(t.evidence).toBe("Backtest 2020–25, low input stability (n 535): r −0.024 [−0.108, 0.056].");
+    expect(t.evidence).toBe("Backtest 2020–25, low input stability (n 536): r −0.027 [−0.112, 0.060].");
+    expect(validationTag(locked, "spread").evidence).toBeNull(); // the p5-v1 lock itself
   });
 
   it("drops the figures, keeping the flag, when the card's model version differs", () => {

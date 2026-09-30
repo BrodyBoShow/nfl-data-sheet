@@ -15,6 +15,7 @@ from pipeline.synthesis.model import (
     build_game_frame,
     efficiency_fingerprint,
     fit,
+    fit_inputs_hash,
     predict,
     stability_bucket,
     stability_cutpoints,
@@ -230,6 +231,68 @@ def test_fingerprint_changes_with_efficiency_config(monkeypatch):
     assert efficiency_fingerprint(PRIMARY_SPEC) != before
     with pytest.raises(ValueError, match="no efficiency MetricConfig"):
         efficiency_fingerprint(model.ModelSpec("x", ("not_a_metric",)))
+
+
+def test_fingerprint_changes_with_input_definition_labels(monkeypatch):
+    # A definition change (e.g. the try filter) moves it with no MetricConfig change.
+    before = efficiency_fingerprint(PRIMARY_SPEC)
+    assert efficiency_fingerprint(PRIMARY_SPEC) == before
+    monkeypatch.setattr(model, "TEAM_INPUTS_DEFINITION", "next")
+    assert efficiency_fingerprint(PRIMARY_SPEC) != before
+    monkeypatch.undo()
+    monkeypatch.setattr(model, "EFFICIENCY_DEFINITION", "next")
+    assert efficiency_fingerprint(PRIMARY_SPEC) != before
+
+
+def _fit_signals(values: dict[tuple[int, str], float], stability: float = 0.8123) -> pl.DataFrame:
+    rows = [
+        {"season": 2024, "week": week, "team": team, "signal": signal, "value": v,
+         "stability": stability}
+        for (week, team), v in values.items()
+        for signal in ("epa_per_play_off", "epa_per_play_def")
+    ]
+    return pl.DataFrame(rows)
+
+
+def test_fit_inputs_hash_is_stable_and_order_independent():
+    frame = _fit_signals({(1, "BUF"): 0.1, (1, "KC"): -0.05, (2, "BUF"): 0.12})
+    h = fit_inputs_hash(frame, PRIMARY_SPEC, [2024])
+    assert fit_inputs_hash(frame, PRIMARY_SPEC, [2024]) == h
+    assert fit_inputs_hash(frame.reverse(), PRIMARY_SPEC, [2024]) == h
+
+
+def test_fit_inputs_hash_ignores_rows_outside_the_fit():
+    frame = _fit_signals({(1, "BUF"): 0.1, (1, "KC"): -0.05})
+    h = fit_inputs_hash(frame, PRIMARY_SPEC, [2024])
+    extra = pl.concat([
+        frame,
+        frame.with_columns(pl.lit("success_rate_off").alias("signal")),  # not a feature
+        frame.with_columns(pl.lit(2026, dtype=pl.Int64).alias("season")),  # not fit
+    ])
+    assert fit_inputs_hash(extra, PRIMARY_SPEC, [2024]) == h
+
+
+def test_fit_inputs_hash_tolerates_recompute_noise_but_not_a_real_change():
+    frame = _fit_signals({(1, "BUF"): 0.1, (1, "KC"): -0.05})
+    h = fit_inputs_hash(frame, PRIMARY_SPEC, [2024])
+    # A re-backfill that reproduces the same values differs by ~5e-16 (parity check).
+    noise = frame.with_columns(pl.col("value") + 5e-16)
+    assert fit_inputs_hash(noise, PRIMARY_SPEC, [2024]) == h
+    # A definition change moves values by far more (e.g. 0.013 EPA/play for the try filter).
+    moved = frame.with_columns(
+        pl.when(pl.col("team") == "KC").then(pl.col("value") + 1e-6).otherwise(pl.col("value"))
+    )
+    assert fit_inputs_hash(moved, PRIMARY_SPEC, [2024]) != h
+    assert fit_inputs_hash(frame.head(3), PRIMARY_SPEC, [2024]) != h  # a row went missing
+
+
+def test_fit_inputs_hash_ignores_stability():
+    # Stored stability reads back ~5e-7 from a fresh compute (float4 column), which would
+    # flip any rounding grid somewhere across ~7.9k rows. It's excluded by design.
+    frame = _fit_signals({(1, "BUF"): 0.1, (1, "KC"): -0.05}, stability=0.832162)
+    h = fit_inputs_hash(frame, PRIMARY_SPEC, [2024])
+    fresh = frame.with_columns(pl.lit(0.8321625267).alias("stability"))
+    assert fit_inputs_hash(fresh, PRIMARY_SPEC, [2024]) == h
 
 
 # --- scripts/projection_history.py ---------------------------------------------------
