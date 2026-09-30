@@ -378,6 +378,44 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     > season onwards and is charted within 48 hours following each game. This data
     > is released under the [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
     > Creative Commons license and attribution must be made to **FTN Data via nflverse**
+  - **CC BY-SA 4.0 terms**, quoted verbatim from
+    https://creativecommons.org/licenses/by-sa/4.0/legalcode.en (fetched 2026-09-30 with
+    curl, so the text isn't a summary). They govern FTN charting and participation. They
+    were gathered for the P7 step 9 player view, which would show FTN-derived values. **The
+    ShareAlike reading is the user's call, not decided here.**
+    - §1, definition:
+      > Adapted Material means material subject to Copyright and Similar Rights that is derived from or based upon the Licensed Material and in which the Licensed Material is translated, altered, arranged, transformed, or otherwise modified in a manner requiring permission under the Copyright and Similar Rights held by the Licensor.
+    - §2(a)(2), Exceptions and Limitations:
+      > For the avoidance of doubt, where Exceptions and Limitations apply to Your use, this Public License does not apply, and You do not need to comply with its terms and conditions.
+    - §3(a), Attribution. §3(a)(1) opens "If You Share the Licensed Material (including in
+      modified form), You must:" and requires:
+      - to "retain the following if it is supplied by the Licensor with the Licensed
+        Material": "identification of the creator(s) of the Licensed Material and any
+        others designated to receive attribution, in any reasonable manner requested by
+        the Licensor", "a copyright notice", "a notice that refers to this Public
+        License", "a notice that refers to the disclaimer of warranties", and "a URI or
+        hyperlink to the Licensed Material to the extent reasonably practicable";
+      - "indicate if You modified the Licensed Material and retain an indication of any
+        previous modifications"; and
+      - "indicate the Licensed Material is licensed under this Public License, and
+        include the text of, or the URI or hyperlink to, this Public License."
+    - §3(a)(2):
+      > You may satisfy the conditions in Section 3(a)(1) in any reasonable manner based on the medium, means, and context in which You Share the Licensed Material. For example, it may be reasonable to satisfy the conditions by providing a URI or hyperlink to a resource that includes the required information.
+    - §3(b), ShareAlike:
+      > In addition to the conditions in Section 3(a), if You Share Adapted Material You produce, the following conditions also apply.
+      >
+      > The Adapter's License You apply must be a Creative Commons license with the same License Elements, this version or later, or a BY-SA Compatible License.
+      >
+      > You must include the text of, or the URI or hyperlink to, the Adapter's License You apply. You may satisfy this condition in any reasonable manner based on the medium, means, and context in which You Share Adapted Material.
+      >
+      > You may not offer or impose any additional or different terms or conditions on, or apply any Effective Technological Measures to, Adapted Material that restrict exercise of the rights granted under the Adapter's License You apply.
+    - §4(b), databases:
+      > if You include all or a substantial portion of the database contents in a database in which You have Sui Generis Database Rights, then the database in which You have Sui Generis Database Rights (but not its individual contents) is Adapted Material, including for purposes of Section 3(b)
+    - **The open question.** Are per-player aggregates of FTN charting "Adapted Material
+      … requiring permission", or covered by §2(a)(2)?
+      - If they're Adapted Material, the displayed values go out under BY-SA 4.0 or later,
+        with that license's link.
+      - §3(a) applies to any Sharing of the Licensed Material either way.
   - **FTN columns not yet staged** (per `dictionary_ftn_charting.csv`, all 29 already in
     `tests/fixtures/nflreadpy_ftn_charting_sample.parquet`):
     - Pre-snap and play flags: `starting_hash`, `qb_location`, `is_trick_play`,

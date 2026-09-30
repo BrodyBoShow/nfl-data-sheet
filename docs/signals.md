@@ -828,6 +828,14 @@ the numerator, denominator, and source differ.
   shown.
   - `snaps` is PFR-sourced, so **every usage snap share and every defense per-snap rate
     is PFR-derived** through its denominator.
+  - **Where the credit goes (decided 2026-09-30, user, P7 step 9): at the column head,
+    not per value.**
+    - Every PFR (Sports Reference LLC), NGS or FTN column names its source in its header.
+      `/sources` carries the full statements.
+    - "A game played is a `snaps` row" (the `_l4` window, `usage_games_*`, and every
+      per-game-played `_pct` minimum) isn't read literally as making every value
+      PFR-derived. The page states once, plainly, that game counts and windows come
+      from PFR snap counts, and credits SRL there.
 - **Mixed-source rates** (numerator and denominator from different providers) are marked
   † below. Their attribution can disagree: a PFR pressure isn't guaranteed to sit on a
   pbp dropback. Read them as approximate.
@@ -912,6 +920,10 @@ the numerator, denominator, and source differ.
     2026-09-29 with the shrunk prior).
     - Whether the floor's *number* (0.2262, derived from team stability) is right for
       player values is unmeasured. It's an open question in `docs/phases/P6.md` §4.
+    - **Display (decided 2026-09-30, user, P7 step 9): player values are never dimmed.**
+      The family stability is shown as a number beside the values, and no threshold
+      gates rendering. A player-level derivation (P6 §4) is what would justify dimming
+      later.
 - **`usage_stability = games/(games + k_usage)`, with `k_usage` = 2 games (set
   2026-09-29).**
   - k0 in games is measured per season and per share (unweighted one-way ANOVA). Median
@@ -1075,9 +1087,12 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
     (131–355), r_corr 0.11 (0.06–0.15), r_slope 0.72.
   - Where RB stability lands: take a week-4 RB with 12 targets and 40 last season. With
     k 189 and r 0.72, stability is 12/201 + (189/201)·0.72·(40/229) ≈ 0.18. That's below
-    the P6 floor (0.2262), so it renders dimmed as expected.
+    the team-derived P6 floor (0.2262). Player values aren't dimmed (decided
+    2026-09-30), so it shows at full weight beside its 0.18.
   - A heavy-volume RB (60 targets now, 90 prior) reaches ≈ 0.54. Re-check against live
     rows once the analyst runs.
+    - **Live, 2026 week 3 (run 835):** RB `rec_stability` median 0.104. 70 of 77 RB rows
+      are below 0.2262, and 18 of the 25 RBs with a headline `_pct`.
 - **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
@@ -1135,11 +1150,14 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
     r_corr 0.17 (0.12–0.22) and r_slope 0.51. The signal is real but thin.
   - **Where RB `rush_stability` lands, and it isn't always at the floor:**
     - A rotational back (20 carries now, 30 last season): 20/235 + (215/235)·0.51·(30/245)
-      ≈ 0.14. That's below the P6 floor (0.2262), so it's dimmed.
+      ≈ 0.14. That's below the team-derived P6 floor (0.2262).
     - A feature back at week 4 (60 now, 200 last season): 0.22 + 0.78·0.51·0.48 ≈ 0.41.
-      That's above the floor and not dimmed.
+      That's above the floor.
     - The expectation that RB stability "lands at or below the floor" holds only for
-      low-volume backs. Re-check against live rows once the analyst runs.
+      low-volume backs.
+      - **Live, 2026 week 3 (run 835):** RB `rush_stability` median 0.255. 35 of 75 RB
+        rows are below 0.2262, and 9 of the 48 RBs with a headline `_pct`.
+    - Player values aren't dimmed either way (decided 2026-09-30). The number is shown.
 - **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
