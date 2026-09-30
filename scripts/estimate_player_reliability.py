@@ -625,11 +625,191 @@ def _usage(d: dict[str, pl.DataFrame]) -> None:
                 )
 
 
+# ---------------------------------------------------------------------- recommend
+#
+# Turns estimates.csv into the k and r the analyst uses (decided 2026-09-29, user: pinned
+# where the data pins them, judgment elsewhere following Efficiency's pattern, and every
+# entry says which). Prints the registry table (docs/signals.md) and the constants block
+# (pipeline/analysts/player_efficiency.py) from the same rows, so the two can't differ.
+
+HEADLINE = {
+    "receiving": "epa_per_target",
+    "rushing": "epa_per_carry",
+    "passing": "epa_per_dropback",
+    "defense": "tackles_per_snap",
+}
+# Split metrics: same outcome as the parent, over a subset of the parent's denominator.
+# A split whose own k can't be pinned takes its parent's k, in the split's own units. k0 is
+# noise-per-unit over true variance, so a subset of the same plays keeps about the same k0,
+# and the measured point estimates agree: RB epa_per_carry cells 65-408 vs parent 215, WR
+# epa_per_target left/middle/right 179/150/155 vs 177. Efficiency instead sizes splits
+# below the parent in proportion to their share (plays 200 -> pass/rush 120 -> down 50);
+# applied here that gave QB gap cells k of about 1, i.e. no shrinkage (2026-09-29).
+PARENT = {
+    **{f"epa_per_target_{x}": "epa_per_target" for x in ("left", "middle", "right")},
+    "epa_per_target_play_action": "epa_per_target",
+    "catchable_catch_rate": "catch_rate",
+    "contested_catch_rate": "catch_rate",
+    "drop_rate": "catch_rate",
+    **{f"epa_per_carry_{x}": "epa_per_carry" for x in ("le", "lt", "lg", "mid", "rg", "rt", "re")},
+    **{
+        f"rush_success_rate_{x}": "rush_success_rate"
+        for x in ("le", "lt", "lg", "mid", "rg", "rt", "re")
+    },
+    "epa_per_carry_stacked_box": "epa_per_carry",
+    "epa_per_dropback_play_action": "epa_per_dropback",
+    "epa_per_dropback_vs_blitz": "epa_per_dropback",
+}
+PIN_K_RATIO = 2.0  # k0's 90% interval within 2x
+R_SLOPE_STABLE = 1.5  # r_slope's 90% upper bound; above it the slope is unstable
+FTN_METRICS_REVISIT = "3 season pairs, revisit at 5+"
+
+
+def _registry_name(metric: str) -> str:
+    return metric.replace("[present]", "")
+
+
+def _k_round(k: float) -> float:
+    return float(round(k)) if k >= 10 else round(k, 1)
+
+
+def recommend() -> None:
+    e = pl.read_csv(CACHE / "estimates.csv", infer_schema_length=None).filter(
+        ~c("metric").str.contains(r"\[zero\]")
+    )
+    d = _load()
+    src = _sources(d)
+    specs = {
+        (fam, _registry_name(m)): (source, num, den) for fam, m, source, num, den in _metrics()
+    }
+
+    def share(family: str, metric: str, parent: str, group: str, seasons: str) -> float:
+        source, _, den = specs[(family, metric)]
+        _, _, pden = specs[(family, parent)]
+        lo, hi = (int(x) for x in seasons.split("-"))
+        df = (
+            src[source]
+            .filter((c("position_group") == group) & c("season").is_between(lo, hi))
+            .select(den.cast(pl.Float64).alias("d"), pden.cast(pl.Float64).alias("p"))
+        )
+        df = df.filter(c("p").is_not_null() & (c("p") > 0))
+        return float(df["d"].fill_null(0).sum()) / float(df["p"].sum())
+
+    rows = {(r["family"], _registry_name(r["metric"]), r["group"]): r for r in e.to_dicts()}
+    out: dict[tuple[str, str, str], dict] = {}
+
+    def pinned(r: dict) -> bool:
+        k_ok = (
+            np.isfinite(r["k0"])
+            and np.isfinite(r["k0_p95"])
+            and r["k0_p95"] < 1e6
+            and r["k0_p95"] / r["k0_p5"] <= PIN_K_RATIO
+        )
+        return bool(k_ok and r["r_corr_p5"] is not None and r["r_corr_p5"] > 0)
+
+    def r_value(r: dict, k_pinned: bool) -> tuple[float, str]:
+        # The "0" cases are Efficiency's down4 pattern: no reliable year-over-year signal.
+        if r["r_slope"] is None or r["r_corr_p5"] is None or not np.isfinite(r["r_slope"]):
+            return 0.0, "0: no season pairs"
+        if r["r_corr_p5"] <= 0:
+            return 0.0, "0: no YoY signal (r_corr reaches 0)"
+        if not k_pinned and r["r_slope_p95"] > R_SLOPE_STABLE:
+            return 0.0, "0: r_slope unstable"
+        basis = "r_slope" if k_pinned else "r_slope (k judgment)"
+        return float(min(1.0, max(0.0, r["r_slope"]))), basis
+
+    def finite_k0(r: dict | None) -> bool:
+        return r is not None and bool(np.isfinite(r["k0"])) and r["k0"] < 1e6
+
+    # Parents resolve before their splits.
+    order = sorted(rows, key=lambda key: key[1] in PARENT)
+    for key in order:
+        family, metric, group = key
+        r = rows[key]
+        is_pinned = pinned(r)
+        no_signal = False
+        if is_pinned:
+            k, k_basis = r["k0"], "pinned"
+        elif metric in PARENT and (family, PARENT[metric], group) in out:
+            parent = out[(family, PARENT[metric], group)]
+            s = share(family, metric, PARENT[metric], group, r["seasons"])
+            k = parent["k"]
+            k_basis = f"J: split of `{PARENT[metric]}` ({s:.2f} of its units), parent k"
+        elif finite_k0(r):
+            k, k_basis = r["k0"], "J: point k0 (interval too wide)"
+        else:
+            # No detectable signal: an ordinary k in the metric's own units -- the same
+            # metric's point k0 in the family's first group that has one -- and r = 0.
+            no_signal = True
+            donor = next(
+                (g for g in GROUPS[family] if finite_k0(rows.get((family, metric, g)))), None
+            )
+            if donor is not None:
+                k = rows[(family, metric, donor)]["k0"]
+                k_basis = f"J: no detectable signal, {donor} point k0 (same units)"
+            else:
+                k = out[(family, HEADLINE[family], group)]["k"]
+                k_basis = f"J: no detectable signal, `{HEADLINE[family]}` k"
+        rv, r_basis = r_value(r, is_pinned)
+        if no_signal:
+            rv, r_basis = 0.0, "0: no detectable signal"
+        note = ""
+        if r["seasons"].startswith("2022") and family in ("passing", "receiving", "rushing"):
+            note = FTN_METRICS_REVISIT
+        r_corr = r["r_corr"]
+        out[key] = dict(
+            family=family,
+            metric=metric,
+            group=group,
+            k=_k_round(k),
+            k_basis=k_basis,
+            r=round(rv, 2),
+            r_basis=r_basis,
+            r_corr=None if r_corr is None or not np.isfinite(r_corr) else round(r_corr, 2),
+            seasons=r["seasons"],
+            pairs=r["n_pairs"],
+            pinned=is_pinned,
+            note=note,
+        )
+
+    fam_order = ["receiving", "rushing", "passing", "defense"]
+    metric_order = [_registry_name(m) for _, m, *_ in _metrics()]
+    keyed = sorted(
+        out.values(),
+        key=lambda x: (
+            fam_order.index(x["family"]),
+            metric_order.index(x["metric"]),
+            GROUPS[x["family"]].index(x["group"]),
+        ),
+    )
+    print("PINNED", sum(x["pinned"] for x in keyed), "of", len(keyed))
+    print("\n=== REGISTRY ROWS ===")
+    for fam in fam_order:
+        print(f"\n--- {fam}")
+        print(
+            "| Metric | Group | k | k basis | r | r basis | r_corr (attenuated) | Seasons (pairs) |"
+        )
+        print("|---|---|---|---|---|---|---|---|")
+        for x in (x for x in keyed if x["family"] == fam):
+            note = f"; {x['note']}" if x["note"] else ""
+            print(
+                f"| `{x['metric']}` | {x['group']} | {x['k']:g} | {x['k_basis']} | "
+                f"{x['r']:.2f} | {x['r_basis']}{note} | "
+                f"{'n/a' if x['r_corr'] is None else f'{x["r_corr"]:.2f}'} | "
+                f"{x['seasons']} ({x['pairs']}) |"
+            )
+    print("\n=== CONSTANTS ===")
+    for x in keyed:
+        print(f'    ("{x["metric"]}", "{x["group"]}"): ({x["k"]:g}, {x["r"]:.2f}),')
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=["fetch", "estimate"])
+    ap.add_argument("step", choices=["fetch", "estimate", "recommend"])
     args = ap.parse_args()
     if args.step == "fetch":
         fetch()
-    else:
+    elif args.step == "estimate":
         estimate()
+    else:
+        recommend()

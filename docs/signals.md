@@ -789,7 +789,9 @@ the numerator, denominator, and source differ.
   of per-game rates. NGS averages are weighted by NGS's own count in that row
   (`attempts`/`rush_attempts`/`targets`, staged by `0027`).
   - `_game`: this row's game.
-  - `_l4`: the player's last 4 games played (a `snaps` row), this one included.
+  - `_l4`: the player's last 4 games played, this one included. A game played is a
+    `snaps` row. It's also a `player_game_pbp` row with no snaps row, which happened in
+    8 player-games in 2025–2026 (a crosswalk gap), so the game still counts.
   - `_std`: every game of the season through this row's week. POST weeks continue the
     count.
 - **Nulls:** a window is null when its denominator is 0 there. That covers no targets,
@@ -816,10 +818,16 @@ the numerator, denominator, and source differ.
   Efficiency sector, with no QB/OL discount:
   - `w_cur = n/(n+k)`, `w_prior = (1−w_cur)·r`, `w_league = 1−w_cur−w_prior`.
   - `n` is the metric's own current-season denominator.
-  - The prior is the player's own raw season−1 ratio, recomputed from the staged tables,
-    which L2 retention keeps for `[season−1, season]`. It is never the previous
-    season's blended final row. It counts wherever he played, so a traded player keeps
-    his prior. With no season−1 sample, `w_prior = 0` and the weight goes to the league.
+  - **The prior is the player's own season−1 ratio, shrunk with the same `k` toward
+    season−1's league value for his group:** `(Σnum + k·league₋₁) / (Σden + k)`. This
+    matches Efficiency, whose prior is a `k_metric`-shrunk plain solve (decided
+    2026-09-29, user; corrects the earlier "raw" wording).
+    - With a raw prior, no constant `r` is right: a 5-target prior and a 150-target prior
+      would get the same weight.
+    - The prior is recomputed from the staged tables, which L2 retention keeps for
+      `[season−1, season]`. It's never the previous season's blended final row.
+    - It counts wherever the player played, so a traded player keeps his prior.
+    - With no season−1 sample, `w_prior = 0` and the weight goes to the league.
   - The league value is the season-to-date `Σ/Σ` over the player's `position_group`.
   - `_game`/`_l4` are raw, never blended.
   - **`k` is per metric *and* per position group (decided 2026-09-29, user).** k0 varies
@@ -828,29 +836,67 @@ the numerator, denominator, and source differ.
     - **Where the data pins it,** `k` = the pooled k0 from
       `scripts/estimate_player_reliability.py`. k0 is the sample at which a player's own
       rate is half signal (one-way random effects, 2001–2025 or the source's span).
-    - **Elsewhere, `k` is pinned by judgment**, like Efficiency's `k_metric`.
     - "Pins it" means the 90% bootstrap interval of k0 is finite and within 2×, and
       r_corr's lower bound is above 0. That holds for 96 of 206 metric × group pairs
       (P7 step 6).
-  - **`r` is estimated offline** from nflverse history by the same script, from
-    adjacent-season pairs of the same player in the same group. The DB holds only
-    `[season−1, season]`.
-  - **Not recorded yet: the values await the user's review of the 2026-09-29
-    estimation.** Two choices are open:
-    - **Which r.** `r_corr` is Efficiency's method: the pooled correlation of shrunk
-      season values. `r_slope` is the slope of next season's raw rate on this season's
-      shrunk value, which is the coefficient the blend multiplies. For teams, with large
-      samples, the two coincide. For players, `r_corr` is attenuated by both seasons'
-      noise. Example, WR `epa_per_target`: r_corr 0.22 (0.19–0.26), r_slope 0.79
-      (0.69–0.93).
-    - **Which prior.** The prior above is the *raw* season−1 ratio. Efficiency's prior
-      is a *shrunk* solve (`k_metric` pseudo-plays). With a raw prior, no constant r is
-      right, because the prior's own noise depends on its sample.
-  - Until then, every family entry below reads "k, r: per group, pending review".
-- **Family `stability`:** `w_cur + w_prior` of the family's headline metric (receiving
-  `epa_per_target`, rushing `epa_per_carry`, passing `epa_per_dropback`, defense
-  `tackles_per_snap`). `usage_stability = games/(games + k_usage)`, with **`k_usage` = 2
-  games (set 2026-09-29).**
+    - **Elsewhere (110), `k` is pinned by judgment**, like Efficiency's `k_metric`, and
+      each entry's "k basis" says which rule:
+      - **Split of a parent metric** (gap cells, field location, play action, vs blitz,
+        stacked box, catchable/contested/drop): the parent's `k`, in the split's own
+        units.
+        - This departs from Efficiency, which sizes splits below the parent roughly in
+          proportion to their share (plays 200 → pass/rush 120 → down 50).
+        - Here the measured point k0s of splits sit near the parent's: RB `epa_per_carry`
+          cells 65–408 vs 215; WR `epa_per_target` left/middle/right 179/150/155 vs 177.
+        - Proportional sizing gave QB gap cells k ≈ 1, i.e. no shrinkage.
+      - **Own denominator, finite point k0:** the point k0. Its interval is too wide to
+        call it derived.
+      - **No detectable between-player signal:** the family headline's `k` for the
+        group, with `r = 0`. That's Efficiency's `down4` pattern: an ordinary k and no
+        prior.
+  - **`r` = `r_slope`, clipped to [0, 1] (decided 2026-09-29, user).** It's estimated
+    offline by the same script from adjacent-season pairs of the same player in the same
+    group. The DB holds only `[season−1, season]`.
+    - `r_slope` is the weighted slope of next season's raw rate on this season's shrunk
+      value. With a shrunk prior, it's exactly the coefficient the blend multiplies.
+    - **`r_corr` is recorded beside it as the attenuated comparison only. It's never an
+      input.** It's Efficiency's method, the pooled correlation of shrunk values in both
+      seasons, and both seasons' noise pulls it down.
+      - Example, WR `epa_per_target`: r_corr 0.22 (0.19–0.26), r_slope 0.79
+        (0.69–0.93).
+      - Teams show the same gap. Efficiency's r is attenuated too (`docs/phases/P2.md`,
+        open item 2).
+    - **No shrinkage toward a family mean.** Efficiency shrinks each r halfway toward its
+      side mean because 7 pairs of 32 teams is thin. Here pairs number in the hundreds
+      to thousands, and the bootstrap interval is recorded instead.
+    - **When k isn't pinned,** `r` is still `r_slope` when r_corr's lower bound is above
+      0 and `r_slope`'s 90% upper bound is ≤ 1.5. Otherwise `r = 0` (Efficiency's `down4`
+      pattern: no reliable year-over-year signal).
+  - **Position groups outside the estimate** borrow the family's primary group's `k` and
+    `r`: receiving → WR, rushing → RB, passing → QB, defense → DB. That covers QB
+    receiving, WR/TE rushing, non-QB passing, OL/SPEC, and offensive players with
+    defensive snaps. It's judgment.
+  - The k and r table is under "k and r by metric and position group" below. The
+    analyst's constants (`pipeline/analysts/player_efficiency.py`, `_K_R`) are
+    generated from the same rows (`estimate_player_reliability.py recommend`), and a
+    test fails if the two differ.
+- **Family `stability`:** the share of the family headline metric's `_std` that isn't
+  league average. Headlines: receiving `epa_per_target`, rushing `epa_per_carry`,
+  passing `epa_per_dropback`, defense `tackles_per_snap`.
+  - Formula: `w_cur + w_prior · n₋₁/(n₋₁ + k)`, where `n₋₁` is the prior season's
+    denominator.
+  - The second factor exists because the prior is itself shrunk (above). Without it,
+    `w_cur + w_prior` would count the prior's own league-average part as information.
+    - Example: an RB with 40 prior-season targets and k 189 has a prior that's 83%
+      league.
+    - Efficiency's team priors rest on ~1,000 plays, so the factor is near 1 there. For
+      players it isn't.
+  - This keeps `stability`'s meaning, which the P6 dimming floor relies on (added
+    2026-09-29 with the shrunk prior).
+    - Whether the floor's *number* (0.2262, derived from team stability) is right for
+      player values is unmeasured. It's an open question in `docs/phases/P6.md` §4.
+- **`usage_stability = games/(games + k_usage)`, with `k_usage` = 2 games (set
+  2026-09-29).**
   - k0 in games is measured per season and per share (unweighted one-way ANOVA). Median
     over seasons:
     - target share: WR 0.99, TE 1.13, RB 2.13 (range 1.81–2.79)
@@ -879,12 +925,12 @@ the numerator, denominator, and source differ.
     | Family | Group | Minimum per game played | Status |
     |---|---|---|---|
     | passing | QB | ≥ 15 dropbacks | **Derived** |
-    | rushing | QB | **none set** | Not derivable, decision pending |
+    | passing | other groups | ≥ 15 dropbacks (the QB number) | Guess |
+    | rushing | QB | ≥ 2 designed-run carries | **Judgment, not derived** |
     | rushing | RB | ≥ 6 carries | Guess |
     | rushing | other groups | ≥ 6 carries (the RB guess) | Guess |
     | receiving | WR, TE, RB, others | ≥ 3 targets | Guess, and no data will derive it |
-    | defense | DB | ≥ 20 defensive snaps | Supported by 2025, not reproduced 2013–2025 |
-    | defense | DL, LB | ≥ 20 defensive snaps | Guess |
+    | defense | DB, DL, LB, others | ≥ 20 defensive snaps | Guess |
     | usage | all | a non-null `_std` | — |
 
     - **Passing, QB: 15, derived.**
@@ -895,13 +941,18 @@ the numerator, denominator, and source differ.
         inside it.
       - QBs included at 2025 week 18 with a minimum of 10 / 15 / 20: 63 / 54 / 52 of 99
         with a dropback. By week: 32/33 in week 1, 37/54 in week 4, 43/69 in week 8.
-    - **Rushing, QB: not derived. No minimum set, decision pending.**
-      - Designed-run carries per game played decline steadily across 768 QB
-        player-seasons (2013–2025), with no low point: 31% under 0.5, 28% at 0.5–1, 19%
-        at 1–1.5, 7% at 1.5–2, 5% at 2–2.5, and ≤ 2% per half-carry above that.
+    - **Rushing, QB: 2 designed-run carries per game played. A judgment call, not
+      derived (decided 2026-09-29, user).**
+      - **The low-point criterion used for QB passing doesn't apply here.** No low point
+        exists: designed-run carries per game played decline steadily across 768 QB
+        player-seasons (2013–2025). 31% are under 0.5, 28% at 0.5–1, 19% at 1–1.5, 7% at
+        1.5–2, 5% at 2–2.5, and ≤ 2% per half-carry above that.
+      - The sharpest step is 19% at 1–1.5 falling to 7% at 1.5–2. 2 sits just past that
+        shoulder and keeps about the top 15% (116 of 768 player-seasons average ≥ 2).
+        That's slightly more than the ~14% first estimated.
       - The RB number (6) would exclude every QB. None averaged 5 or more per game
-        played in 2025, yet QB designed-run rates are the most reliable rushing rates
-        (EPA/carry k0 23, 19–34).
+        played in 2025, yet QB designed-run rates are among the most reliable rushing
+        rates (EPA/carry k0 23, 19–34).
     - **Rushing, RB: 6, a guess.** The data gives a range, not a point.
       - 2025 per game: a dip at 4–7 carries (4.6–5.8% of player-games each, vs 11.7% at
         1 and 13.6% at 12–14).
@@ -911,15 +962,14 @@ the numerator, denominator, and source differ.
       and per game played (2013–2025: WR 2,751, TE 1,546, RB 1,916 player-seasons)
       decline steadily in every group. There's no empirical low point, so more data
       won't change this.
-    - **Defense, DB: 20, supported by 2025 but not reproduced across seasons.**
-      - 2025 per game: a low point at 15–24 snaps (3.7–4.0% of player-games per 5-snap
-        bin, vs 9% at 1–4 and 10% at 60+).
-      - 2013–2025 per game played (4,867 DB player-seasons): flat from 10 to 50 snaps
-        (5.8–6.8% per 5-snap bin), then a peak at 55–65. So the multi-season data
-        doesn't show the 2025 low point (flagged 2026-09-29 for re-decision).
+    - **Defense, every group: 20, a guess (DB downgraded 2026-09-29, user).**
+      - DB: 2025 alone showed a low point at 15–24 snaps per game (3.7–4.0% of
+        player-games per 5-snap bin, vs 9% at 1–4 and 10% at 60+). 2013–2025 per game
+        played (4,867 DB player-seasons) doesn't reproduce it: flat from 10 to 50 snaps
+        (5.8–6.8% per 5-snap bin), then a peak at 55–65. A one-season artifact doesn't
+        get a derived label.
+      - DL is single-peaked (mode 15–25 per game played). LB is flat from 0 to 65.
       - Moot until the defense gate below clears.
-    - **Defense, DL and LB: 20, guesses.** DL is single-peaked (mode 15–25 per game
-      played). LB is flat from 0 to 65.
   - **Defense rate percentiles are gated (decided 2026-09-29, user).** No defense-family
     `_pct` ships until the P7 step 7 missing-row question is resolved: when a defender
     with snaps has no `pfr_advstats` / `player_week` row, did he record zero, or is the
@@ -929,9 +979,19 @@ the numerator, denominator, and source differ.
     - Usage and offense-family rates are not gated.
   - **Direction-neutral:** a high `stuff_rate_pct` is a high stuff rate. The display
     decides which way is good.
-- **Stale rows:** `Analyst.run()`'s signals cleanup doesn't cover these tables. How a
-  player-week row that a rerun no longer produces gets removed is designed with the
-  analysts in step 6.
+- **Which weeks a run writes, and stale rows (designed at step 6, 2026-09-29).**
+  - A run for `(season, W)` recomputes every week ≤ W of that season that has inputs,
+    not only the latest.
+    - Late inputs land that way: FTN charts within 48h, and nflverse revises stats.
+    - `filter_changed` writes only the rows whose `content_hash` moved.
+    - Each row still uses only games through its own week, so there's no leakage.
+  - `Analyst.run()`'s signals cleanup doesn't reach these tables, and these two analysts
+    declare no `signal_names`. Instead, each analyst's write deletes its own table's rows
+    for that season with week ≤ W whose `(player_id, week)` this run didn't produce.
+    Then it upserts.
+    - That's the "delete only within your own current scope and rewrite it in the same
+      run" rule (CLAUDE.md), and it's one transaction.
+    - Rows for weeks after W are never touched.
 
 #### Usage family (`player_usage_week`)
 - **Family:** usage. Sample: `usage_games_std`/`_l4` (games with a `snaps` row).
@@ -944,8 +1004,15 @@ the numerator, denominator, and source differ.
     has to be derived because no stored column holds it.
     - Using the max-snaps player fails: in 2025, 54 of 570 team-games had no defender at
       100%, and 552 had no ST player at 100%.
-    - Null when nobody reaches 0.50. Verify the recovery against pbp play counts at step
-      6.
+    - Null when nobody reaches 0.50.
+    - **Verified 2026-09-29** against `team_week` scrimmage plays (`plays +
+      garbage_time_plays_excluded`), with `usage.team_snaps` on live snaps.
+      - Recovered offense snaps minus scrimmage plays, 2025: median +3, p5 +1, p95 +7,
+        range −1 to +12, below zero in 2 of 570 team-games (both −1), never null.
+      - 2026 weeks 1–3: median +4, range 0 to +9.
+      - A small positive gap is expected: snaps include the no-plays, kneels and spikes
+        that `team_week` drops.
+      - Defense snaps mirror the opponent's offense exactly, and ST snaps are never null.
 - `_std`/`_l4` sum the player's and the team's values over the player's own games, so a
   missed game doesn't dilute a share.
 - **Prior blend:** none (observed shares). **Pct population:** the same `position_group`
@@ -973,18 +1040,20 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
 - **Sample:** `rec_targets_*` = `player_game_pbp.targets`. **Minimum for pct:** 3 targets
   per game played, every group. It's a guess and a judgment call: there's no empirical
   low point (see the `_pct` rules above).
-- **k, r:** per group, pending review (see "Prior blend").
-  - Headline `epa_per_target`, 2001–2025, k0 with 90% interval:
-    - WR 177 (158–217), r_corr 0.22
-    - TE 141 (109–239), r_corr 0.24
-    - RB 189 (131–355), r_corr 0.11 (0.06–0.15)
+- **k, r:** per metric × group, recorded 2026-09-29 in "k and r by metric and position
+  group" below.
+  - Headline `epa_per_target`: WR k 177 (pinned), r 0.79; TE k 141 and RB k 189
+    (judgment, point k0), r 0.94 / 0.72.
 - **RB `epa_per_target` (decided 2026-09-29, user: kept, not special-cased).**
   - 2025 alone showed no detectable between-RB signal (τ² ≤ 0 in 80% of bootstrap
     draws).
-  - The multi-season re-check (2001–2025, 2,595 RB pairs) does find some: k0 189
-    (131–355), r_corr 0.11. That's the weakest of the three groups.
-  - Reassess once k and r are recorded, by checking whether RB stability actually lands
-    at or below the floor. With these values it may not.
+  - The multi-season re-check (2001–2025, 2,595 RB pairs) finds a thin one: k0 189
+    (131–355), r_corr 0.11 (0.06–0.15), r_slope 0.72.
+  - Where RB stability lands: take a week-4 RB with 12 targets and 40 last season. With
+    k 189 and r 0.72, stability is 12/201 + (189/201)·0.72·(40/229) ≈ 0.18. That's below
+    the P6 floor (0.2262), so it renders dimmed as expected.
+  - A heavy-volume RB (60 targets now, 90 prior) reaches ≈ 0.54. Re-check against live
+    rows once the analyst runs.
 - **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
@@ -1021,8 +1090,9 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
 #### Rushing family (`player_eff_week`)
 - **Sample:** `rush_carries_*` = `player_game_pbp.carries`. Designed runs only;
   scrambles are the passer's dropbacks. **Minimum for pct:** RB and other groups, 6
-  carries per game played (a guess; the data gives a 4–7 range in 2025 only). QB: none
-  set, not derivable, decision pending. See the `_pct` rules above.
+  carries per game played (a guess; the data gives a 4–7 range in 2025 only). QB: 2
+  designed-run carries per game played, a judgment call (no low point exists). See the
+  `_pct` rules above.
 - **Gap cells:** `run_location` left/middle/right × `run_gap` end/tackle/guard, with
   `run_gap` null on middle (fixture-verified), gives 7 cells: `le lt lg mid rg rt re`.
   Carries with a null `run_location` are in the family sample but in no cell, so the
@@ -1030,17 +1100,22 @@ season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
   table). `_game` cell values are trivia; read `_std` with `rush_stability`.
   - Across 2001–2025, most gap-cell EPA/success rates can't be pinned: k0's interval is
     unbounded or r_corr's reaches 0.
-- **k, r:** per group, pending review.
-  - Headline `epa_per_carry`, 2001–2025: RB k0 215 (186–270), r_corr 0.17; QB (designed
-    runs) k0 23 (19–34), r_corr 0.19.
+- **k, r:** per metric × group, recorded 2026-09-29 in "k and r by metric and position
+  group" below.
+  - Headline `epa_per_carry`: RB k 215 (pinned), r 0.51; QB (designed runs) k 23
+    (pinned), r 0.67.
 - **RB `epa_per_carry` (decided 2026-09-29, user: kept, not special-cased).**
   - 2025 alone showed essentially no between-RB signal: k0 ~4,500, with no signal in 45%
     of bootstrap draws.
-  - The multi-season re-check (2001–2025, 2,556 RB pairs) finds k0 215 (186–270) and
-    r_corr 0.17 (0.12–0.22). The signal is real but thin.
-  - Reassess once k and r are recorded, by checking whether RB `rush_stability` lands
-    at or below the floor. With these values it may not: at 60 carries, w_cur is about
-    0.22.
+  - The multi-season re-check (2001–2025, 2,556 RB pairs) finds k0 215 (186–270),
+    r_corr 0.17 (0.12–0.22) and r_slope 0.51. The signal is real but thin.
+  - **Where RB `rush_stability` lands, and it isn't always at the floor:**
+    - A rotational back (20 carries now, 30 last season): 20/235 + (215/235)·0.51·(30/245)
+      ≈ 0.14. That's below the P6 floor (0.2262), so it's dimmed.
+    - A feature back at week 4 (60 now, 200 last season): 0.22 + 0.78·0.51·0.48 ≈ 0.41.
+      That's above the floor and not dimmed.
+    - The expectation that RB stability "lands at or below the floor" holds only for
+      low-volume backs. Re-check against live rows once the analyst runs.
 - **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
@@ -1069,13 +1144,13 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
   scrambles. **Minimum for pct:** QB, 15 dropbacks per game played, **derived**
   (2026-09-29): the low point at 15–19. See the `_pct` rules above. Other groups use the
   same 15, which in practice excludes them.
-- **k, r:** QB, pending review.
-  - Headline `epa_per_dropback`, 2001–2025: k0 199 (177–231), r_corr 0.42 (0.36–0.47),
-    r_slope 0.81.
-  - 16 of 23 passing metrics can be pinned. The seven that can't are all FTN rates, with
-    3 season pairs: `blitzed_rate`, `catchable_rate`, `throwaway_rate`,
-    `int_worthy_rate`, `qb_fault_sack_share`, `epa_per_dropback_play_action`, and
-    `epa_per_dropback_vs_blitz`.
+- **k, r:** QB, recorded 2026-09-29 in "k and r by metric and position group" below.
+  - Headline `epa_per_dropback`: k 199 (pinned; 90% 177–231), r 0.81 (r_corr 0.42).
+  - 16 of 23 passing metrics are pinned. The seven that aren't are all FTN rates, with
+    **3 season pairs, revisit at 5+** (2027 completes the 4th, 2028 the 5th):
+    `blitzed_rate`, `catchable_rate`, `throwaway_rate`, `int_worthy_rate`,
+    `qb_fault_sack_share`, `epa_per_dropback_play_action`, and
+    `epa_per_dropback_vs_blitz`. Each carries a judgment k.
 - **Added:** P7, 2026-09-26 (drafted).
 
 | Metric | Numerator / denominator | Src |
@@ -1112,8 +1187,8 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
 #### Defense family (`player_eff_week`)
 - **Sample:** `def_snaps_*` = `snaps.defense_snaps`. Every per-snap rate is per
   *defensive snap*: not per pass rush, not per coverage snap, since neither exists in
-  a free in-season source. **Minimum for pct:** 20 defensive snaps per game played. DB is
-  supported by 2025 but not reproduced 2013–2025. DL and LB are guesses. See the `_pct`
+  a free in-season source. **Minimum for pct:** 20 defensive snaps per game played, a
+  guess in every group (DB's 2025 low point isn't reproduced 2013–2025). See the `_pct`
   rules above.
 - **Percentiles gated (decided 2026-09-29, user).** No defense `_pct` until P7 step 7
   settles whether a missing `pfr_advstats` / `player_week` row means zero.
@@ -1123,12 +1198,12 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
 - The PFR allowed stats are **PFR's nearest-defender charting on targeted plays, not
   coverage assignments** (`docs/phases/P7.md`, "Coverage: who covered whom"). They have
   no untargeted snaps and no receiver identity.
-- **k, r:** per group, pending review and the step 7 missing-row answer, which moves
-  them.
-  - `tackles_per_snap`, 2018–2025, missing read as zero vs present rows only:
-    - DL k0 322 vs 378
-    - LB 88 vs 93
-    - DB 322 vs 265
+- **k, r:** per metric × group, recorded 2026-09-29 in "k and r by metric and position
+  group" below. They're estimated under today's rule: games with a PFR / `player_week`
+  row only.
+  - **They move when step 7 answers the missing-row question.** Re-estimate then. For
+    `tackles_per_snap`, missing read as zero vs present rows only: DL k0 322 vs 378, LB
+    88 vs 93, DB 322 vs 265.
   - `forced_fumbles_per_snap` and `int_rate_on_targets` can't be pinned in any group.
 - **Added:** P7, 2026-09-26 (drafted).
 
@@ -1154,6 +1229,254 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
 No defense `_hist`. The natural one, PFR targets per on-field coverage dropback, needs
 PFR rows for the `_hist` seasons, and L2 retention keeps `pfr_advstats` only for
 `[season−1, season]`.
+
+#### k and r by metric and position group (recorded 2026-09-29)
+- **Generated.** `scripts/estimate_player_reliability.py fetch` → `estimate` →
+  `recommend` (P7 step 6) produced these rows, and the analyst's `_K_R` constants come
+  from the same run. Rules are under "Prior blend" above.
+- **k basis:** `pinned` = pooled k0, 90% interval finite and within 2×. `J:` = judgment,
+  with the rule named.
+- **r basis:** `r_slope` = the estimate, clipped to [0, 1]. `0:` = Efficiency's `down4`
+  pattern, with the reason given.
+- **r_corr is the attenuated comparison only. It's never an input.**
+- **Seasons (pairs):** the estimation span and the count of adjacent-season player
+  pairs.
+- **Defense:** estimated under today's missing-row rule (present rows only). Re-estimate
+  after P7 step 7.
+- **Groups not listed** borrow the family's primary group (receiving WR, rushing RB,
+  passing QB, defense DB).
+
+**Receiving**
+
+| Metric | Group | k | k basis | r | r basis | r_corr (attenuated) | Seasons (pairs) |
+|---|---|---|---|---|---|---|---|
+| `epa_per_target` | WR | 177 | pinned | 0.79 | r_slope | 0.22 | 2001-2025 (3432) |
+| `epa_per_target` | TE | 141 | J: point k0 (interval too wide) | 0.94 | r_slope (k judgment) | 0.24 | 2001-2025 (1953) |
+| `epa_per_target` | RB | 189 | J: point k0 (interval too wide) | 0.72 | r_slope (k judgment) | 0.11 | 2001-2025 (2595) |
+| `rec_success_rate` | WR | 100 | pinned | 0.79 | r_slope | 0.30 | 2001-2025 (3432) |
+| `rec_success_rate` | TE | 130 | pinned | 0.90 | r_slope | 0.24 | 2001-2025 (1953) |
+| `rec_success_rate` | RB | 126 | pinned | 0.58 | r_slope | 0.12 | 2001-2025 (2595) |
+| `catch_rate` | WR | 64 | pinned | 0.81 | r_slope | 0.38 | 2001-2025 (3432) |
+| `catch_rate` | TE | 128 | pinned | 0.76 | r_slope | 0.20 | 2001-2025 (1953) |
+| `catch_rate` | RB | 99 | pinned | 0.50 | r_slope | 0.12 | 2001-2025 (2595) |
+| `yards_per_target` | WR | 154 | pinned | 0.77 | r_slope | 0.24 | 2001-2025 (3432) |
+| `yards_per_target` | TE | 118 | pinned | 1.00 | r_slope | 0.32 | 2001-2025 (1953) |
+| `yards_per_target` | RB | 150 | J: point k0 (interval too wide) | 0.71 | r_slope (k judgment) | 0.13 | 2001-2025 (2595) |
+| `rec_adot` | WR | 19 | pinned | 0.87 | r_slope | 0.58 | 2006-2025 (2793) |
+| `rec_adot` | TE | 22 | pinned | 0.81 | r_slope | 0.45 | 2006-2025 (1609) |
+| `rec_adot` | RB | 18 | pinned | 0.79 | r_slope | 0.42 | 2006-2025 (2039) |
+| `yac_per_reception` | WR | 53 | pinned | 0.91 | r_slope | 0.38 | 2001-2025 (3320) |
+| `yac_per_reception` | TE | 48 | pinned | 0.91 | r_slope | 0.34 | 2001-2025 (1888) |
+| `yac_per_reception` | RB | 80 | J: point k0 (interval too wide) | 0.77 | r_slope (k judgment) | 0.17 | 2001-2025 (2499) |
+| `yac_oe_per_reception` | WR | 111 | pinned | 0.99 | r_slope | 0.28 | 2006-2025 (2681) |
+| `yac_oe_per_reception` | TE | 71 | J: point k0 (interval too wide) | 0.96 | r_slope (k judgment) | 0.29 | 2006-2025 (1535) |
+| `yac_oe_per_reception` | RB | 274 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.09 | 2006-2025 (1952) |
+| `rec_first_down_rate` | WR | 113 | pinned | 0.72 | r_slope | 0.26 | 2001-2025 (3432) |
+| `rec_first_down_rate` | TE | 99 | pinned | 0.87 | r_slope | 0.27 | 2001-2025 (1953) |
+| `rec_first_down_rate` | RB | 130 | pinned | 0.93 | r_slope | 0.19 | 2001-2025 (2595) |
+| `rec_explosive_rate` | WR | 185 | pinned | 0.69 | r_slope | 0.19 | 2001-2025 (3432) |
+| `rec_explosive_rate` | TE | 142 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.26 | 2001-2025 (1953) |
+| `rec_explosive_rate` | RB | 402 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.09 | 2001-2025 (2595) |
+| `deep_target_rate` | WR | 35 | pinned | 0.85 | r_slope | 0.48 | 2001-2025 (3432) |
+| `deep_target_rate` | TE | 58 | pinned | 0.67 | r_slope | 0.27 | 2001-2025 (1953) |
+| `deep_target_rate` | RB | 48 | J: point k0 (interval too wide) | 0.71 | r_slope (k judgment) | 0.26 | 2001-2025 (2595) |
+| `epa_per_target_left` | WR | 177 | J: split of `epa_per_target` (0.31 of its units), parent k | 0.57 | r_slope (k judgment) | 0.08 | 2001-2025 (2603) |
+| `epa_per_target_left` | TE | 141 | J: split of `epa_per_target` (0.28 of its units), parent k | 0.98 | r_slope (k judgment) | 0.12 | 2004-2025 (1384) |
+| `epa_per_target_left` | RB | 189 | J: split of `epa_per_target` (0.31 of its units), parent k | 0.00 | 0: no season pairs | n/a | 2002-2025 (0) |
+| `epa_per_target_middle` | WR | 177 | J: split of `epa_per_target` (0.18 of its units), parent k | 0.50 | r_slope (k judgment) | 0.05 | 2002-2025 (2438) |
+| `epa_per_target_middle` | TE | 141 | J: split of `epa_per_target` (0.26 of its units), parent k | 0.00 | 0: r_slope unstable | 0.08 | 2003-2025 (1346) |
+| `epa_per_target_middle` | RB | 189 | J: split of `epa_per_target` (0.21 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.02 | 2005-2025 (1456) |
+| `epa_per_target_right` | WR | 177 | J: split of `epa_per_target` (0.32 of its units), parent k | 1.00 | r_slope (k judgment) | 0.18 | 2001-2025 (2621) |
+| `epa_per_target_right` | TE | 141 | J: split of `epa_per_target` (0.34 of its units), parent k | 0.00 | 0: r_slope unstable | 0.12 | 2001-2025 (1490) |
+| `epa_per_target_right` | RB | 189 | J: split of `epa_per_target` (0.37 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.01 | 2004-2025 (1853) |
+| `catchable_catch_rate` | WR | 64 | J: split of `catch_rate` (0.71 of its units), parent k | 0.84 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.27 | 2022-2025 (467) |
+| `catchable_catch_rate` | TE | 128 | J: split of `catch_rate` (0.79 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.07 | 2022-2025 (272) |
+| `catchable_catch_rate` | RB | 99 | J: split of `catch_rate` (0.85 of its units), parent k | 0.40 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.10 | 2022-2025 (287) |
+| `drop_rate` | WR | 64 | J: split of `catch_rate` (0.71 of its units), parent k | 0.78 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.16 | 2022-2025 (467) |
+| `drop_rate` | TE | 128 | J: split of `catch_rate` (0.79 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.05 | 2022-2025 (272) |
+| `drop_rate` | RB | 99 | J: split of `catch_rate` (0.85 of its units), parent k | 0.44 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.11 | 2022-2025 (287) |
+| `contested_target_rate` | WR | 82 | pinned | 0.73 | r_slope; 3 season pairs, revisit at 5+ | 0.32 | 2022-2025 (484) |
+| `contested_target_rate` | TE | 120 | J: point k0 (interval too wide) | 0.83 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.29 | 2022-2025 (275) |
+| `contested_target_rate` | RB | 468 | J: point k0 (interval too wide) | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.14 | 2022-2025 (296) |
+| `contested_catch_rate` | WR | 64 | J: split of `catch_rate` (0.17 of its units), parent k | 0.00 | 0: r_slope unstable; 3 season pairs, revisit at 5+ | 0.15 | 2022-2025 (394) |
+| `contested_catch_rate` | TE | 128 | J: split of `catch_rate` (0.14 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | -0.11 | 2022-2025 (192) |
+| `contested_catch_rate` | RB | 99 | J: split of `catch_rate` (0.05 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.04 | 2022-2025 (126) |
+| `created_reception_rate` | WR | 74 | J: point k0 (interval too wide) | 0.78 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.27 | 2022-2025 (459) |
+| `created_reception_rate` | TE | 13871 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable; 3 season pairs, revisit at 5+ | 0.30 | 2022-2025 (269) |
+| `created_reception_rate` | RB | 13114 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable; 3 season pairs, revisit at 5+ | 0.17 | 2022-2025 (278) |
+| `screen_target_rate` | WR | 19 | pinned | 0.76 | r_slope; 3 season pairs, revisit at 5+ | 0.49 | 2022-2025 (484) |
+| `screen_target_rate` | TE | 39 | J: point k0 (interval too wide) | 0.93 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.49 | 2022-2025 (275) |
+| `screen_target_rate` | RB | 31 | pinned | 0.54 | r_slope; 3 season pairs, revisit at 5+ | 0.25 | 2022-2025 (296) |
+| `epa_per_target_play_action` | WR | 177 | J: split of `epa_per_target` (0.19 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.05 | 2022-2025 (413) |
+| `epa_per_target_play_action` | TE | 141 | J: split of `epa_per_target` (0.27 of its units), parent k | 0.00 | 0: no season pairs; 3 season pairs, revisit at 5+ | n/a | 2022-2025 (0) |
+| `epa_per_target_play_action` | RB | 189 | J: split of `epa_per_target` (0.21 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.07 | 2022-2025 (232) |
+| `broken_tackles_per_reception` | WR | 169 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.29 | 2018-2025 (1079) |
+| `broken_tackles_per_reception` | TE | 351 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.31 | 2018-2025 (617) |
+| `broken_tackles_per_reception` | RB | 169 | J: no detectable signal, WR point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2018-2025 (0) |
+| `avg_separation` | WR | 35 | pinned | 0.87 | r_slope | 0.52 | 2016-2025 (927) |
+| `avg_separation` | TE | 67 | J: point k0 (interval too wide) | 0.93 | r_slope (k judgment) | 0.34 | 2016-2025 (364) |
+| `avg_separation` | RB | 35 | J: no detectable signal, WR point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2016-2023 (0) |
+| `avg_cushion` | WR | 50 | pinned | 0.70 | r_slope | 0.39 | 2016-2025 (927) |
+| `avg_cushion` | TE | 164 | J: point k0 (interval too wide) | 0.76 | r_slope (k judgment) | 0.18 | 2016-2025 (364) |
+| `avg_cushion` | RB | 50 | J: no detectable signal, WR point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2016-2023 (0) |
+
+**Rushing**
+
+| Metric | Group | k | k basis | r | r basis | r_corr (attenuated) | Seasons (pairs) |
+|---|---|---|---|---|---|---|---|
+| `epa_per_carry` | RB | 215 | pinned | 0.51 | r_slope | 0.17 | 2001-2025 (2556) |
+| `epa_per_carry` | QB | 23 | pinned | 0.67 | r_slope | 0.19 | 2001-2025 (994) |
+| `rush_success_rate` | RB | 196 | pinned | 0.57 | r_slope | 0.20 | 2001-2025 (2556) |
+| `rush_success_rate` | QB | 22 | pinned | 0.74 | r_slope | 0.23 | 2001-2025 (994) |
+| `yards_per_carry` | RB | 241 | pinned | 0.63 | r_slope | 0.21 | 2001-2025 (2556) |
+| `yards_per_carry` | QB | 13 | pinned | 0.95 | r_slope | 0.42 | 2001-2025 (994) |
+| `stuff_rate` | RB | 251 | pinned | 0.57 | r_slope | 0.18 | 2001-2025 (2556) |
+| `stuff_rate` | QB | 10 | pinned | 0.78 | r_slope | 0.32 | 2001-2025 (994) |
+| `rush_explosive_rate` | RB | 258 | pinned | 0.70 | r_slope | 0.22 | 2001-2025 (2556) |
+| `rush_explosive_rate` | QB | 24 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.39 | 2001-2025 (994) |
+| `rush_first_down_rate` | RB | 116 | pinned | 0.61 | r_slope | 0.25 | 2001-2025 (2556) |
+| `rush_first_down_rate` | QB | 19 | pinned | 0.83 | r_slope | 0.28 | 2001-2025 (994) |
+| `gap_share_le` | RB | 56 | pinned | 0.74 | r_slope | 0.44 | 2001-2025 (2556) |
+| `gap_share_le` | QB | 16 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.48 | 2001-2025 (994) |
+| `epa_per_carry_le` | RB | 215 | J: split of `epa_per_carry` (0.11 of its units), parent k | 0.57 | r_slope (k judgment) | 0.08 | 2001-2025 (1877) |
+| `epa_per_carry_le` | QB | 23 | J: split of `epa_per_carry` (0.14 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | -0.02 | 2001-2025 (272) |
+| `rush_success_rate_le` | RB | 196 | J: split of `rush_success_rate` (0.11 of its units), parent k | 0.00 | 0: r_slope unstable | 0.05 | 2001-2025 (1877) |
+| `rush_success_rate_le` | QB | 22 | J: split of `rush_success_rate` (0.14 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.07 | 2001-2025 (272) |
+| `gap_share_lt` | RB | 111 | pinned | 0.60 | r_slope | 0.29 | 2001-2025 (2556) |
+| `gap_share_lt` | QB | 43 | J: point k0 (interval too wide) | 0.87 | r_slope (k judgment) | 0.25 | 2001-2025 (994) |
+| `epa_per_carry_lt` | RB | 215 | J: split of `epa_per_carry` (0.13 of its units), parent k | 0.93 | r_slope (k judgment) | 0.08 | 2001-2025 (1917) |
+| `epa_per_carry_lt` | QB | 23 | J: split of `epa_per_carry` (0.04 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.01 | 2001-2025 (99) |
+| `rush_success_rate_lt` | RB | 196 | J: split of `rush_success_rate` (0.13 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.04 | 2001-2025 (1917) |
+| `rush_success_rate_lt` | QB | 22 | J: split of `rush_success_rate` (0.04 of its units), parent k | 0.00 | 0: no season pairs | n/a | 2001-2025 (0) |
+| `gap_share_lg` | RB | 99 | pinned | 0.73 | r_slope | 0.36 | 2001-2025 (2556) |
+| `gap_share_lg` | QB | 57 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.36 | 2001-2025 (994) |
+| `epa_per_carry_lg` | RB | 215 | J: split of `epa_per_carry` (0.12 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.01 | 2001-2025 (1941) |
+| `epa_per_carry_lg` | QB | 23 | J: split of `epa_per_carry` (0.04 of its units), parent k | 0.00 | 0: r_slope unstable | 0.26 | 2001-2025 (101) |
+| `rush_success_rate_lg` | RB | 196 | J: split of `rush_success_rate` (0.12 of its units), parent k | 0.54 | r_slope (k judgment) | 0.07 | 2001-2025 (1941) |
+| `rush_success_rate_lg` | QB | 22 | J: split of `rush_success_rate` (0.04 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.17 | 2001-2025 (101) |
+| `gap_share_mid` | RB | 41 | pinned | 0.80 | r_slope | 0.49 | 2001-2025 (2556) |
+| `gap_share_mid` | QB | 9.2 | pinned | 0.96 | r_slope | 0.44 | 2001-2025 (994) |
+| `epa_per_carry_mid` | RB | 215 | J: split of `epa_per_carry` (0.28 of its units), parent k | 0.73 | r_slope (k judgment) | 0.15 | 2001-2025 (2323) |
+| `epa_per_carry_mid` | QB | 23 | J: split of `epa_per_carry` (0.35 of its units), parent k | 0.54 | r_slope (k judgment) | 0.12 | 2001-2025 (702) |
+| `rush_success_rate_mid` | RB | 132 | pinned | 0.60 | r_slope | 0.13 | 2001-2025 (2323) |
+| `rush_success_rate_mid` | QB | 11 | pinned | 0.75 | r_slope | 0.23 | 2001-2025 (702) |
+| `gap_share_rg` | RB | 76 | pinned | 0.80 | r_slope | 0.43 | 2001-2025 (2556) |
+| `gap_share_rg` | QB | 43 | J: point k0 (interval too wide) | 0.69 | r_slope (k judgment) | 0.18 | 2001-2025 (994) |
+| `epa_per_carry_rg` | RB | 215 | J: split of `epa_per_carry` (0.13 of its units), parent k | 0.29 | r_slope (k judgment) | 0.05 | 2001-2025 (1959) |
+| `epa_per_carry_rg` | QB | 23 | J: split of `epa_per_carry` (0.05 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | -0.16 | 2001-2025 (131) |
+| `rush_success_rate_rg` | RB | 196 | J: split of `rush_success_rate` (0.13 of its units), parent k | 0.00 | 0: r_slope unstable | 0.11 | 2001-2025 (1959) |
+| `rush_success_rate_rg` | QB | 22 | J: split of `rush_success_rate` (0.05 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | -0.04 | 2001-2025 (131) |
+| `gap_share_rt` | RB | 110 | pinned | 0.63 | r_slope | 0.31 | 2001-2025 (2556) |
+| `gap_share_rt` | QB | 150 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.32 | 2001-2025 (994) |
+| `epa_per_carry_rt` | RB | 215 | J: split of `epa_per_carry` (0.13 of its units), parent k | 0.00 | 0: r_slope unstable | 0.05 | 2001-2025 (1936) |
+| `epa_per_carry_rt` | QB | 23 | J: split of `epa_per_carry` (0.04 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.16 | 2001-2025 (96) |
+| `rush_success_rate_rt` | RB | 196 | J: split of `rush_success_rate` (0.13 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.04 | 2001-2025 (1936) |
+| `rush_success_rate_rt` | QB | 22 | J: split of `rush_success_rate` (0.04 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.03 | 2001-2025 (96) |
+| `gap_share_re` | RB | 61 | pinned | 0.74 | r_slope | 0.44 | 2001-2025 (2556) |
+| `gap_share_re` | QB | 14 | pinned | 0.97 | r_slope | 0.39 | 2001-2025 (994) |
+| `epa_per_carry_re` | RB | 215 | J: split of `epa_per_carry` (0.10 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.01 | 2001-2025 (1826) |
+| `epa_per_carry_re` | QB | 23 | J: split of `epa_per_carry` (0.14 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.02 | 2001-2025 (292) |
+| `rush_success_rate_re` | RB | 196 | J: split of `rush_success_rate` (0.10 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.01 | 2001-2025 (1826) |
+| `rush_success_rate_re` | QB | 22 | J: split of `rush_success_rate` (0.14 of its units), parent k | 0.59 | r_slope (k judgment) | 0.09 | 2001-2025 (292) |
+| `stacked_box_rate` | RB | 113 | pinned | 0.41 | r_slope; 3 season pairs, revisit at 5+ | 0.22 | 2022-2025 (308) |
+| `stacked_box_rate` | QB | 16 | J: point k0 (interval too wide) | 0.62 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.27 | 2022-2025 (146) |
+| `epa_per_carry_stacked_box` | RB | 215 | J: split of `epa_per_carry` (0.13 of its units), parent k | 0.00 | 0: no season pairs; 3 season pairs, revisit at 5+ | n/a | 2022-2025 (0) |
+| `epa_per_carry_stacked_box` | QB | 23 | J: split of `epa_per_carry` (0.22 of its units), parent k | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | -0.07 | 2022-2025 (77) |
+| `yards_before_contact_per_carry` | RB | 229 | pinned | 0.67 | r_slope | 0.24 | 2018-2025 (758) |
+| `yards_before_contact_per_carry` | QB | 26 | pinned | 0.92 | r_slope | 0.42 | 2018-2025 (401) |
+| `yards_after_contact_per_carry` | RB | 265 | J: point k0 (interval too wide) | 0.79 | r_slope (k judgment) | 0.24 | 2018-2025 (758) |
+| `yards_after_contact_per_carry` | QB | 30 | J: point k0 (interval too wide) | 0.80 | r_slope (k judgment) | 0.45 | 2018-2025 (401) |
+| `broken_tackles_per_carry` | RB | 613 | J: point k0 (interval too wide) | 0.87 | r_slope (k judgment) | 0.18 | 2018-2025 (758) |
+| `broken_tackles_per_carry` | QB | 175 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.32 | 2018-2025 (401) |
+| `ryoe_per_carry` | RB | 661 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.25 | 2018-2025 (398) |
+| `avg_time_to_los` | RB | 45 | pinned | 0.62 | r_slope | 0.41 | 2016-2025 (503) |
+
+- NGS rushing weekly rows, 2016–2025 regular season, joined to `players.position_group`:
+  5,309 RB, 6 WR, and **no QB**. Measured 2026-09-29; why NGS omits QBs isn't recorded.
+- So QBs get no `ryoe_per_carry`/`avg_time_to_los` (null, never estimated). The
+  borrowed-group rule only matters if a QB ever appears.
+
+**Passing**
+
+| Metric | Group | k | k basis | r | r basis | r_corr (attenuated) | Seasons (pairs) |
+|---|---|---|---|---|---|---|---|
+| `epa_per_dropback` | QB | 199 | pinned | 0.81 | r_slope | 0.42 | 2001-2025 (1332) |
+| `dropback_success_rate` | QB | 178 | pinned | 0.81 | r_slope | 0.45 | 2001-2025 (1332) |
+| `cpoe` | QB | 233 | pinned | 0.91 | r_slope | 0.45 | 2006-2025 (1042) |
+| `pass_adot` | QB | 213 | pinned | 0.66 | r_slope | 0.35 | 2006-2025 (1046) |
+| `sack_rate` | QB | 189 | pinned | 0.72 | r_slope | 0.40 | 2001-2025 (1332) |
+| `scramble_rate` | QB | 67 | pinned | 0.94 | r_slope | 0.68 | 2001-2025 (1332) |
+| `int_rate` | QB | 757 | pinned | 0.54 | r_slope | 0.15 | 2001-2025 (1324) |
+| `deep_attempt_rate` | QB | 360 | pinned | 0.63 | r_slope | 0.27 | 2001-2025 (1324) |
+| `play_action_rate` | QB | 155 | pinned | 0.35 | r_slope; 3 season pairs, revisit at 5+ | 0.22 | 2022-2025 (181) |
+| `epa_per_dropback_play_action` | QB | 199 | J: split of `epa_per_dropback` (0.22 of its units), parent k | 1.00 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.37 | 2022-2025 (167) |
+| `blitzed_rate` | QB | 1347 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable; 3 season pairs, revisit at 5+ | 0.32 | 2022-2025 (181) |
+| `epa_per_dropback_vs_blitz` | QB | 199 | J: split of `epa_per_dropback` (0.27 of its units), parent k | 0.56 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.16 | 2022-2025 (170) |
+| `out_of_pocket_rate` | QB | 73 | pinned | 0.95 | r_slope; 3 season pairs, revisit at 5+ | 0.68 | 2022-2025 (181) |
+| `screen_rate` | QB | 221 | pinned | 0.38 | r_slope; 3 season pairs, revisit at 5+ | 0.24 | 2022-2025 (179) |
+| `throwaway_rate` | QB | 283 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.45 | 2022-2025 (179) |
+| `catchable_rate` | QB | 475 | J: point k0 (interval too wide) | 0.88 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.29 | 2022-2025 (177) |
+| `int_worthy_rate` | QB | 531 | J: point k0 (interval too wide) | 0.64 | r_slope (k judgment); 3 season pairs, revisit at 5+ | 0.21 | 2022-2025 (179) |
+| `qb_fault_sack_share` | QB | 215 | J: point k0 (interval too wide) | 0.00 | 0: no YoY signal (r_corr reaches 0); 3 season pairs, revisit at 5+ | 0.03 | 2022-2025 (154) |
+| `pressure_rate` | QB | 246 | pinned | 0.73 | r_slope | 0.40 | 2018-2025 (399) |
+| `pressure_to_sack_rate` | QB | 90 | pinned | 0.69 | r_slope | 0.30 | 2018-2025 (360) |
+| `avg_time_to_throw` | QB | 81 | pinned | 0.72 | r_slope | 0.56 | 2016-2025 (388) |
+| `aggressiveness` | QB | 387 | pinned | 0.77 | r_slope | 0.37 | 2016-2025 (388) |
+| `avg_air_yards_to_sticks` | QB | 258 | pinned | 0.64 | r_slope | 0.33 | 2016-2025 (388) |
+
+**Defense** (per-snap rates estimated on games with a PFR / `player_week` row: today's
+rule, which is gated)
+
+| Metric | Group | k | k basis | r | r basis | r_corr (attenuated) | Seasons (pairs) |
+|---|---|---|---|---|---|---|---|
+| `tackles_per_snap` | DL | 378 | pinned | 0.83 | r_slope | 0.35 | 2018-2025 (1482) |
+| `tackles_per_snap` | LB | 93 | pinned | 0.95 | r_slope | 0.71 | 2018-2025 (1335) |
+| `tackles_per_snap` | DB | 265 | pinned | 0.86 | r_slope | 0.52 | 2018-2025 (1895) |
+| `pressures_per_snap` | DL | 397 | pinned | 0.92 | r_slope | 0.40 | 2018-2025 (1482) |
+| `pressures_per_snap` | LB | 84 | pinned | 0.96 | r_slope | 0.74 | 2018-2025 (1335) |
+| `pressures_per_snap` | DB | 603 | pinned | 0.87 | r_slope | 0.42 | 2018-2025 (1895) |
+| `blitzes_per_snap` | DL | 80 | pinned | 0.79 | r_slope | 0.62 | 2018-2025 (1482) |
+| `blitzes_per_snap` | LB | 153 | pinned | 0.65 | r_slope | 0.48 | 2018-2025 (1335) |
+| `blitzes_per_snap` | DB | 92 | pinned | 0.64 | r_slope | 0.52 | 2018-2025 (1895) |
+| `targets_per_snap` | DL | 303 | pinned | 0.67 | r_slope | 0.32 | 2018-2025 (1482) |
+| `targets_per_snap` | LB | 76 | pinned | 0.96 | r_slope | 0.75 | 2018-2025 (1335) |
+| `targets_per_snap` | DB | 143 | pinned | 0.87 | r_slope | 0.62 | 2018-2025 (1895) |
+| `tfl_per_snap` | DL | 1023 | pinned | 0.98 | r_slope | 0.30 | 2013-2025 (2730) |
+| `tfl_per_snap` | LB | 850 | pinned | 1.00 | r_slope | 0.41 | 2013-2025 (2364) |
+| `tfl_per_snap` | DB | 1574 | J: point k0 (interval too wide) | 0.95 | r_slope (k judgment) | 0.26 | 2013-2025 (3281) |
+| `sacks_per_snap` | DL | 688 | pinned | 1.00 | r_slope | 0.39 | 2013-2025 (2730) |
+| `sacks_per_snap` | LB | 332 | pinned | 1.00 | r_slope | 0.57 | 2013-2025 (2364) |
+| `sacks_per_snap` | DB | 15784 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.23 | 2013-2025 (3281) |
+| `qb_hits_per_snap` | DL | 262 | pinned | 0.94 | r_slope | 0.54 | 2013-2025 (2730) |
+| `qb_hits_per_snap` | LB | 154 | pinned | 1.00 | r_slope | 0.69 | 2013-2025 (2364) |
+| `qb_hits_per_snap` | DB | 1137 | J: point k0 (interval too wide) | 0.99 | r_slope (k judgment) | 0.34 | 2013-2025 (3281) |
+| `forced_fumbles_per_snap` | DL | 9201 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.20 | 2013-2025 (2730) |
+| `forced_fumbles_per_snap` | LB | 9201 | J: no detectable signal, DL point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2013-2025 (0) |
+| `forced_fumbles_per_snap` | DB | 9201 | J: no detectable signal, DL point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2013-2025 (0) |
+| `pass_defended_per_snap` | DL | 862 | pinned | 0.79 | r_slope | 0.26 | 2013-2025 (2730) |
+| `pass_defended_per_snap` | LB | 2169 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.26 | 2013-2025 (2364) |
+| `pass_defended_per_snap` | DB | 1062 | pinned | 0.98 | r_slope | 0.35 | 2013-2025 (3281) |
+| `missed_tackle_rate` | DL | 51 | pinned | 0.56 | r_slope | 0.17 | 2018-2025 (1429) |
+| `missed_tackle_rate` | LB | 141 | pinned | 0.72 | r_slope | 0.21 | 2018-2025 (1319) |
+| `missed_tackle_rate` | DB | 158 | pinned | 0.91 | r_slope | 0.21 | 2018-2025 (1872) |
+| `completion_pct_allowed` | DL | 204 | J: no detectable signal, LB point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2018-2025 (0) |
+| `completion_pct_allowed` | LB | 204 | J: point k0 (interval too wide) | 0.42 | r_slope (k judgment) | 0.06 | 2018-2025 (1185) |
+| `completion_pct_allowed` | DB | 112 | pinned | 0.70 | r_slope | 0.21 | 2018-2025 (1876) |
+| `yards_per_target_allowed` | DL | 10 | J: point k0 (interval too wide) | 0.52 | r_slope (k judgment) | 0.11 | 2018-2025 (468) |
+| `yards_per_target_allowed` | LB | 283 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.16 | 2018-2025 (1141) |
+| `yards_per_target_allowed` | DB | 104 | pinned | 0.73 | r_slope | 0.19 | 2018-2025 (1821) |
+| `yac_allowed_per_completion` | DL | 5.4 | J: point k0 (interval too wide) | 0.34 | r_slope (k judgment) | 0.09 | 2018-2025 (462) |
+| `yac_allowed_per_completion` | LB | 275 | J: point k0 (interval too wide) | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.06 | 2018-2025 (1141) |
+| `yac_allowed_per_completion` | DB | 163 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.15 | 2018-2025 (1818) |
+| `adot_allowed` | DL | 103 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.30 | 2018-2025 (585) |
+| `adot_allowed` | LB | 44 | pinned | 0.67 | r_slope | 0.24 | 2018-2025 (1182) |
+| `adot_allowed` | DB | 31 | pinned | 0.64 | r_slope | 0.34 | 2018-2025 (1875) |
+| `td_rate_allowed` | DL | 5 | J: point k0 (interval too wide) | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.13 | 2018-2025 (468) |
+| `td_rate_allowed` | LB | 208 | J: point k0 (interval too wide) | 0.00 | 0: no YoY signal (r_corr reaches 0) | 0.05 | 2018-2025 (1141) |
+| `td_rate_allowed` | DB | 171 | pinned | 0.62 | r_slope | 0.11 | 2018-2025 (1821) |
+| `int_rate_on_targets` | DL | 1409 | J: no detectable signal, DB point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2018-2025 (0) |
+| `int_rate_on_targets` | LB | 1409 | J: no detectable signal, DB point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2018-2025 (0) |
+| `int_rate_on_targets` | DB | 1409 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.25 | 2018-2025 (1876) |
 
 #### Considered, not built
 - **FTN `read_thrown`.** The code meanings for `1` and `2` aren't recorded in

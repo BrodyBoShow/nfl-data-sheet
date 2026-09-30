@@ -17,6 +17,8 @@ from pipeline.analysts.availability_impact import AvailabilityImpactAnalyst
 from pipeline.analysts.efficiency import EfficiencyAnalyst
 from pipeline.analysts.environment import EnvironmentAnalyst
 from pipeline.analysts.market import MarketAnalyst
+from pipeline.analysts.player_efficiency import PlayerEfficiencyAnalyst
+from pipeline.analysts.usage import UsageAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
@@ -39,6 +41,9 @@ _JOBS: dict[str, Collector | Analyst | Synthesizer | Grader | Retention] = {
     "weather": WeatherCollector(),
     "environment": EnvironmentAnalyst(),
     "market": MarketAnalyst(),
+    # P7 step 6: manual only, not in the dispatcher until a live run has been reviewed.
+    "usage": UsageAnalyst(),
+    "player_efficiency": PlayerEfficiencyAnalyst(),
     "synthesizer": MatchupSynthesizer(),
     "grader": ProjectionGrader(),
     # Dry run: the registered instance never deletes. Only `--delete` builds one that does.

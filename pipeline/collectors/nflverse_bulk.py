@@ -1076,6 +1076,8 @@ def _aggregate_player_game_pbp(
         .unique()
         .rename({"posteam": "team", "defteam": "opponent_team"})
     )
+    # Across 1999-2025 exactly one game trips this: 2011_13_DET_NO (docs/sources.md). That
+    # was the guard working, not a bug.
     if identity.height != identity.select("game_id", "player_id").n_unique():
         raise ValueError("player_game_pbp: a player maps to two teams in one game")
 

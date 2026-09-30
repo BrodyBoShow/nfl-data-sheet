@@ -146,6 +146,19 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
         even after a scoped run advanced one of the tag keys.
       - It makes participation refetch at the season rollover.
       - Rationale and the one-tag-fresh cases: `docs/phases/P7.md`, step 4.
+  - **`player_game_pbp` over history (measured 2026-09-29, P7 step 6, by running the
+    collector's own `_aggregate_player_game_pbp` on every season 1999–2025 offline;
+    `scripts/estimate_player_reliability.py fetch`):**
+    - **`2011_13_DET_NO` is the only game in 25 seasons that trips the "a player maps to
+      two teams in one game" guard.** The guard behaved correctly: it refused a game
+      whose pbp credits one player to both sides. This isn't a bug. The live collector
+      only fetches `[season−1, season]` and never loads 2011. The offline estimate
+      excludes that one game and reports it; it never patches the data.
+    - **1999–2000 yield no rows:** `play_deleted` is null on every play (checked on
+      2000: 45,491 of 45,491), and the scope filter's `play_deleted != 1` drops null. So
+      the player scope effectively starts in 2001. `team_week`'s scope uses the same
+      condition. That's irrelevant to live runs, which fetch 2025+.
+    - `load_snap_counts(2012)` returns 0 rows, so snaps start in 2013.
 - **Functions to use:** `load_schedules`, `load_teams`, `load_players`, `load_ff_playerids`
   (ID spine); `load_pbp`, `load_player_stats`, `load_snap_counts`, `load_nextgen_stats`,
   `load_ftn_charting`, `load_depth_charts`, `load_pfr_advstats` (bulk collector, P2 —
