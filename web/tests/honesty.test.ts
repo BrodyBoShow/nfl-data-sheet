@@ -314,8 +314,19 @@ describe("the backtest report's frame", () => {
     const p = text(preface);
     expect(p).toContain("backtest win rates");
     expect(p).toContain("52.4% of decided games to break even (110 ÷ 210)");
-    // p5-v2: one bucket clears break-even, so the preface lists it instead of "no bucket".
-    expect(p).toContain("1 of 10 buckets reach it: 52.6% (spread, 2–3 pt |edge|, 287 decided)");
+    // p5-v2: one bucket clears break-even. The preface lists it, then says why that isn't
+    // evidence: its distance from a coin flip in standard errors, and how many of the ten
+    // buckets would clear break-even by chance.
+    expect(p).toContain("1 of 10 buckets reaches it: 52.6% (spread, 2–3 pt |edge|, 151 of 287 decided)");
+    expect(p).toContain("that's 2.6 points above a coin flip");
+    expect(p).toContain(
+      "with 287 decided games, the standard error of that share is 3.0 points, so it sits 0.9 standard " +
+        "errors above 50%: far too few games to tell it apart from chance",
+    );
+    expect(p).toContain(
+      "it's also 1 of 10 buckets examined. if the model's side won exactly half the time, about 2 of 10 " +
+        "would reach 52.4% by chance, and at least one would do so about 89% of the time",
+    );
     expect(p).toContain("every bucket is shown, and the correlations above are the test");
     expect(p).toContain("evidence that the edge doesn't work");
     expect(p).toContain("not a record of anything this site has done");
