@@ -6,7 +6,16 @@
 // returns null. scripts/check-sources.mjs fails on any live signal it can't map, so a new
 // signal can't reach a page without a source entry.
 
-export type SourceId = "nflverse" | "odds_api" | "open_meteo" | "osm" | "wikipedia" | "iana_tz" | "espn" | "sleeper";
+export type SourceId =
+  | "nflverse"
+  | "pfr"
+  | "odds_api"
+  | "open_meteo"
+  | "osm"
+  | "wikipedia"
+  | "iana_tz"
+  | "espn"
+  | "sleeper";
 
 export interface Source {
   id: SourceId;
@@ -23,11 +32,31 @@ export const SOURCES: readonly Source[] = [
     name: "nflverse (via nflreadpy)",
     url: "https://github.com/nflverse/nflverse-data",
     feeds:
-      "The schedule on every page. Every efficiency rating (team play-by-play aggregates, plus QB and " +
-      "O-line continuity from player stats and snap counts). Surface, roof status for retractable roofs, " +
-      "rest days, and the snap and depth-chart inputs to the availability counts.",
+      "The schedule on every page. Every efficiency rating (team play-by-play aggregates, plus the QB " +
+      "continuity adjustment from player stats, and the depth charts both continuity adjustments fall back " +
+      "on). Surface, roof status for retractable roofs, rest days, and the player positions behind the " +
+      "availability counts. Snap counts come through nflverse too, but they're Pro Football Reference data " +
+      "(below).",
     license: { name: "CC BY 4.0", url: "https://creativecommons.org/licenses/by/4.0/" },
     terms: ["Attribution required. Credited here and in the site footer."],
+  },
+  {
+    id: "pfr",
+    name: "Pro Football Reference (Sports Reference LLC), via nflverse",
+    url: "https://www.pro-football-reference.com/",
+    feeds:
+      "Snap counts. They identify each team's O-line for the O-line continuity adjustment, which reaches every " +
+      "offense efficiency rating and, through the opponent adjustment, every defense rating. They also show " +
+      "when a player ESPN still lists as out has played since, which clears him from the availability counts.",
+    license: { name: "Sports Reference Terms of Use", url: "https://www.sports-reference.com/termsofuse.html" },
+    terms: [
+      'Terms of Use §5 (page "Last Updated: May 19, 2023", read 2026-09-25): sharing or publishing data ' +
+        '"should explicitly credit SRL as the source of the data to the maximum extent possible".',
+      "Credited here, in the site footer, and under each block whose values use it.",
+      "Fetched only as nflverse's published release files (tag snap_counts), never from Sports Reference's " +
+        "own sites.",
+      "A takedown request from Sports Reference is honored immediately.",
+    ],
   },
   {
     id: "odds_api",
@@ -144,11 +173,11 @@ const ENVIRONMENT: Record<string, SourceId[]> = {
 export function sourcesFor(sector: string, signal: string): SourceId[] | null {
   switch (sector) {
     case "efficiency":
-      return ["nflverse"];
+      return ["nflverse", "pfr"];
     case "market":
       return ["odds_api"];
     case "availability":
-      return ["espn", "sleeper", "nflverse"];
+      return ["espn", "sleeper", "nflverse", "pfr"];
     case "environment":
       return ENVIRONMENT[signal] ?? null;
     default:

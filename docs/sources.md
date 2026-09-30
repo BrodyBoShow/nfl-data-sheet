@@ -51,6 +51,11 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
       "Start blocker".
     - **Unblocks** the P7 web player view (step 9), which must carry the attribution
       above.
+    - **Already live before step 9 (found and fixed 2026-09-30).** Efficiency's O-line
+      continuity adjustment and Availability's cluster counts both rest on `snaps`. The
+      site credited them to nflverse only until the fix (`docs/phases/P7.md`, open item
+      10). `/sources` now has a Pro Football Reference entry, and the credit line sits
+      under each block that uses it.
   - **Sports Reference (Pro Football Reference)**,
     https://www.sports-reference.com/termsofuse.html. The page reads "Effective Date:
     October 1, 2004" and "Last Updated: May 19, 2023"; read 2026-09-25.

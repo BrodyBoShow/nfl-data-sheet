@@ -52,7 +52,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/method">Method and backtest</Link>
             <Link href="/sources">Sources and licenses</Link>
             <span>
-              Data: nflverse (CC BY 4.0), The Odds API, Open-Meteo (CC BY 4.0), © OpenStreetMap contributors.
+              Data: nflverse (CC BY 4.0), Pro Football Reference (Sports Reference LLC), The Odds API, Open-Meteo
+              (CC BY 4.0), © OpenStreetMap contributors.
             </span>
             <span>Not affiliated with the NFL.</span>
             <span className="mono">page built {formatEtStamp(new Date())}</span>

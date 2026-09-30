@@ -11,6 +11,7 @@ import { PairingTable } from "@/components/game/pairings";
 import { RawSignals } from "@/components/game/raw-signals";
 import { LowStabilityNote } from "@/components/game/signal-cells";
 import { TeamSignals } from "@/components/game/team-signals";
+import { SnapCountsCredit } from "@/components/marks";
 import { backtest } from "@/lib/backtest";
 import type { Card } from "@/lib/card";
 import { card as loadCard, game, gameSignals, isGameId } from "@/lib/db";
@@ -57,6 +58,7 @@ function CardBody({ card, asOf, now }: { card: Card; asOf: string; now: Date }) 
   const kickedOff = new Date(card.identity.kickoff) <= now;
   const { home_team: home, away_team: away } = card.identity;
   const pairs = card.context.efficiency_pairings;
+  const showArithmetic = lines !== null && card.projection !== null;
   return (
     <>
       <p className="t-small mono">
@@ -101,6 +103,9 @@ function CardBody({ card, asOf, now }: { card: Card; asOf: string; now: Date }) 
             [r.subject, r.opponent].some((b) => b != null && b.value !== null && isLowStability(b.stability)),
           )}
         />
+        {/* The arithmetic carries the snap-count credit when it renders; a card without a
+            projection still shows efficiency values here. */}
+        {showArithmetic ? null : <SnapCountsCredit use="efficiency" />}
       </section>
       <MarketDetail card={card} />
     </>

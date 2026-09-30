@@ -1,3 +1,4 @@
+import { SnapCountsCredit } from "@/components/marks";
 import type { SignalRowT } from "@/lib/db";
 import { anyLeaguePct, isLowStability } from "@/lib/game";
 import { signalLabel } from "@/lib/signal-labels";
@@ -46,6 +47,7 @@ export function TeamSignals({ rows, home, away }: { rows: SignalRowT[]; home: st
         </table>
       </div>
       <LowStabilityNote show={eff.some((r) => r.value !== null && isLowStability(r.stability))} />
+      <SnapCountsCredit use="efficiency" />
     </section>
   );
 }

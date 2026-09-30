@@ -1,3 +1,4 @@
+import { SnapCountsCredit } from "@/components/marks";
 import type { Card } from "@/lib/card";
 import { formatFixed, formatSpread } from "@/lib/format";
 import { formatSignalValue, signalLabel } from "@/lib/signal-labels";
@@ -95,6 +96,7 @@ export function Arithmetic({ card, projection }: { card: Card; projection: Proje
         Inputs are season-to-date and opponent-adjusted, entering this week. Centered = value
         minus that week&apos;s league mean.
       </p>
+      <SnapCountsCredit use="efficiency" />
     </section>
   );
 }

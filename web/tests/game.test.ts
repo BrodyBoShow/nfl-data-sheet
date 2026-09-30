@@ -16,6 +16,7 @@ import { backtest } from "../lib/backtest";
 import { parseCard, type Card, type CardPairing } from "../lib/card";
 import { buildLines, edgeSpreadText, edgeTotalText, gameStatus, isLowStability, validationTag } from "../lib/game";
 import { formatSignalValue, signalLabel } from "../lib/signal-labels";
+import { SOURCES, sourcesFor } from "../lib/sources";
 import { parseTeamAliases } from "../scripts/team-aliases.mjs";
 import lockedRow from "./fixtures/card_2026_03_ATL_GB.json";
 import provisionalRow from "./fixtures/card_2026_03_ARI_SF.json";
@@ -199,6 +200,28 @@ describe("context blocks", () => {
     expect(h).toContain("data-low-stability-note");
     const withPct = html(createElement(TeamSignals, { rows: [...rows.slice(0, 2), row("CHI", "epa_per_play_def", 0.6, 40)], home: "LV", away: "CHI" }));
     expect(withPct).toContain("data-pct");
+  });
+
+  it("snap counts → SRL credit under the arithmetic, the availability block and the no-card table", () => {
+    const credited = (h: string) =>
+      h.includes('data-credit="pfr"') &&
+      h.includes('href="/sources#pfr"') &&
+      text(h).includes("Pro Football Reference (Sports Reference LLC), via nflverse");
+    expect(credited(html(createElement(Arithmetic, { card: locked, projection: locked.projection! })))).toBe(true);
+    expect(credited(html(createElement(Availability, { card: locked })))).toBe(true);
+    const row = {
+      season: 2020, week: 5, game_id: null, team: "CHI", player_id: null, sector: "efficiency",
+      signal: "epa_per_play_off", value: 0.01, league_pct: null, sample_n: 3, stability: 0.5,
+      as_of: "2020-10-01T00:00:00Z", inputs_version: "x",
+    };
+    expect(credited(html(createElement(TeamSignals, { rows: [row], home: "LV", away: "CHI" })))).toBe(true);
+  });
+
+  it("efficiency and availability map to the PFR source, which quotes SRL's credit clause", () => {
+    expect(sourcesFor("efficiency", "epa_per_play_off")).toContain("pfr");
+    expect(sourcesFor("availability", "ol_cluster_count")).toContain("pfr");
+    const pfr = SOURCES.find((s) => s.id === "pfr");
+    expect(pfr?.terms.join(" ")).toContain("should explicitly credit SRL as the source of the data");
   });
 
   it("weather shown → Open-Meteo credit on the block and the 10 m wind label", () => {

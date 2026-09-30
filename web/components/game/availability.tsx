@@ -1,3 +1,4 @@
+import { SnapCountsCredit } from "@/components/marks";
 import type { Card } from "@/lib/card";
 
 // Availability counts (docs/phases/P6.md §6, context). The Availability analyst writes a
@@ -41,6 +42,7 @@ export function Availability({ card }: { card: Card }) {
       <p className="legend t-small ink-2">
         Players listed with an injury designation or as unavailable (suspension, exempt list).
       </p>
+      <SnapCountsCredit use="availability" />
     </section>
   );
 }

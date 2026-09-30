@@ -19,6 +19,25 @@ export function FlipMarker() {
   );
 }
 
+/** The Sports Reference credit, under each block whose values rest on Pro Football
+ *  Reference snap counts (docs/sources.md, nflverse bulk → License: "next to every
+ *  PFR-derived value"). Stated once per block, not per value. Efficiency: the O-line
+ *  continuity adjustment, which reaches defense ratings through the opponent adjustment.
+ *  Availability: a snap clears a player ESPN still lists (availability_impact.py,
+ *  _fetch_last_played). */
+export function SnapCountsCredit({ use }: { use: "efficiency" | "availability" }) {
+  const what =
+    use === "efficiency"
+      ? "Efficiency ratings include an O-line continuity adjustment built from snap counts"
+      : "A player ESPN still lists but who has played since is cleared using snap counts";
+  return (
+    <p className="legend t-small ink-2" data-credit="pfr">
+      {what} by Pro Football Reference (Sports Reference LLC), via nflverse (
+      <Link href="/sources#pfr">sources</Link>).
+    </p>
+  );
+}
+
 /** The validation status that travels with every edge value (§5 device 2). It's part of
  *  the value, not a footnote. It links to the evidence, and its tooltip gives this
  *  card's bucket figures. */
