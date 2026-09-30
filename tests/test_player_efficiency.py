@@ -218,17 +218,49 @@ def test_minimums_per_group():
     assert eff.min_per_game("defense", "DB") == 20
 
 
-def test_defense_percentiles_are_gated():
+def test_defense_percentiles_are_gated_by_source():
+    # P7 step 7 (2026-09-30): PFR-derived defense _pct stays null; player_week-derived ranks.
     snaps = [_snap("D1", S, 1, off=0, de=60), _snap("D2", S, 1, off=0, de=55)]
     pfr = [
         {"player_id": p, "season": S, "week": 1, "stat_type": "def", "def_tackles_combined": t}
         for p, t in (("D1", 6.0), ("D2", 3.0))
     ]
+    zeros = dict.fromkeys(eff._PW_DEF_COLS, 0)
+    pw = [
+        {"player_id": p, "season": S, "week": 1, **zeros, "def_sacks": s}
+        for p, s in (("D1", 1.0), ("D2", 0.0))
+    ]
     pos = [{"player_id": p, "position_group": "LB"} for p in ("D1", "D2")]
-    df = eff.build_eff_rows(_inputs(snaps=snaps, pfr=pfr, positions=pos), S)
+    df = eff.build_eff_rows(_inputs(snaps=snaps, pfr=pfr, pw=pw, positions=pos), S)
     d1 = _row(df, "D1", 1)
     assert d1["tackles_per_snap_game"] == pytest.approx(0.1)  # values are written
-    assert all(d1[f"{m.name}_pct"] is None for m in eff.METRICS if m.family == "defense")
+    defense = [m for m in eff.METRICS if m.family == "defense"]
+    gated = [m for m in defense if m.source in eff.DEFENSE_PCT_GATED_SOURCES]
+    ranked = [m for m in defense if m.source == "def_pw"]
+    assert gated and len(ranked) == 5
+    assert all(d1[f"{m.name}_pct"] is None for m in gated)
+    assert all(d1[f"{m.name}_pct"] is not None for m in ranked)
+    assert d1["sacks_per_snap_pct"] > _row(df, "D2", 1)["sacks_per_snap_pct"]
+
+
+def test_missing_player_week_row_reads_as_zero_but_missing_pfr_row_stays_null():
+    # 1,172 of 1,172 2025 defender-games with no player_week row had no pbp credit on any
+    # play; 59.6% of those with no PFR def row did (P7 step 7).
+    snaps = [_snap("D1", S, 1, off=0, de=40), _snap("D1", S, 2, off=0, de=60)]
+    zeros = dict.fromkeys(eff._PW_DEF_COLS, 0)
+    pw = [{"player_id": "D1", "season": S, "week": 2, **zeros, "def_sacks": 1.0}]
+    pfr = [
+        {"player_id": "D1", "season": S, "week": 2, "stat_type": "def", "def_tackles_combined": 6.0}
+    ]
+    pos = [{"player_id": "D1", "position_group": "DL"}]
+    df = eff.build_eff_rows(_inputs(snaps=snaps, pfr=pfr, pw=pw, positions=pos), S)
+    wk1 = _row(df, "D1", 1)
+    assert wk1["sacks_per_snap_game"] == 0.0  # no player_week row: a sourced zero
+    assert wk1["tackles_per_snap_game"] is None  # no PFR row: unknown, stays null
+    # Week 2's _l4 covers both games: the zero game's snaps count in the denominator.
+    wk2 = _row(df, "D1", 2)
+    assert wk2["sacks_per_snap_l4"] == pytest.approx(1.0 / 100)
+    assert wk2["tackles_per_snap_l4"] == pytest.approx(6.0 / 60)
 
 
 # --- _hist -----------------------------------------------------------------------------

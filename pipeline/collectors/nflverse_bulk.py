@@ -601,6 +601,10 @@ def _aggregate_team_week(pbp: pl.DataFrame) -> pl.DataFrame:
         & (pl.col("play_type") != "no_play")
         & (pl.col("qb_kneel") != 1)
         & (pl.col("qb_spike") != 1)
+        # Two-point tries are excluded, the same expression as _player_play_scope (decided
+        # 2026-09-30, P2 open item 1). They carry a non-null epa, and 2025 had 130 of them
+        # in "plays"/"garbage_time_plays_excluded". No row this filter keeps has a null flag.
+        & (pl.col("two_point_attempt") != 1)
         & pl.col("posteam").is_not_null()
         & pl.col("season_type").is_in(_SEASON_TYPES)
     ).with_columns(
@@ -656,8 +660,15 @@ def _aggregate_team_week(pbp: pl.DataFrame) -> pl.DataFrame:
     # Drive-level outcomes use ALL plays of a drive (not just pass/rush) since
     # drive_play_count/fixed_drive_result are drive-constant fields carried on every play,
     # including field goals/punts. A drive counts if any of its plays are non-garbage.
+    # Except try plays (PAT and two-point, decided 2026-09-30): the try sits inside the 20
+    # (PATs mostly at the 15, two-point tries mostly at the 2), so it set closest_yardline
+    # and made nearly every TD drive a red-zone trip and TD, and
+    # a try alone under a fixed_drive made a phantom drive. Null flags are kept: they're
+    # GAME/END QUARTER/no_play marker rows, which this aggregation always included.
     drive_rows = pbp.filter(
         (pl.col("play_deleted") != 1)
+        & (pl.col("two_point_attempt").fill_null(0) != 1)
+        & (pl.col("extra_point_attempt").fill_null(0) != 1)
         & pl.col("fixed_drive").is_not_null()
         & pl.col("posteam").is_not_null()
         & pl.col("season_type").is_in(_SEASON_TYPES)
@@ -1386,7 +1397,18 @@ class NflverseBulkCollector(Collector):
         building = self._build_set()
         player_pbp = bool(building & {"player_game_pbp", "participation_player_season"})
         for name, required in (
-            ("pbp", {"game_id", "posteam", "defteam", "epa", "success"}),
+            (
+                "pbp",
+                {
+                    "game_id",
+                    "posteam",
+                    "defteam",
+                    "epa",
+                    "success",
+                    "two_point_attempt",
+                    "extra_point_attempt",
+                },
+            ),
             ("pbp", _PBP_PLAYER_REQUIRED if player_pbp else set()),
             ("player_stats", {"player_id", "game_id", "season_type"}),
             ("snap_counts", {"pfr_player_id", "game_id"}),

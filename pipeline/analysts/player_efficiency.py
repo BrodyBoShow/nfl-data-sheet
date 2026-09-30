@@ -60,9 +60,12 @@ PRIMARY_GROUP = {"receiving": "WR", "rushing": "RB", "passing": "QB", "defense":
 MIN_PER_GAME: dict[tuple[str, str], float] = {("rushing", "QB"): 2.0}
 MIN_PER_GAME_DEFAULT = {"receiving": 3.0, "rushing": 6.0, "passing": 15.0, "defense": 20.0}
 
-# Defense percentiles ship only once P7 step 7 settles whether a missing PFR /
-# player_week row means zero (decided 2026-09-29). Values are written; _pct stays null.
-DEFENSE_PCT_GATED = True
+# Defense percentiles are gated by source (P7 step 7, decided 2026-09-30). A missing
+# player_week row reads as zero (1,172 of 1,172 2025 defender-games without one had no pbp
+# credit on any play), so def_pw metrics rank. PFR drops rows at the source for defenders
+# who recorded stats (59.6% of 2025's missing def rows had pbp credits), so neither
+# reading is right and PFR-derived defense _pct stays null. Values are written either way.
+DEFENSE_PCT_GATED_SOURCES = frozenset({"def_pfr", "pfr_def"})
 
 # _hist window: the three completed seasons before the current one (docs/phases/P7.md).
 _HIST_SEASONS = 3
@@ -395,21 +398,22 @@ _K_R: dict[tuple[str, str], tuple[float, float]] = {
     ("targets_per_snap", "DL"): (303, 0.67),
     ("targets_per_snap", "LB"): (76, 0.96),
     ("targets_per_snap", "DB"): (143, 0.87),
-    ("tfl_per_snap", "DL"): (1023, 0.98),
-    ("tfl_per_snap", "LB"): (850, 1.00),
-    ("tfl_per_snap", "DB"): (1574, 0.95),
-    ("sacks_per_snap", "DL"): (688, 1.00),
-    ("sacks_per_snap", "LB"): (332, 1.00),
-    ("sacks_per_snap", "DB"): (15784, 0.00),
-    ("qb_hits_per_snap", "DL"): (262, 0.94),
-    ("qb_hits_per_snap", "LB"): (154, 1.00),
-    ("qb_hits_per_snap", "DB"): (1137, 0.99),
-    ("forced_fumbles_per_snap", "DL"): (9201, 0.00),
-    ("forced_fumbles_per_snap", "LB"): (9201, 0.00),
-    ("forced_fumbles_per_snap", "DB"): (9201, 0.00),
-    ("pass_defended_per_snap", "DL"): (862, 0.79),
-    ("pass_defended_per_snap", "LB"): (2169, 1.00),
-    ("pass_defended_per_snap", "DB"): (1062, 0.98),
+    # player_week numerators: re-estimated 2026-09-30 under the zero reading (P7 step 7).
+    ("tfl_per_snap", "DL"): (827, 0.92),
+    ("tfl_per_snap", "LB"): (859, 1.00),
+    ("tfl_per_snap", "DB"): (1504, 0.91),
+    ("sacks_per_snap", "DL"): (595, 0.96),
+    ("sacks_per_snap", "LB"): (347, 1.00),
+    ("sacks_per_snap", "DB"): (10343, 0.00),
+    ("qb_hits_per_snap", "DL"): (237, 0.92),
+    ("qb_hits_per_snap", "LB"): (163, 0.99),
+    ("qb_hits_per_snap", "DB"): (1287, 1.00),
+    ("forced_fumbles_per_snap", "DL"): (5262, 0.00),
+    ("forced_fumbles_per_snap", "LB"): (5262, 0.00),
+    ("forced_fumbles_per_snap", "DB"): (5262, 0.00),
+    ("pass_defended_per_snap", "DL"): (840, 0.77),
+    ("pass_defended_per_snap", "LB"): (1980, 1.00),
+    ("pass_defended_per_snap", "DB"): (1017, 0.94),
     ("missed_tackle_rate", "DL"): (51, 0.56),
     ("missed_tackle_rate", "LB"): (141, 0.72),
     ("missed_tackle_rate", "DB"): (158, 0.91),
@@ -483,10 +487,13 @@ def _sources(inp: EffInputs) -> dict[str, pl.DataFrame]:
         "ngs_rec": inp.ngs.filter(c("stat_type") == "receiving"),
         "ngs_rush": inp.ngs.filter(c("stat_type") == "rushing"),
         "ngs_pass": inp.ngs.filter(c("stat_type") == "passing"),
-        # Today's rule for a defender's per-snap rates: only games with a row in the
-        # numerator's source. That's a known upward bias, and why defense _pct is gated.
+        # PFR: only games with a PFR def row. That's a known upward bias on every per-snap
+        # rate, and why these metrics' _pct stays gated (DEFENSE_PCT_GATED_SOURCES).
         "def_pfr": snaps_def.join(pfr["def"].drop("defense_snaps", strict=False), on=key),
-        "def_pw": snaps_def.join(inp.player_week, on=key),
+        # player_week: every game with defense snaps, a missing row read as zero.
+        "def_pw": snaps_def.join(inp.player_week, on=key, how="left").with_columns(
+            c(col).fill_null(0) for col in _PW_DEF_COLS
+        ),
     }
     for name in ("ngs_rec", "ngs_rush", "ngs_pass"):
         check_one_game_per_week(out[name], name)
@@ -736,12 +743,10 @@ def _attach_family_columns(rows: pl.DataFrame) -> pl.DataFrame:
 
 def _attach_percentiles(rows: pl.DataFrame) -> pl.DataFrame:
     """`<m>_pct` among players meeting their position group's family minimum per game
-    played. Defense stays null while DEFENSE_PCT_GATED."""
+    played. A metric from a source in DEFENSE_PCT_GATED_SOURCES stays null."""
     specs = []
     elig_exprs = []
     for fam, (prefix, _) in _FAMILY_SAMPLE.items():
-        if fam == "defense" and DEFENSE_PCT_GATED:
-            continue
         minimum = c("position_group").replace_strict(
             {g: v for (f, g), v in MIN_PER_GAME.items() if f == fam},
             default=MIN_PER_GAME_DEFAULT[fam],
@@ -751,7 +756,9 @@ def _attach_percentiles(rows: pl.DataFrame) -> pl.DataFrame:
             (c(f"{prefix}_std").fill_null(0) >= minimum * c("games_std")).alias(f"_elig_{fam}")
         )
         specs += [
-            (f"{m.name}_std", f"_elig_{fam}", f"{m.name}_pct") for m in METRICS if m.family == fam
+            (f"{m.name}_std", f"_elig_{fam}", f"{m.name}_pct")
+            for m in METRICS
+            if m.family == fam and m.source not in DEFENSE_PCT_GATED_SOURCES
         ]
     rows = as_of_percentiles(rows.with_columns(elig_exprs), specs)
     missing = [f"{m.name}_pct" for m in METRICS if f"{m.name}_pct" not in rows.columns]
@@ -982,7 +989,7 @@ class PlayerEfficiencyAnalyst(Analyst):
             "weeks": sorted(df["week"].unique().to_list()),
             "rows": len(self._rows),
             "skipped_not_in_players": unknown,
-            "defense_pct_gated": DEFENSE_PCT_GATED,
+            "defense_pct_gated_sources": sorted(DEFENSE_PCT_GATED_SOURCES),
             "hist_span": df["hist_span"].drop_nulls().first() if df.height else None,
         }
         return df

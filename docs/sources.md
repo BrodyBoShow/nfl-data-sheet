@@ -243,6 +243,19 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     deriving garbage time — there's **no precomputed `garbage_time_play` flag**, contrary
     to what the phase doc's mention of "garbage time filtered" might imply; the filter has
     to be defined from `wp`/`score_differential`/time remaining).
+  - **Try-play flags (verified live 2026-09-30, 2025 pbp, P7 step 7).**
+    `two_point_attempt` and `extra_point_attempt` are both present, and both are in the pbp
+    fixture (3 PAT rows, 0 two-point).
+    - 130 two-point tries (98 pass, 32 run), every one with a non-null `epa`.
+      `yardline_100`: 110 at 2, 18 at 1, one each at 7 and 12 (penalty-moved).
+    - 1,324 PATs: `yardline_100` 15 for 1,296, then 30 (13), 20 (9), 7 (6).
+    - Every try in both sets has a non-null `fixed_drive`.
+    - Both flags are null on the same 1,511 rows: `GAME`, `END QUARTER`, timeout and
+      `no_play` marker rows. None of them is a `pass`/`rush` play that `team_week`'s
+      other conditions keep.
+    - Every try sits under a `fixed_drive`. 3 two-point tries are the only play by their
+      posteam under that `fixed_drive`, with result `Opp touchdown` (a try after a return
+      score).
   - `load_player_stats()` → 19,422 rows × 150 cols/season. Already carries
     `target_share`, `air_yards_share`, `wopr`, `racr`, `pacr`, and per-play-type `epa`
     pre-aggregated to player-week — the Usage analyst mostly reads this directly rather

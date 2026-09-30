@@ -261,6 +261,23 @@ on `opponent_team` for the opponent-adjustment solve. **Added:** Phase 2, 2026.
   "no_play"` plus a `qb_kneel`/`qb_spike` flag check as a safety net (verified live that
   those flags are never actually set on a `pass==1`/`rush==1` row in this data — the net
   only guards against `no_play`, but is kept in case that ever changes).
+- **Try plays are out (decided 2026-09-30, P2 open item 1).** In the collector since
+  2026-09-30; stored `team_week` changes when it's re-staged with the queued re-fit.
+  - **Two-point tries** leave every play count and sum. The expression is the same
+    `two_point_attempt != 1` as `_player_play_scope`, so `team_week` and
+    `player_game_pbp` share one scrimmage scope.
+    - All 130 of 2025's carried a non-null `epa`, and all were counted: 94 in `plays`, 36
+      in `garbage_time_plays_excluded`.
+  - **PAT and two-point tries** leave the drive aggregation too
+    (`two_point_attempt`/`extra_point_attempt`, nulls kept as non-tries).
+    - The try sits inside the 20 (PATs mostly at the 15, two-point tries mostly at the
+      2), so it set `closest_yardline`. That made nearly every TD drive a red-zone trip
+      and a red-zone TD.
+    - A try alone under a `fixed_drive` made a phantom drive.
+    - 2025 REG, before → after: `red_zone_trips` 1,962 → 1,636, `red_zone_tds` 1,193 →
+      921, league rate 0.608 → 0.563, `drives` 5,271 → 5,206, `points` 9,873 → 9,825.
+  - Null flags are marker rows (`GAME`, `END QUARTER`, `no_play`: 1,511 in 2025). None
+    reaches the scrimmage scope, and the drive aggregation keeps them as before.
 - **Garbage time is time-aware**, not a single WP threshold applied to the whole game —
   a flat threshold triggers as early as the 2nd quarter of a blowout (verified live: one
   team's 51 eligible plays got cut to 13 this way). `_garbage_time_expr()`:
@@ -970,12 +987,19 @@ the numerator, denominator, and source differ.
         get a derived label.
       - DL is single-peaked (mode 15–25 per game played). LB is flat from 0 to 65.
       - Moot until the defense gate below clears.
-  - **Defense rate percentiles are gated (decided 2026-09-29, user).** No defense-family
-    `_pct` ships until the P7 step 7 missing-row question is resolved: when a defender
-    with snaps has no `pfr_advstats` / `player_week` row, did he record zero, or is the
-    row just absent?
-    - Known bias until then: under the null rule, the per-snap denominator counts only
-      the games where the defender recorded a stat.
+  - **Defense rate percentiles are gated by source (decided 2026-09-30, user; P7 step 7
+    measured the missing-row question on 2025).**
+    - **`player_week`-derived (`tfl`, `sacks`, `qb_hits`, `forced_fumbles`,
+      `pass_defended` per snap): ungated.** A missing row reads as zero.
+      - 1,172 of 1,172 defender-games with no row had no pbp credit on any play,
+        special teams included (Wilson 95% lower bound 99.67%).
+      - Where a row exists, pbp matches it exactly on four of the five numerators, and on
+        forced fumbles in 99.83% of rows.
+    - **`pfr_advstats`-derived (every other defense metric): gated, permanently as far
+      as this source goes.** Neither reading is correct.
+      - Read as zero, it drops 12.4% of 2025's pbp defensive tackles.
+      - Present-only inflates every per-snap rate, because the denominator counts only
+        the games with a row.
     - Usage and offense-family rates are not gated.
   - **Direction-neutral:** a high `stuff_rate_pct` is a high stuff rate. The display
     decides which way is good.
@@ -1190,20 +1214,33 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
   a free in-season source. **Minimum for pct:** 20 defensive snaps per game played, a
   guess in every group (DB's 2025 low point isn't reproduced 2013–2025). See the `_pct`
   rules above.
-- **Percentiles gated (decided 2026-09-29, user).** No defense `_pct` until P7 step 7
-  settles whether a missing `pfr_advstats` / `player_week` row means zero.
-  - Until then, the denominator counts only games where the defender recorded a stat,
-    which is a known upward bias on every per-snap rate.
-  - The values themselves are still written.
+- **Percentiles gated by source (decided 2026-09-30, user; P7 step 7).**
+  - **`player_week` numerators: a missing row is 0,** and these five metrics rank. Their
+    per-snap denominator is every game with defense snaps.
+  - **`pfr_advstats` numerators: `_pct` stays null.** Their denominator counts only games
+    with a PFR def row, which is a known upward bias on every per-snap rate. (`snaps`,
+    the denominator, is PFR-sourced too, but it's complete: the gap is `pfr_advstats`
+    only.)
+    - It's a source gap, not a collector bug. The raw nflverse 2025 def file has 7,926
+      rows, exactly what's staged.
+    - 2,889 of the 3,153 missing 2025 rows belong to players with PFR def rows in other
+      games. Only 3 team-games (all week 13) are missing entirely.
+    - **The zero rate falls with snaps.** Of missing rows, 75–84% had zero pbp credits at
+      1–9 defensive snaps, and 0–7% at 40+.
+  - The values themselves are still written in both cases.
+  - **The family headline, `tackles_per_snap`, is PFR-derived.** So `def_stability`
+    (headline-based) still rests on a gated metric. A pbp defender role is filed as a
+    decision (`docs/phases/P7.md`, open item 9).
 - The PFR allowed stats are **PFR's nearest-defender charting on targeted plays, not
   coverage assignments** (`docs/phases/P7.md`, "Coverage: who covered whom"). They have
   no untargeted snaps and no receiver identity.
-- **k, r:** per metric × group, recorded 2026-09-29 in "k and r by metric and position
-  group" below. They're estimated under today's rule: games with a PFR / `player_week`
-  row only.
-  - **They move when step 7 answers the missing-row question.** Re-estimate then. For
-    `tackles_per_snap`, missing read as zero vs present rows only: DL k0 322 vs 378, LB
-    88 vs 93, DB 322 vs 265.
+- **k, r:** per metric × group, in "k and r by metric and position group" below.
+  - The PFR-derived rows are estimated on present rows only (recorded 2026-09-29).
+  - The five `player_week` rows were re-estimated 2026-09-30 under the zero reading.
+    - k moved, for example DL `tfl` 1023 → 827 and `sacks` 688 → 595.
+    - Every group kept its k basis (pinned or judgment).
+  - For `tackles_per_snap`, missing read as zero vs present rows only gives DL k0 322 vs
+    378, LB 88 vs 93, DB 322 vs 265. Moot while PFR stays gated.
   - `forced_fumbles_per_snap` and `int_rate_on_targets` can't be pinned in any group.
 - **Added:** P7, 2026-09-26 (drafted).
 
@@ -1241,8 +1278,9 @@ PFR rows for the `_hist` seasons, and L2 retention keeps `pfr_advstats` only for
 - **r_corr is the attenuated comparison only. It's never an input.**
 - **Seasons (pairs):** the estimation span and the count of adjacent-season player
   pairs.
-- **Defense:** estimated under today's missing-row rule (present rows only). Re-estimate
-  after P7 step 7.
+- **Defense:** PFR-derived rows are present-only. The five `player_week` rows use the zero
+  reading, re-estimated 2026-09-30 (P7 step 7). `recommend` picks the reading per metric
+  (`ZERO_READING`).
 - **Groups not listed** borrow the family's primary group (receiving WR, rushing RB,
   passing QB, defense DB).
 
@@ -1424,8 +1462,10 @@ PFR rows for the `_hist` seasons, and L2 retention keeps `pfr_advstats` only for
 | `aggressiveness` | QB | 387 | pinned | 0.77 | r_slope | 0.37 | 2016-2025 (388) |
 | `avg_air_yards_to_sticks` | QB | 258 | pinned | 0.64 | r_slope | 0.33 | 2016-2025 (388) |
 
-**Defense** (per-snap rates estimated on games with a PFR / `player_week` row: today's
-rule, which is gated)
+**Defense.** The PFR-derived rows are estimated on games with a PFR def row (present
+only, `_pct` gated). The five `player_week` rows (`tfl`, `sacks`, `qb_hits`,
+`forced_fumbles`, `pass_defended`) were re-estimated 2026-09-30 under the zero reading,
+over every game with defense snaps (P7 step 7). Their k basis is unchanged in every group.
 
 | Metric | Group | k | k basis | r | r basis | r_corr (attenuated) | Seasons (pairs) |
 |---|---|---|---|---|---|---|---|
@@ -1441,21 +1481,21 @@ rule, which is gated)
 | `targets_per_snap` | DL | 303 | pinned | 0.67 | r_slope | 0.32 | 2018-2025 (1482) |
 | `targets_per_snap` | LB | 76 | pinned | 0.96 | r_slope | 0.75 | 2018-2025 (1335) |
 | `targets_per_snap` | DB | 143 | pinned | 0.87 | r_slope | 0.62 | 2018-2025 (1895) |
-| `tfl_per_snap` | DL | 1023 | pinned | 0.98 | r_slope | 0.30 | 2013-2025 (2730) |
-| `tfl_per_snap` | LB | 850 | pinned | 1.00 | r_slope | 0.41 | 2013-2025 (2364) |
-| `tfl_per_snap` | DB | 1574 | J: point k0 (interval too wide) | 0.95 | r_slope (k judgment) | 0.26 | 2013-2025 (3281) |
-| `sacks_per_snap` | DL | 688 | pinned | 1.00 | r_slope | 0.39 | 2013-2025 (2730) |
-| `sacks_per_snap` | LB | 332 | pinned | 1.00 | r_slope | 0.57 | 2013-2025 (2364) |
-| `sacks_per_snap` | DB | 15784 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.23 | 2013-2025 (3281) |
-| `qb_hits_per_snap` | DL | 262 | pinned | 0.94 | r_slope | 0.54 | 2013-2025 (2730) |
-| `qb_hits_per_snap` | LB | 154 | pinned | 1.00 | r_slope | 0.69 | 2013-2025 (2364) |
-| `qb_hits_per_snap` | DB | 1137 | J: point k0 (interval too wide) | 0.99 | r_slope (k judgment) | 0.34 | 2013-2025 (3281) |
-| `forced_fumbles_per_snap` | DL | 9201 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.20 | 2013-2025 (2730) |
-| `forced_fumbles_per_snap` | LB | 9201 | J: no detectable signal, DL point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2013-2025 (0) |
-| `forced_fumbles_per_snap` | DB | 9201 | J: no detectable signal, DL point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2013-2025 (0) |
-| `pass_defended_per_snap` | DL | 862 | pinned | 0.79 | r_slope | 0.26 | 2013-2025 (2730) |
-| `pass_defended_per_snap` | LB | 2169 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.26 | 2013-2025 (2364) |
-| `pass_defended_per_snap` | DB | 1062 | pinned | 0.98 | r_slope | 0.35 | 2013-2025 (3281) |
+| `tfl_per_snap` | DL | 827 | pinned | 0.92 | r_slope | 0.33 | 2013-2025 (2842) |
+| `tfl_per_snap` | LB | 859 | pinned | 1.00 | r_slope | 0.39 | 2013-2025 (2467) |
+| `tfl_per_snap` | DB | 1504 | J: point k0 (interval too wide) | 0.91 | r_slope (k judgment) | 0.26 | 2013-2025 (3419) |
+| `sacks_per_snap` | DL | 595 | pinned | 0.96 | r_slope | 0.41 | 2013-2025 (2842) |
+| `sacks_per_snap` | LB | 347 | pinned | 1.00 | r_slope | 0.56 | 2013-2025 (2467) |
+| `sacks_per_snap` | DB | 10343 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.23 | 2013-2025 (3419) |
+| `qb_hits_per_snap` | DL | 237 | pinned | 0.92 | r_slope | 0.57 | 2013-2025 (2842) |
+| `qb_hits_per_snap` | LB | 163 | pinned | 0.99 | r_slope | 0.68 | 2013-2025 (2467) |
+| `qb_hits_per_snap` | DB | 1287 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.34 | 2013-2025 (3419) |
+| `forced_fumbles_per_snap` | DL | 5262 | J: point k0 (interval too wide) | 0.00 | 0: r_slope unstable | 0.20 | 2013-2025 (2842) |
+| `forced_fumbles_per_snap` | LB | 5262 | J: no detectable signal, DL point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2013-2025 (0) |
+| `forced_fumbles_per_snap` | DB | 5262 | J: no detectable signal, DL point k0 (same units) | 0.00 | 0: no detectable signal | n/a | 2013-2025 (0) |
+| `pass_defended_per_snap` | DL | 840 | pinned | 0.77 | r_slope | 0.27 | 2013-2025 (2842) |
+| `pass_defended_per_snap` | LB | 1980 | J: point k0 (interval too wide) | 1.00 | r_slope (k judgment) | 0.27 | 2013-2025 (2467) |
+| `pass_defended_per_snap` | DB | 1017 | pinned | 0.94 | r_slope | 0.35 | 2013-2025 (3419) |
 | `missed_tackle_rate` | DL | 51 | pinned | 0.56 | r_slope | 0.17 | 2018-2025 (1429) |
 | `missed_tackle_rate` | LB | 141 | pinned | 0.72 | r_slope | 0.21 | 2018-2025 (1319) |
 | `missed_tackle_rate` | DB | 158 | pinned | 0.91 | r_slope | 0.21 | 2018-2025 (1872) |

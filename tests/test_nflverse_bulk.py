@@ -174,6 +174,9 @@ def _synthetic_drive_row(
     play_type: str | None = None,
     qb_kneel: int = 0,
     qb_spike: int = 0,
+    two_point_attempt: int | None = 0,
+    extra_point_attempt: int | None = 0,
+    yardline_100: int = 10,
 ) -> dict:
     return {
         "game_id": "2099_01_AA_BB",
@@ -194,10 +197,12 @@ def _synthetic_drive_row(
         "play_type": play_type or ("pass" if is_pass else "run"),
         "qb_kneel": qb_kneel,
         "qb_spike": qb_spike,
+        "two_point_attempt": two_point_attempt,
+        "extra_point_attempt": extra_point_attempt,
         "fixed_drive": fixed_drive,
         "drive_play_count": 1,
         "fixed_drive_result": fixed_drive_result,
-        "yardline_100": 10,
+        "yardline_100": yardline_100,
     }
 
 
@@ -250,6 +255,72 @@ def test_qb_kneel_and_spike_excluded_even_if_pass_rush_flag_ever_lets_them_throu
     )
     team_week = _aggregate_team_week(pbp)
     row = team_week.filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 1
+
+
+def test_two_point_try_excluded_from_plays_like_player_game_pbp():
+    # A two-point try carries pass/rush flags and a non-null epa (all 130 in 2025 did),
+    # so it reached "plays" until 2026-09-30 (P2 open item 1).
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", yardline_100=30),
+            _synthetic_drive_row(1, "Touchdown", two_point_attempt=1, yardline_100=2),
+        ]
+    )
+    row = _aggregate_team_week(pbp).filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["plays"] == 1
+    assert row["pass_plays"] == 1
+    assert row["garbage_time_plays_excluded"] == 0
+
+
+def test_try_plays_dont_make_a_long_td_drive_a_red_zone_trip():
+    # The try sits inside the 20 (PATs mostly at the 15, two-point tries mostly at the 2).
+    # Counting it set closest_yardline, so TD drives read as red-zone trips and TDs: 2025
+    # REG 1,962 trips vs 1,636.
+    pat = {"is_pass": False, "extra_point_attempt": 1, "yardline_100": 15}
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", yardline_100=60),
+            {**_synthetic_drive_row(1, "Touchdown", **pat), "rush": 0, "play_type": "extra_point"},
+            _synthetic_drive_row(2, "Touchdown", yardline_100=60),
+            _synthetic_drive_row(2, "Touchdown", two_point_attempt=1, yardline_100=2),
+        ]
+    )
+    row = _aggregate_team_week(pbp).filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["drives"] == 2
+    assert row["red_zone_trips"] == 0
+    assert row["red_zone_tds"] == 0
+    assert row["points"] == 12
+
+
+def test_a_try_alone_under_a_fixed_drive_is_not_a_drive():
+    # After a return TD the try can sit under a fixed_drive with no other play by that
+    # posteam: a phantom drive (65 in 2025, 1.2% of points_per_drive's denominator).
+    pbp = pl.DataFrame(
+        [
+            _synthetic_drive_row(1, "Touchdown", yardline_100=60),
+            {
+                **_synthetic_drive_row(2, "Opp touchdown", is_pass=False, extra_point_attempt=1),
+                "rush": 0,
+                "play_type": "extra_point",
+            },
+        ]
+    )
+    row = _aggregate_team_week(pbp).filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["drives"] == 1
+
+
+def test_null_try_flags_keep_marker_rows_in_drives():
+    # GAME/END QUARTER/no_play marker rows have null try flags (1,511 in 2025). The drive
+    # filter keeps them, as it always did; only a flag of 1 marks a try.
+    marker = {
+        **_synthetic_drive_row(2, "Punt", two_point_attempt=None, extra_point_attempt=None),
+        "pass": 0,
+        "play_type": None,
+    }
+    pbp = pl.DataFrame([_synthetic_drive_row(1, "Touchdown"), marker])
+    row = _aggregate_team_week(pbp).filter(pl.col("team") == "AA").to_dicts()[0]
+    assert row["drives"] == 2
     assert row["plays"] == 1
 
 

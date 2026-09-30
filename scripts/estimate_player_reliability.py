@@ -660,13 +660,36 @@ PARENT = {
     "epa_per_dropback_play_action": "epa_per_dropback",
     "epa_per_dropback_vs_blitz": "epa_per_dropback",
 }
+# Defense metrics whose registry reading is [zero], a missing row read as 0 (P7 step 7,
+# decided 2026-09-30): player_week's numerators, where 1,172 of 1,172 2025 defender-games
+# without a row had no pbp credit. PFR's stay [present]: it drops rows at the source.
+ZERO_READING = frozenset(
+    {
+        "tfl_per_snap",
+        "sacks_per_snap",
+        "qb_hits_per_snap",
+        "forced_fumbles_per_snap",
+        "pass_defended_per_snap",
+    }
+)
 PIN_K_RATIO = 2.0  # k0's 90% interval within 2x
 R_SLOPE_STABLE = 1.5  # r_slope's 90% upper bound; above it the slope is unstable
 FTN_METRICS_REVISIT = "3 season pairs, revisit at 5+"
 
 
 def _registry_name(metric: str) -> str:
-    return metric.replace("[present]", "")
+    return metric.replace("[present]", "").replace("[zero]", "")
+
+
+def _is_registry_reading(metric: str) -> bool:
+    """The one estimate row per metric the registry uses: [zero] for ZERO_READING,
+    [present] for every other two-reading metric, and the only row otherwise."""
+    name = _registry_name(metric)
+    if "[zero]" in metric:
+        return name in ZERO_READING
+    if "[present]" in metric:
+        return name not in ZERO_READING
+    return True
 
 
 def _k_round(k: float) -> float:
@@ -674,13 +697,14 @@ def _k_round(k: float) -> float:
 
 
 def recommend() -> None:
-    e = pl.read_csv(CACHE / "estimates.csv", infer_schema_length=None).filter(
-        ~c("metric").str.contains(r"\[zero\]")
-    )
+    e = pl.read_csv(CACHE / "estimates.csv", infer_schema_length=None)
+    e = e.filter(pl.Series([_is_registry_reading(m) for m in e["metric"]]))
     d = _load()
     src = _sources(d)
     specs = {
-        (fam, _registry_name(m)): (source, num, den) for fam, m, source, num, den in _metrics()
+        (fam, _registry_name(m)): (source, num, den)
+        for fam, m, source, num, den in _metrics()
+        if _is_registry_reading(m)
     }
 
     def share(family: str, metric: str, parent: str, group: str, seasons: str) -> float:
