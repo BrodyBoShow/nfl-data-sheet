@@ -92,6 +92,9 @@ flowchart TB
   - **Dispatcher**: one GitHub Actions cron every ~10 min, reads the schedule/game state
     and `agent_runs`, triggers only what the calendar (see below) needs. Triggers
     nothing in idle windows.
+    - **As observed:** the cron is set to every 15 min (96 a day). It actually fires about
+      5.7 times a day (~6%), with gaps up to ~8 h (filed 2026-10-01 in
+      `docs/phases/P8.md`).
   - **ID spine**: canonical keys for games, teams, players, and a provider ID crosswalk
     (gsis ↔ ESPN ↔ Sleeper ↔ PFR). Every table foreign-keys here. Also fills in
     `player_id_crosswalk.sleeper_id` gaps (fill-null-only) from Sleeper's own
