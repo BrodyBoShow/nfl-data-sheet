@@ -34,7 +34,7 @@ from pipeline.collectors.nflverse_bulk import (
     _garbage_time_expr,
     _player_play_scope,
 )
-from pipeline.core.base import RunContext
+from pipeline.core.base import RunContext, WorkResult
 from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -819,6 +819,11 @@ class _FakeNflverse:
         self.freshness: dict[str, str] = {}
         self.calls: list[tuple[str, list[int] | int]] = []
         self.upserted: dict[str, int] = {}
+        # filter_changed: rows offered per table, and how many leading rows to treat as
+        # unchanged (dropped) per table. Nothing is dropped unless a test says so.
+        self.offered: dict[str, int] = {}
+        self.unchanged: dict[str, int] = {}
+        self.result: WorkResult | None = None
         raw = _load_raw()
 
         def loader(name: str, frame):
@@ -849,7 +854,12 @@ class _FakeNflverse:
         monkeypatch.setattr(
             nflverse_bulk, "set_last_value", lambda c, k, v: self.freshness.__setitem__(k, v)
         )
-        monkeypatch.setattr(nflverse_bulk, "filter_changed", lambda c, t, pk, rows: rows)
+
+        def filter_changed(conn, table, pk_cols, rows):
+            self.offered[table] = self.offered.get(table, 0) + len(rows)
+            return rows[self.unchanged.get(table, 0) :]
+
+        monkeypatch.setattr(nflverse_bulk, "filter_changed", filter_changed)
         monkeypatch.setattr(nflverse_bulk, "upsert_rows", upsert)
         monkeypatch.setattr(nflverse_bulk, "_resolve_pfr_player_ids", lambda c, ids: {})
 
@@ -860,6 +870,8 @@ class _FakeNflverse:
         """One run as Collector.run drives it. Returns what was stored, or None if skipped."""
         self.calls.clear()
         self.upserted.clear()
+        self.offered.clear()
+        self.result = None
         ctx = RunContext(
             season=season,
             week=3,
@@ -871,7 +883,7 @@ class _FakeNflverse:
         if not collector.should_run(ctx):
             return None
         validated = collector.validate(collector.fetch(ctx))
-        collector.store(ctx, validated)
+        self.result = collector.store(ctx, validated)
         return set(validated)
 
 
@@ -972,6 +984,44 @@ def test_freshness_season_rollover_refetches_participation_without_a_tag_change(
     )
 
 
+def test_run_meta_logs_live_tags_and_which_datasets_own_key_moved(fake):
+    """Only pbp moved, so every core table is rebuilt (all-or-nothing), but only the two
+    built from pbp report their own key moving. That split is what the analysts'
+    freshness-gate decision needs (docs/phases/P7.md, step 9)."""
+    fake.live["pbp"] = "t2"
+    assert fake.cycle(NflverseBulkCollector()) == _CORE
+    assert fake.result is not None
+    logged = fake.result.meta["datasets"]
+    assert set(logged) == _CORE
+    assert logged["team_week"] == {
+        "live": {"pbp": "t2"},
+        "key_moved": True,
+        "rows_changed": fake.upserted["team_week"],
+    }
+    assert logged["player_game_pbp"]["live"] == {"pbp": "t2", "ftn_charting": "t1"}
+    assert logged["player_game_pbp"]["key_moved"] is True
+    for dataset in _CORE - {"team_week", "player_game_pbp"}:
+        assert logged[dataset]["key_moved"] is False, dataset
+    assert fake.result.meta["pgp_ftn_unmatched_plays"] == 0  # existing meta kept
+
+
+def test_run_meta_rows_changed_is_what_filter_changed_let_through(fake):
+    """rows_changed counts rows after the hash diff, per dataset: a marker that moves with
+    unchanged content must log 0, not the rows fetched."""
+    fake.live["snap_counts"] = "t2"
+    fake.unchanged = {"snaps": 3, "team_week": 10**9}  # 3 snaps rows and all of team_week
+    assert fake.cycle(NflverseBulkCollector()) == _CORE
+    assert fake.result is not None
+    logged = fake.result.meta["datasets"]
+    assert fake.offered["snaps"] > 3
+    assert logged["snaps"]["rows_changed"] == fake.offered["snaps"] - 3
+    assert fake.offered["team_week"] > 0
+    assert logged["team_week"]["rows_changed"] == 0
+    for dataset in _CORE:
+        assert logged[dataset]["rows_changed"] == fake.upserted.get(dataset, 0), dataset
+    assert fake.result.rows_written == sum(d["rows_changed"] for d in logged.values())
+
+
 def test_forced_run_builds_everything_and_records_nothing(monkeypatch):
     fake = _FakeNflverse(monkeypatch, {tag: "t1" for tag in _TAGS})
     collector = NflverseBulkCollector()
@@ -988,3 +1038,7 @@ def test_forced_run_builds_everything_and_records_nothing(monkeypatch):
     assert set(validated) == _CORE | {"participation_player_season"}
     assert fake.freshness == {}
     assert result.meta["pgp_ftn_unmatched_plays"] == 0
+    # No live timestamps and no staleness decision on a forced run: logged as unknown.
+    for logged in result.meta["datasets"].values():
+        assert logged["key_moved"] is None
+        assert set(logged["live"].values()) == {None}

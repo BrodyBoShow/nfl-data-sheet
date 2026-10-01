@@ -1306,6 +1306,9 @@ class NflverseBulkCollector(Collector):
         self._due: set[str] | None = None
         self._building: set[str] | None = None
         self._run_meta: dict[str, Any] = {}
+        # Per dataset, whether its own stored key differed from live (should_run). Empty
+        # on a forced run.
+        self._key_moved: dict[str, bool] = {}
         self.seasons_override = seasons_override
         self.datasets = datasets
 
@@ -1350,15 +1353,21 @@ class NflverseBulkCollector(Collector):
             tag: _fetch_timestamp(tag)
             for tag in sorted({t for d in active for t in _DATASET_SOURCES[d]})
         }
+        # Every dataset's own staleness, not short-circuited: store reports it per dataset
+        # (`key_moved` in the run meta), since a core table can be rebuilt on a tick when
+        # only another core table's key moved.
+        self._key_moved = {d: self._is_stale(ctx, d) for d in sorted(active)}
         core = active - _INDEPENDENTLY_GATED
         due: set[str] = set()
-        if any(self._is_stale(ctx, d) for d in sorted(core)):
+        if any(self._key_moved[d] for d in core):
             due |= core
-        due |= {d for d in active & _INDEPENDENTLY_GATED if self._is_stale(ctx, d)}
+        due |= {d for d in active & _INDEPENDENTLY_GATED if self._key_moved[d]}
         self._due = due
         return bool(due)
 
     def fetch(self, ctx: RunContext) -> dict[str, Any]:
+        if self._due is None:  # forced: should_run didn't decide, so nothing is "moved"
+            self._key_moved = {}
         building = self._due if self._due is not None else self._active_datasets()
         self._building, self._due = building, None
         seasons = self._fetch_seasons(ctx)
@@ -1458,7 +1467,9 @@ class NflverseBulkCollector(Collector):
 
     def store(self, ctx: RunContext, validated: dict[str, pl.DataFrame]) -> WorkResult:
         conn = ctx.conn
-        total_written = 0
+        # Rows changed per dataset: each upsert gets only filter_changed's output and
+        # returns its length, so this is what actually changed, not what was fetched.
+        written: dict[str, int] = {}
 
         if "player_week" in validated:
             player_week_rows = [
@@ -1472,7 +1483,7 @@ class NflverseBulkCollector(Collector):
             player_week_rows = filter_changed(
                 conn, "player_week", ["player_id", "game_id"], player_week_rows
             )
-            total_written += upsert_rows(
+            written["player_week"] = upsert_rows(
                 conn,
                 "player_week",
                 player_week_rows,
@@ -1487,7 +1498,7 @@ class NflverseBulkCollector(Collector):
                 for r in validated["team_week"].to_dicts()
             ]
             team_week_rows = filter_changed(conn, "team_week", ["game_id", "team"], team_week_rows)
-            total_written += upsert_rows(
+            written["team_week"] = upsert_rows(
                 conn,
                 "team_week",
                 team_week_rows,
@@ -1520,7 +1531,7 @@ class NflverseBulkCollector(Collector):
             ngs_rows = filter_changed(
                 conn, "ngs", ["player_id", "season", "week", "season_type", "stat_type"], ngs_rows
             )
-            total_written += upsert_rows(
+            written["ngs"] = upsert_rows(
                 conn,
                 "ngs",
                 ngs_rows,
@@ -1539,7 +1550,7 @@ class NflverseBulkCollector(Collector):
                 for r in validated["ftn"].to_dicts()
             ]
             ftn_rows = filter_changed(conn, "ftn", ["game_id", "play_id"], ftn_rows)
-            total_written += upsert_rows(
+            written["ftn"] = upsert_rows(
                 conn,
                 "ftn",
                 ftn_rows,
@@ -1577,7 +1588,7 @@ class NflverseBulkCollector(Collector):
             pfr_rows = filter_changed(
                 conn, "pfr_advstats", ["game_id", "pfr_player_id", "stat_type"], pfr_rows
             )
-            total_written += upsert_rows(
+            written["pfr_advstats"] = upsert_rows(
                 conn,
                 "pfr_advstats",
                 pfr_rows,
@@ -1621,7 +1632,7 @@ class NflverseBulkCollector(Collector):
                     )
                 )
             snap_rows = filter_changed(conn, "snaps", ["game_id", "pfr_player_id"], snap_rows)
-            total_written += upsert_rows(
+            written["snaps"] = upsert_rows(
                 conn,
                 "snaps",
                 snap_rows,
@@ -1643,7 +1654,7 @@ class NflverseBulkCollector(Collector):
             depth_rows = filter_changed(
                 conn, "depth", ["team", "pos_grp", "pos_abb", "pos_rank"], depth_rows
             )
-            total_written += upsert_rows(
+            written["depth"] = upsert_rows(
                 conn,
                 "depth",
                 depth_rows,
@@ -1655,7 +1666,7 @@ class NflverseBulkCollector(Collector):
             )
 
         if "player_game_pbp" in validated:
-            total_written += _upsert_staged(
+            written["player_game_pbp"] = _upsert_staged(
                 conn,
                 "player_game_pbp",
                 validated["player_game_pbp"],
@@ -1665,7 +1676,7 @@ class NflverseBulkCollector(Collector):
             )
 
         if "participation_player_season" in validated:
-            total_written += _upsert_staged(
+            written["participation_player_season"] = _upsert_staged(
                 conn,
                 "participation_player_season",
                 validated["participation_player_season"],
@@ -1687,4 +1698,18 @@ class NflverseBulkCollector(Collector):
             if dataset in _BUILT_FROM_GATED:
                 set_last_value(conn, f"nflverse:{dataset}", self._built_from(dataset, ctx))
 
-        return WorkResult(total_written, dict(self._run_meta))
+        # Per-dataset log for the analysts' freshness-gate decision (docs/phases/P7.md, step
+        # 9): does a tag move without its content changing? `live` is each source tag's
+        # timestamp.json value (None on a forced run), `key_moved` whether this dataset's
+        # own stored key differed from live (None when should_run didn't decide), and
+        # `rows_changed` the rows filter_changed let through.
+        meta = dict(self._run_meta)
+        meta["datasets"] = {
+            dataset: {
+                "live": {t: self._live_timestamps.get(t) for t in _DATASET_SOURCES[dataset]},
+                "key_moved": self._key_moved.get(dataset),
+                "rows_changed": written.get(dataset, 0),
+            }
+            for dataset in sorted(validated)
+        }
+        return WorkResult(sum(written.values()), meta)
