@@ -1,4 +1,4 @@
-// The read contract (docs/phases/P6.md §2c). Every query the app makes is in this file,
+// The read contract (docs/phases/P6.md §2c, Q1–Q8). Every query the app makes is in this file,
 // and this is the only module that reads SUPABASE_* or calls fetch (enforced by
 // tests/read-boundary.test.ts).
 //
@@ -91,6 +91,103 @@ const SignalRow = z.object({
   as_of: z.string(),
   inputs_version: z.string(),
 });
+
+// Q7/Q8 (P7 step 9, migration 0033): exactly the columns the players section shows. The
+// request's `select=` is built from these keys, so the payload is what's parsed, nothing
+// more. A null name or position means players had no row for the id (never guessed).
+const num = z.number().nullable();
+const count = z.int().nullable();
+const PlayerIdentity = {
+  player_id: z.string(),
+  display_name: z.string().nullable(),
+  position: z.string().nullable(),
+  position_group: z.string().nullable(),
+  team: z.string(),
+  week: z.int(),
+};
+
+const PlayerUsageRow = z.object({
+  ...PlayerIdentity,
+  usage_games_std: count,
+  off_snap_share_std: num,
+  off_snap_share_game: num,
+  target_share_std: num,
+  target_share_game: num,
+  air_yards_share_std: num,
+  air_yards_share_game: num,
+  carry_share_std: num,
+  carry_share_game: num,
+  // Season only (user, 2026-10-01): a single-game red-zone share rests on one or two
+  // touches and carries no stability, so the _game columns aren't read.
+  rz_target_share_std: num,
+  rz_carry_share_std: num,
+  def_snap_share_std: num,
+});
+
+const PlayerEffRow = z.object({
+  ...PlayerIdentity,
+  pass_dropbacks_std: count,
+  pass_dropbacks_l4: count,
+  pass_stability: num,
+  epa_per_dropback_std: num,
+  epa_per_dropback_pct: num,
+  epa_per_dropback_l4: num,
+  dropback_success_rate_std: num,
+  cpoe_std: num,
+  pass_adot_std: num,
+  sack_rate_std: num,
+  pressure_rate_std: num,
+  avg_time_to_throw_std: num,
+  scramble_rate_std: num,
+  rush_carries_std: count,
+  rush_carries_l4: count,
+  rush_stability: num,
+  epa_per_carry_std: num,
+  epa_per_carry_pct: num,
+  epa_per_carry_l4: num,
+  rush_success_rate_std: num,
+  stuff_rate_std: num,
+  rush_explosive_rate_std: num,
+  yards_before_contact_per_carry_std: num,
+  rec_targets_std: count,
+  rec_targets_l4: count,
+  rec_stability: num,
+  epa_per_target_std: num,
+  epa_per_target_pct: num,
+  epa_per_target_l4: num,
+  rec_success_rate_std: num,
+  yards_per_target_std: num,
+  rec_adot_std: num,
+  yac_oe_per_reception_std: num,
+  avg_separation_std: num,
+  def_snaps_std: count,
+  def_snaps_l4: count,
+  def_stability: num,
+  tackles_per_snap_std: num,
+  tackles_per_snap_pct: num,
+  tackles_per_snap_l4: num,
+  tfl_per_snap_std: num,
+  pressures_per_snap_std: num,
+  sacks_per_snap_std: num,
+  qb_hits_per_snap_std: num,
+  targets_per_snap_std: num,
+  yards_per_target_allowed_std: num,
+  missed_tackle_rate_std: num,
+  hist_span: z.string().nullable(),
+  rec_hist_n: count,
+  pass_hist_n: count,
+  epa_per_target_vs_man_hist: num,
+  epa_per_target_vs_zone_hist: num,
+  target_rate_vs_man_hist: num,
+  target_rate_vs_zone_hist: num,
+  epa_per_dropback_vs_man_hist: num,
+  epa_per_dropback_vs_zone_hist: num,
+});
+
+export type PlayerUsage = z.infer<typeof PlayerUsageRow>;
+export type PlayerEff = z.infer<typeof PlayerEffRow>;
+export const PLAYER_USAGE_COLUMNS = Object.keys(PlayerUsageRow.shape) as (keyof PlayerUsage)[];
+export const PLAYER_EFF_COLUMNS = Object.keys(PlayerEffRow.shape) as (keyof PlayerEff)[];
 
 export type Week = z.infer<typeof WeekRow>;
 export type Game = z.infer<typeof GameRow>;
@@ -207,6 +304,42 @@ export async function card(gameId: string): Promise<CardRecord | null> {
   const rows = await select("cards", { game_id: `eq.${gameId}` }, CardRow);
   const row = rows[0];
   return row ? { ...row, card: parseCard(row.card) } : null;
+}
+
+/** Q7/Q8 filter: each player's latest row with week <= asOfWeek, for the two teams
+ *  (docs/phases/P6.md §2b, next_week). `asOfWeek` is the week before the game. */
+function asOfParams(season: number, asOfWeek: number, home: string, away: string, columns: string[]) {
+  checkSeasonWeek(season, asOfWeek);
+  checkTeam(home);
+  checkTeam(away);
+  return {
+    select: columns.join(","),
+    season: `eq.${season}`,
+    team: `in.(${home},${away})`,
+    week: `lte.${asOfWeek}`,
+    or: `(next_week.is.null,next_week.gt.${asOfWeek})`,
+    order: "team.asc,player_id.asc",
+  };
+}
+
+/** Q7: both teams' usage rows as of `asOfWeek` (P7 step 9). */
+export async function gamePlayerUsage(
+  season: number,
+  asOfWeek: number,
+  home: string,
+  away: string,
+): Promise<PlayerUsage[]> {
+  return select("player_usage", asOfParams(season, asOfWeek, home, away, PLAYER_USAGE_COLUMNS), PlayerUsageRow);
+}
+
+/** Q8: both teams' player-efficiency rows as of `asOfWeek` (P7 step 9). */
+export async function gamePlayerEff(
+  season: number,
+  asOfWeek: number,
+  home: string,
+  away: string,
+): Promise<PlayerEff[]> {
+  return select("player_eff", asOfParams(season, asOfWeek, home, away, PLAYER_EFF_COLUMNS), PlayerEffRow);
 }
 
 /** Q6: the signal rows behind one game: both teams' team-week rows (efficiency,

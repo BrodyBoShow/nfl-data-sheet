@@ -1074,6 +1074,14 @@ the numerator, denominator, and source differ.
 `<m>_wow = _game − previous game's _game`. It's null on a player's first game of the
 season, or when either value is null. **Added:** P7, 2026-09-26 (drafted).
 
+**Display (decided 2026-10-01, user, P7 step 9): red-zone shares show season only.**
+`rz_target_share` and `rz_carry_share` appear on the web as `_std` only, never `_game`.
+- A single game's red-zone share rests on one or two touches and carries no stability.
+  It's trivia, not a role signal.
+- This isn't a width fallback. The columns are still stored, and anon can still read
+  them (migration `0033`), but `web/lib/db.ts` doesn't select them.
+- Snap, target, air-yards and carry share show season and last game.
+
 #### Receiving family (`player_eff_week`)
 - **Sample:** `rec_targets_*` = `player_game_pbp.targets`. **Minimum for pct:** 3 targets
   per game played, every group. It's a guess and a judgment call: there's no empirical

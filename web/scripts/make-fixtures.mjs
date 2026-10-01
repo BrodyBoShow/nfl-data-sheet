@@ -5,7 +5,7 @@
 // are exactly what lib/db.ts receives. Reads SUPABASE_URL / SUPABASE_ANON_KEY from the
 // repo-root .env. Writes web/tests/fixtures/*.json.
 //
-// Usage (from web/): node scripts/make-fixtures.mjs
+// Usage (from web/): node scripts/make-fixtures.mjs [--only players]
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,35 @@ const write = (name, data) => {
   writeFileSync(join(out, name), JSON.stringify(data, null, 2) + "\n");
   console.log(`wrote tests/fixtures/${name}`);
 };
+
+// Q7/Q8 shape for ATL@GB (P7 step 9): each player's latest row as of week 2, the week
+// before the game, through the same as-of filter lib/db.ts sends. Trimmed to the top 2
+// players per team and position group by snap share, plus every player whose latest
+// game is before week 2, so each table and the "Last wk" marker are exercised.
+// `--only players` captures just these (added 2026-10-01, once week 3 had been played and
+// the card fixtures below could no longer be re-captured as they were).
+{
+  const asOf = { season: "eq.2026", week: "lte.2", or: "(next_week.is.null,next_week.gt.2)", team: "in.(ATL,GB)" };
+  const usage = await get("player_usage", { ...asOf, order: "team.asc,player_id.asc" });
+  const eff = await get("player_eff", { ...asOf, order: "team.asc,player_id.asc" });
+  const snapShare = (r) => Math.max(r.off_snap_share_std ?? 0, r.def_snap_share_std ?? 0);
+  const keep = new Set();
+  const groups = new Map();
+  for (const r of usage) {
+    const k = `${r.team}/${r.position_group}`;
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+    if (r.week < 2) keep.add(r.player_id);
+  }
+  for (const rows of groups.values()) {
+    rows.sort((a, b) => snapShare(b) - snapShare(a)).slice(0, 2).forEach((r) => keep.add(r.player_id));
+  }
+  const drop = ({ next_week, ...r }) => r; // the filter column; lib/db.ts never selects it
+  write("player_usage_2026_03_ATL_GB.json", usage.filter((r) => keep.has(r.player_id)).map(drop));
+  write("player_eff_2026_03_ATL_GB.json", eff.filter((r) => keep.has(r.player_id)).map(drop));
+}
+const only = process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : null;
+if (only !== null && only !== "players") throw new Error(`unknown --only ${only}`);
+if (only === "players") process.exit(0);
 
 // Trim: keep the first 3 efficiency pairings per side. Every other block stays whole,
 // since the card schema needs to see each block's real shape.
@@ -79,6 +108,7 @@ write(
     order: "season.asc,week.asc",
   }),
 );
+
 // Q6 shape for ATL@GB: a few rows per scope (team-week efficiency and availability,
 // game-scope market and environment, game-team market).
 const sig = (extra) =>

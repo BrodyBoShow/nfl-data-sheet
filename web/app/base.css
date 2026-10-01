@@ -238,6 +238,33 @@ details.raw-signals > summary {
   cursor: pointer;
 }
 
+/* Players section (P7 step 9). A source tag in a column head reads as part of the label;
+   its full name is in the title. */
+abbr.src {
+  text-decoration: none;
+  cursor: help;
+}
+.players-block-head {
+  margin-top: var(--space-4);
+}
+details.players-history {
+  margin-top: var(--space-3);
+}
+details.players-history > summary {
+  cursor: pointer;
+}
+/* Player-table heads wrap (labels carry units and source tags); numbers never do. Without
+   this the defense table measured 2,265px against a 1,088px column at 1280px. */
+table.players-table thead th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+/* The Role table's two-row head: the group row has no rule of its own. */
+table.players-table thead tr:first-child th[colspan] {
+  border-bottom: none;
+  text-align: center;
+}
+
 /* Prose (/method, /sources): --t-prose body, spaced paragraphs, readable measure. */
 .prose > p,
 .prose > ul,

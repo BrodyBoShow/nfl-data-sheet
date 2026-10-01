@@ -20,6 +20,17 @@ import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import report from "../content/backtest-report.json";
+import { PlayersSection } from "../components/game/players";
+import type { PlayerEff, PlayerUsage } from "../lib/db";
+import { FAMILIES, HIST_TABLES, ROLE_GROUPS, TAGS, type Tag } from "../lib/players";
+import { SOURCES } from "../lib/sources";
+import effFixture from "./fixtures/player_eff_2026_03_ATL_GB.json";
+import usageFixture from "./fixtures/player_usage_2026_03_ATL_GB.json";
+
+// Player queries the pages send, as (view, season, asOfWeek). Hoisted, so every copy of
+// the mocked module records into the same list: the page imports lib/db through "@/",
+// this file through a relative path, and vitest mocks each.
+const playerQueries = vi.hoisted(() => [] as [string, number, number][]);
 
 vi.mock("../lib/db", async (importOriginal) => {
   const real = await importOriginal<typeof import("../lib/db")>();
@@ -32,14 +43,30 @@ vi.mock("../lib/db", async (importOriginal) => {
     (await import("./fixtures/card_2026_03_ATL_GB.json")).default,
     (await import("./fixtures/card_2026_03_ARI_SF.json")).default,
   ];
-  // A game with no card: the ATL@GB identity under another id.
-  const noCard = { ...games[0]!, game_id: "2026_03_ATL_GX", home_team: "GX" };
+  // A game with no card: the ATL@GB identity under another id. (games is ordered by
+  // game_id, so games[0] is ARI@SF; this used it until P7 step 9 needed ATL's players.)
+  const atlGb = games.find((g) => g.game_id === "2026_03_ATL_GB")!;
+  const noCard = { ...atlGb, game_id: "2026_03_ATL_GX", home_team: "GX" };
+  // Week 1: the players section must send no query (nothing exists before a first game).
+  const weekOne = { ...atlGb, game_id: "2026_01_ATL_GB", week: 1 };
+  const usage = (await import("./fixtures/player_usage_2026_03_ATL_GB.json")).default;
+  const eff = (await import("./fixtures/player_eff_2026_03_ATL_GB.json")).default;
+  const forTeams = <R extends { team: string }>(rows: R[], home: string, away: string) =>
+    rows.filter((r) => r.team === home || r.team === away);
   return {
     ...real,
     listWeeks: async () => weeks,
     weekGames: async () => games,
     weekCards: async () => weekCards,
-    game: async (id: string) => [...games, noCard].find((g) => g.game_id === id) ?? null,
+    game: async (id: string) => [...games, noCard, weekOne].find((g) => g.game_id === id) ?? null,
+    gamePlayerUsage: async (s: number, w: number, home: string, away: string) => {
+      playerQueries.push(["player_usage", s, w]);
+      return forTeams(usage, home, away);
+    },
+    gamePlayerEff: async (s: number, w: number, home: string, away: string) => {
+      playerQueries.push(["player_eff", s, w]);
+      return forTeams(eff, home, away);
+    },
     card: async (id: string) => {
       const row = cards.find((c) => c.game_id === id);
       return row ? { ...row, card: parseCard(row.card) } : null;
@@ -341,5 +368,213 @@ describe("the backtest report's frame", () => {
       expect(text(html), name).not.toContain("p5 backtest report");
       expect(html, name).not.toContain("data-report-body");
     }
+  });
+});
+
+// ---- Players section (P7 step 9) -------------------------------------------------------
+// The ten assertions approved with the build plan (2026-10-01). They render the real
+// game page from fixtures, plus the section alone where a test changes the data.
+
+const USAGE = usageFixture as unknown as PlayerUsage[];
+const EFF = effFixture as unknown as PlayerEff[];
+const FAMILY_IDS = ["passing", "rushing", "receiving", "defense"];
+
+const section = (html: string) => /<section[^>]*data-players[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+const renderSection = (usage = USAGE, eff = EFF, teamSection: string | null = "Efficiency matchups") =>
+  render(PlayersSection({ usage, eff, home: "GB", away: "ATL", asOfWeek: 2, teamSection })!);
+const tables = (html: string) => [...html.matchAll(/<table[^>]*data-family="([^"]+)"[\s\S]*?<\/table>/g)];
+/** Each table's player order, keyed by offense team and table. */
+function rowOrder(html: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const block of html.matchAll(/data-offense="([A-Z]+)"[\s\S]*?(?=data-offense=|$)/g)) {
+    for (const t of tables(block[0])) {
+      out[`${block[1]}/${t[1]}`] = [...t[0].matchAll(/<tr data-row="([^"]+)"/g)].map((m) => m[1]!);
+    }
+  }
+  return out;
+}
+/** Column headers with their data-tags, by visible label (source tags stripped). */
+function headers(html: string): { label: string; tags: string; html: string }[] {
+  return [...html.matchAll(/<th scope="col"[^>]*data-tags="([^"]*)"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => ({
+    tags: m[1]!,
+    label: text(m[2]!.replace(/<span>[\s\S]*?<\/span>/g, "")),
+    html: m[0],
+  }));
+}
+
+describe("players section", () => {
+  it("1. renders on the game page and carries no pick or record vocabulary", () => {
+    const html = section(pages["2026_03_ATL_GB"]!);
+    expect(html).toContain("data-players");
+    expect(tables(html).length).toBeGreaterThanOrEqual(8);
+    expect(violations(scanned(html))).toEqual([]);
+  });
+
+  it("2. every PFR, NGS and FTN column names its source in its header, and /sources has each", () => {
+    const html = renderSection();
+    const heads = headers(html);
+    const expectHead = (label: string, tags: Tag[]) => {
+      const found = heads.filter((h) => h.label === normalize(label));
+      expect(found.length, label).toBeGreaterThan(0);
+      for (const h of found) {
+        expect(h.tags, label).toBe(tags.join(","));
+        for (const t of tags) expect(h.html, label).toContain(`data-source="${TAGS[t].source}"`);
+      }
+    };
+    for (const g of ROLE_GROUPS) expectHead(g.label, g.tags);
+    for (const f of FAMILIES) {
+      expectHead(f.sample.label, f.sample.tags);
+      expectHead(f.headline.label, f.headline.tags);
+      for (const c of f.cols) expectHead(c.approx ? `${c.label} †` : c.label, c.tags);
+    }
+    for (const t of HIST_TABLES) for (const c of t.cols) expectHead(c.label, c.tags);
+    // The providers the spec credits, checked by name, so a spec edit can't drop them.
+    expect(heads.find((h) => h.label === "pressure % †")?.tags).toBe("PFR");
+    expect(heads.find((h) => h.label === "time to throw (s)")?.tags).toBe("NGS");
+    expect(heads.find((h) => h.label === "separation (yd)")?.tags).toBe("NGS");
+    expect(heads.find((h) => h.label === "yds before contact")?.tags).toBe("PFR");
+    expect(heads.find((h) => h.label === "snap %")?.tags).toBe("PFR");
+    for (const c of FAMILIES.find((f) => f.id === "defense")!.cols) expect(c.tags, c.key).toContain("PFR");
+    for (const t of HIST_TABLES) for (const c of t.cols) expect(c.tags, c.key).toContain("FTN");
+    // Every source a header links to has its section, with a license, on /sources.
+    const linked = new Set([...html.matchAll(/data-source="([a-z_]+)"/g)].map((m) => m[1]!));
+    expect([...linked].sort()).toEqual(["ftn", "ngs", "pfr"]);
+    for (const id of linked) {
+      expect(pages.sources, id).toContain(`data-source="${id}"`);
+      expect(SOURCES.find((s) => s.id === id)?.license.name, id).toBeTruthy();
+    }
+  });
+
+  it("3. no player value is dimmed, and every family row has one Stab cell", () => {
+    const html = renderSection();
+    expect(html).not.toContain("data-low-stability");
+    expect(html).not.toMatch(/<td[^>]*class="[^"]*ink-3/);
+    const familyTables = tables(html).filter((t) => FAMILY_IDS.includes(t[1]!));
+    expect(familyTables.length).toBeGreaterThanOrEqual(6);
+    for (const t of familyTables) {
+      const rows = [...t[0].matchAll(/<tr data-row=[\s\S]*?<\/tr>/g)].map((m) => m[0]);
+      expect(rows.length, t[1]).toBeGreaterThan(0);
+      for (const r of rows) expect(r.split("data-stab").length - 1, t[1]).toBe(1);
+    }
+  });
+
+  it("4. the garbage-time statement is present wherever team efficiency is on the page", () => {
+    let checked = 0;
+    for (const id of ["2026_03_ATL_GB", "2026_03_ARI_SF", "2026_03_ATL_GX"]) {
+      const page = pages[id]!;
+      const players = section(page);
+      if (!players) continue;
+      const team = page.includes('id="pairings-h"')
+        ? "efficiency matchups"
+        : page.includes('id="teamsig-h"')
+          ? "efficiency entering the week"
+          : null;
+      expect(team, id).not.toBeNull();
+      const line = /<p[^>]*data-garbage-time[^>]*>([\s\S]*?)<\/p>/.exec(players)?.[1] ?? "";
+      expect(text(line), id).toContain("player rates include garbage time");
+      expect(text(line), id).toContain(`the team ratings in ${team} exclude it`);
+      checked++;
+    }
+    expect(checked).toBe(2); // ATL@GB (card) and the no-card ATL@GX; ARI@SF has no player rows
+    expect(text(renderSection(USAGE, EFF, null))).toContain("team efficiency ratings exclude it");
+  });
+
+  it("5. the snap-count statement, with the SRL credit, appears exactly once", () => {
+    for (const id of ["2026_03_ATL_GB", "2026_03_ATL_GX"]) {
+      const page = pages[id]!;
+      expect(page.split("data-snap-statement").length - 1, id).toBe(1);
+      const line = /<p[^>]*data-snap-statement[^>]*>([\s\S]*?)<\/p>/.exec(page)?.[1] ?? "";
+      expect(text(line), id).toContain(
+        "games and last-4 windows count games with a snap, from pro football reference snap counts (sports reference llc), via nflverse",
+      );
+    }
+  });
+
+  it("6. coverage history carries the CC BY-SA notice, 'not this season', and its span on every row", () => {
+    const html = renderSection();
+    const blocks = [...html.matchAll(/<details[^>]*data-coverage-history[\s\S]*?<\/details>/g)].map((m) => m[0]);
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const b of blocks) {
+      expect(text(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(b)?.[1] ?? "")).toMatch(/· 2025 · not this season$/);
+      const notice = text(/<p[^>]*data-cc-by-sa[^>]*>([\s\S]*?)<\/p>/.exec(b)?.[1] ?? "");
+      expect(notice).toContain("adapted from ftn data via nflverse");
+      expect(notice).toContain("modified: this site aggregated");
+      expect(notice).toContain("these values are shared under cc by-sa 4.0");
+      expect(notice).toContain("without warranties");
+      expect(b).toContain('href="https://creativecommons.org/licenses/by-sa/4.0/"');
+      expect(b).toContain('href="https://github.com/nflverse/nflverse-data/releases/tag/pbp_participation"');
+      const rows = [...b.matchAll(/<tr data-row="([^"]+)"[\s\S]*?<\/tr>/g)];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        const span = text(/<td[^>]*data-span[^>]*>([\s\S]*?)<\/td>/.exec(r[0])?.[1] ?? "");
+        expect(span, r[1]).toBe(EFF.find((e) => e.player_id === r[1])!.hist_span);
+      }
+    }
+    // A span before FTN's first season is NFL Next Gen Stats data: withheld, not shown as FTN.
+    const old = EFF.map((r) => (r.hist_span ? { ...r, hist_span: "2021-2023" } : r));
+    const withheld = renderSection(USAGE, old);
+    expect(withheld).not.toContain("data-span");
+    expect(text(withheld)).toContain("seasons before 2023 carry a different attribution");
+  });
+
+  it("7. defense has no Pct column and says why", () => {
+    const html = renderSection();
+    const def = tables(html).filter((t) => t[1] === "defense");
+    expect(def.length).toBe(2);
+    for (const t of def) expect(headers(t[0]).map((h) => h.label)).not.toContain("pct");
+    expect(html.split("data-not-ranked").length - 1).toBe(2);
+    expect(text(html)).toContain("not ranked: pro football reference has no defensive row");
+    // Offense families with a percentile do show it, so the absence above is the gate's.
+    expect(headers(html).some((h) => h.label === "pct")).toBe(true);
+  });
+
+  it("8. row order is unchanged when percentiles are shuffled", () => {
+    const base = rowOrder(renderSection());
+    expect(Object.keys(base).length).toBeGreaterThanOrEqual(8);
+    const pctKeys = Object.keys(EFF[0]!).filter((k) => k.endsWith("_pct")) as (keyof PlayerEff)[];
+    expect(pctKeys.length).toBeGreaterThanOrEqual(3);
+    // Two permutations that would reorder any table sorted or ranked by percentile: each
+    // row takes the percentiles of its mirror row, or its own inverted (p → 100 − p).
+    const shuffled = (invert: boolean) =>
+      EFF.map((r, i) => {
+        const out = { ...r } as Record<string, unknown>;
+        for (const k of pctKeys) {
+          const own = r[k] as number | null;
+          out[k] = invert ? (own === null ? null : 100 - own) : EFF[EFF.length - 1 - i]![k];
+        }
+        return out as unknown as PlayerEff;
+      });
+    expect(rowOrder(renderSection(USAGE, shuffled(false)))).toEqual(base);
+    expect(rowOrder(renderSection(USAGE, shuffled(true)))).toEqual(base);
+    // The shuffle is real: the rendered percentiles changed.
+    expect(renderSection(USAGE, shuffled(true))).not.toEqual(renderSection());
+  });
+
+  it("9. a missing value renders —, a sourced zero renders 0", () => {
+    const row = USAGE.find((r) => r.off_snap_share_std !== null)!;
+    const changed = USAGE.map((r) =>
+      r.player_id === row.player_id ? { ...r, rz_target_share_std: 0, air_yards_share_std: null } : r,
+    );
+    const html = renderSection(changed);
+    const role = tables(html)
+      .filter((t) => t[1] === "role")
+      .map((t) => t[0])
+      .join("");
+    const tr = new RegExp(`<tr data-row="${row.player_id}">[\\s\\S]*?</tr>`).exec(role)![0];
+    const cell = (col: string) => text(new RegExp(`<td[^>]*data-col="${col}"[^>]*>([\\s\\S]*?)</td>`).exec(tr)![1]!);
+    expect(cell("rz_target_share_std")).toBe("0.0%");
+    expect(cell("air_yards_share_std")).toBe("—");
+  });
+
+  it("10. week 1 sends no player query and says why", async () => {
+    // A week-3 page queries both views as of week 2, the week before the game.
+    expect(playerQueries).toContainEqual(["player_usage", 2026, 2]);
+    expect(playerQueries).toContainEqual(["player_eff", 2026, 2]);
+    const before = playerQueries.length;
+    const { default: GamePage } = await import("../app/game/[gameId]/page");
+    const html = render(await GamePage({ params: Promise.resolve({ gameId: "2026_01_ATL_GB" }) }));
+    expect(playerQueries.length).toBe(before);
+    expect(html).toContain("data-players-none");
+    expect(text(html)).toContain("no player rows before a team's first game of the season");
   });
 });

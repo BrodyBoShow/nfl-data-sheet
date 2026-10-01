@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as db from "../lib/db";
 import lockedCard from "./fixtures/card_2026_03_ATL_GB.json";
 import games from "./fixtures/games_2026_03.json";
+import playerEff from "./fixtures/player_eff_2026_03_ATL_GB.json";
+import playerUsage from "./fixtures/player_usage_2026_03_ATL_GB.json";
 import signals from "./fixtures/signals_2026_03_ATL_GB.json";
 import weekCards from "./fixtures/week_cards_2026_03.json";
 import weeks from "./fixtures/weeks.json";
@@ -134,6 +136,28 @@ describe("queries against real response shapes (fixtures)", () => {
       "(and(game_id.is.null,team.in.(GB,ATL)),game_id.eq.2026_03_ATL_GB)",
     );
   });
+
+  it.each([
+    ["Q7 gamePlayerUsage", "player_usage", db.gamePlayerUsage, playerUsage, db.PLAYER_USAGE_COLUMNS],
+    ["Q8 gamePlayerEff", "player_eff", db.gamePlayerEff, playerEff, db.PLAYER_EFF_COLUMNS],
+  ] as const)("%s: each player's latest row as of the week, selecting only shown columns", async (_, view, query, fixture, columns) => {
+    respond(fixture);
+    const rows = await query(2026, 2, "GB", "ATL");
+    expect(rows).toHaveLength(fixture.length);
+    const { url } = lastRequest();
+    expect(url.pathname).toBe(`/rest/v1/${view}`);
+    const p = url.searchParams;
+    expect(p.get("season")).toBe("eq.2026");
+    expect(p.get("team")).toBe("in.(GB,ATL)");
+    expect(p.get("week")).toBe("lte.2");
+    expect(p.get("or")).toBe("(next_week.is.null,next_week.gt.2)");
+    // The payload is exactly what's parsed: no inputs_version, no unshown metric.
+    expect(p.get("select")!.split(",")).toEqual([...columns]);
+    expect(columns).not.toContain("inputs_version" as never);
+    // Red-zone shares are season only (user, 2026-10-01).
+    expect(columns).not.toContain("rz_target_share_game" as never);
+    expect(columns).not.toContain("rz_carry_share_game" as never);
+  });
 });
 
 describe("route params are validated before any request", () => {
@@ -143,6 +167,8 @@ describe("route params are validated before any request", () => {
     ["non-integer week", () => db.weekCards(2026, 2.5)],
     ["game_id", () => db.game("2026_03_ATL_GB,game_id.neq.x")],
     ["team", () => db.gameSignals(2026, 3, "2026_03_ATL_GB", "GB),or(x", "ATL")],
+    ["as-of week 0", () => db.gamePlayerUsage(2026, 0, "GB", "ATL")],
+    ["player team", () => db.gamePlayerEff(2026, 2, "GB),or(x", "ATL")],
   ])("rejects a bad %s", async (_, call) => {
     await expect(call()).rejects.toThrow(db.DbError);
     expect(fetchMock).not.toHaveBeenCalled();

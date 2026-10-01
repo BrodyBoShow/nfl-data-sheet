@@ -9,6 +9,8 @@
 export type SourceId =
   | "nflverse"
   | "pfr"
+  | "ngs"
+  | "ftn"
   | "odds_api"
   | "open_meteo"
   | "osm"
@@ -35,8 +37,9 @@ export const SOURCES: readonly Source[] = [
       "The schedule on every page. Every efficiency rating (team play-by-play aggregates, plus the QB " +
       "continuity adjustment from player stats, and the depth charts both continuity adjustments fall back " +
       "on). Surface, roof status for retractable roofs, rest days, and the player positions behind the " +
-      "availability counts. Snap counts come through nflverse too, but they're Pro Football Reference data " +
-      "(below).",
+      "availability counts. In the players section: player names and positions, and every player rate and " +
+      "share built from play-by-play and player stats. Snap counts, Next Gen Stats and FTN data come " +
+      "through nflverse too, but they're credited to their providers below.",
     license: { name: "CC BY 4.0", url: "https://creativecommons.org/licenses/by/4.0/" },
     terms: ["Attribution required. Credited here and in the site footer."],
   },
@@ -47,7 +50,10 @@ export const SOURCES: readonly Source[] = [
     feeds:
       "Snap counts. They identify each team's O-line for the O-line continuity adjustment, which reaches every " +
       "offense efficiency rating and, through the opponent adjustment, every defense rating. They also show " +
-      "when a player ESPN still lists as out has played since, which clears him from the availability counts.",
+      "when a player ESPN still lists as out has played since, which clears him from the availability counts. " +
+      "In the players section: snap shares, every defensive per-snap rate, and the games and last-4 windows " +
+      "(a game played is a game with a snap). Advanced stats: pressures, blitzes, tackles, missed tackles, " +
+      "yards before contact, and nearest-defender coverage charting. Each such column is marked PFR.",
     license: { name: "Sports Reference Terms of Use", url: "https://www.sports-reference.com/termsofuse.html" },
     terms: [
       'Terms of Use §5 (page "Last Updated: May 19, 2023", read 2026-09-25): sharing or publishing data ' +
@@ -56,6 +62,41 @@ export const SOURCES: readonly Source[] = [
       "Fetched only as nflverse's published release files (tag snap_counts), never from Sports Reference's " +
         "own sites.",
       "A takedown request from Sports Reference is honored immediately.",
+    ],
+  },
+  {
+    id: "ngs",
+    name: "NFL Next Gen Stats, via nflverse",
+    url: "https://nextgenstats.nfl.com/",
+    feeds:
+      "In the players section: receiver separation and quarterback time to throw. Each such column is " +
+      "marked NGS.",
+    license: { name: "NFL Terms and Conditions", url: "https://www.nfl.com/legal/terms" },
+    terms: [
+      "Credited here and at the head of every column that uses it.",
+      "Fetched only as nflverse's published release files (tag nextgen_stats), never from the NFL's own " +
+        "sites. The NFL's terms aren't a grant to this site; a takedown request from the NFL is honored " +
+        "immediately.",
+      '"Next Gen Stats, Next Generation Stats, NFL and the NFL shield design are registered trademarks of ' +
+        'the National Football League." This site isn\'t affiliated with the NFL.',
+    ],
+  },
+  {
+    id: "ftn",
+    name: "FTN Data, via nflverse",
+    url: "https://github.com/nflverse/nflverse-data/releases/tag/pbp_participation",
+    feeds:
+      "In the players section: the coverage history (each player's EPA and target rate against man and zone " +
+      "coverage), from FTN's participation charting of past seasons. Each such column is marked FTN.",
+    license: { name: "CC BY-SA 4.0", url: "https://creativecommons.org/licenses/by-sa/4.0/" },
+    terms: [
+      'nflverse states: "This data is released under the CC-BY-SA 4.0 Creative Commons license and ' +
+        'attribution must be made to FTN Data via nflverse (from 2023 onwards)" (load_participation, read ' +
+        "2026-09-25). Every season shown here is 2023 or later.",
+      "Modified: this site aggregates the play-level charting into per-player rates for each season shown.",
+      "The coverage-history values are adapted material, shared under CC BY-SA 4.0 " +
+        "(https://creativecommons.org/licenses/by-sa/4.0/). The block that shows them says so.",
+      "Provided as is, without warranties of any kind (CC BY-SA 4.0, section 5).",
     ],
   },
   {

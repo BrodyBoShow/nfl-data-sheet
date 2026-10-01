@@ -14,6 +14,9 @@
 //   weather values appear only at weather_status 1, and then with the Open-Meteo credit
 //     and the 10 m label;
 //   the card's "model favors …" summary never appears.
+// Players section (P7 step 9): each table lists exactly the anon view's players, every value
+// matches the view at the precision shown, nothing is dimmed, and the garbage-time line is
+// there.
 // Pages without a card: a 2019 Raiders game (OAK in games, LV in signals) shows both
 // teams' efficiency; a 2018 game says signals start in 2019; bad ids 404.
 //
@@ -220,6 +223,84 @@ check(`values below stability ${floor} dimmed, no others (${dimTotal} on these c
 check("weather only at status 1, always credited and labeled 10 m", problems.weather.length === 0, problems.weather.slice(0, 4).join("; "));
 check("the card's 'model favors …' summary never appears", problems.summary.length === 0, problems.summary.slice(0, 4).join("; "));
 check("status (LOCKED / PROVISIONAL / label) matches the card", problems.status.length === 0, problems.status.slice(0, 4).join("; "));
+
+// --- players section (P7 step 9) ----------------------------------------------------------
+// Per carded game: the rows anon reads with the page's own as-of filter (Q7/Q8), against
+// the rendered tables. Which players each table lists, and every value cell, read back
+// to a number at the precision shown. "—" must be a null; a number must not be.
+{
+  const prob = { members: [], values: [], dim: [], garbage: [] };
+  let cellsChecked = 0;
+  const FAMILY_SAMPLE = {
+    passing: "pass_dropbacks_std",
+    rushing: "rush_carries_std",
+    receiving: "rec_targets_std",
+    defense: "def_snaps_std",
+    "hist-receiving": "rec_hist_n",
+    "hist-passing": "pass_hist_n",
+  };
+  for (const row of cards) {
+    const { home_team: home, away_team: away } = row.card.identity;
+    const asOf = row.week - 1;
+    if (asOf < 1) continue;
+    const q = { season: `eq.${row.season}`, week: `lte.${asOf}`, or: `(next_week.is.null,next_week.gt.${asOf})`, team: `in.(${home},${away})` };
+    const usage = await api("player_usage", q);
+    const eff = await api("player_eff", q);
+    const { html } = await page(`/game/${row.game_id}`);
+    const id = row.game_id;
+    const section = /<section[^>]*data-players[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+    if (!section) {
+      if (usage.length || eff.length) prob.members.push(`${id}: no players section, ${usage.length + eff.length} rows exist`);
+      continue;
+    }
+    if (/data-low-stability|<td[^>]*class="[^"]*ink-3/.test(section)) prob.dim.push(`${id}: a player value is dimmed`);
+    if (!/data-garbage-time[^>]*>[^<]*Player rates include garbage time/.test(section)) prob.garbage.push(`${id}: no garbage-time line`);
+    for (const block of section.matchAll(/data-offense="([A-Z]+)" data-defense="([A-Z]+)"[\s\S]*?(?=data-offense=|$)/g)) {
+      const [, off, def] = block;
+      for (const t of block[0].matchAll(/<table[^>]*data-family="([^"]+)"[\s\S]*?<\/table>/g)) {
+        const family = t[1];
+        const team = family === "defense" ? def : off;
+        const source = family === "role" ? usage : eff;
+        const want = family === "role"
+          ? usage.filter((r) => r.team === team && r.off_snap_share_std !== null)
+          : eff.filter((r) => r.team === team && r[FAMILY_SAMPLE[family]] !== null &&
+              (!family.startsWith("hist-") || /^20(2[3-9]|[3-9]\d)(-\d{4})?$/.test(r.hist_span ?? "")));
+        const shown = [...t[0].matchAll(/<tr data-row="([^"]+)">([\s\S]*?)<\/tr>/g)];
+        const ids = shown.map((m) => m[1]).sort();
+        const wantIds = want.map((r) => r.player_id).sort();
+        if (JSON.stringify(ids) !== JSON.stringify(wantIds)) {
+          prob.members.push(`${id} ${team} ${family}: shown ${ids.length}, view ${wantIds.length}`);
+        }
+        for (const [, pid, tr] of shown) {
+          const r = source.find((x) => x.player_id === pid);
+          for (const c of tr.matchAll(/<td[^>]*data-col="([^"]+)"[^>]*>([\s\S]*?)<\/td>/g)) {
+            const [, col, raw] = c;
+            const txt = visible(raw);
+            // The defense snap share comes from the usage row of the same week.
+            const u = usage.find((x) => x.player_id === pid);
+            const v = col === "def_snap_share_std" ? (u && r && u.week === r.week ? u[col] : null) : r?.[col];
+            cellsChecked++;
+            if (txt === "—") {
+              if (v !== null && v !== undefined) prob.values.push(`${id} ${pid} ${col}: "—" but ${v}`);
+              continue;
+            }
+            const scaled = txt.endsWith("%") || col.includes("_per_snap");
+            const shownNum = num(txt.replace(/%$/, ""));
+            const decimals = (txt.replace(/%$/, "").split(".")[1] ?? "").length;
+            const expected = scaled ? v * 100 : v;
+            if (v === null || v === undefined || Math.abs(shownNum - expected) > 0.5 * 10 ** -decimals + 1e-9) {
+              prob.values.push(`${id} ${pid} ${col}: shows ${txt}, view ${v}`);
+            }
+          }
+        }
+      }
+    }
+  }
+  check(`players: each table lists exactly the view's players (${cards.length} games)`, prob.members.length === 0, prob.members.slice(0, 4).join("; "));
+  check(`players: every value matches web.player_usage/web.player_eff (${cellsChecked} cells)`, prob.values.length === 0 && cellsChecked > 0, prob.values.slice(0, 4).join("; "));
+  check("players: nothing dimmed", prob.dim.length === 0, prob.dim.slice(0, 4).join("; "));
+  check("players: the garbage-time line on every page with players", prob.garbage.length === 0, prob.garbage.slice(0, 4).join("; "));
+}
 
 // --- pages without a card ---------------------------------------------------------------
 {

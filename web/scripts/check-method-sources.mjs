@@ -92,6 +92,19 @@ const unlicensed = SOURCES.filter((s) => {
 });
 check("every /sources section states its license", unlicensed.length === 0, unlicensed.map((s) => s.id).join(", "));
 
+// --- players section (P7 step 9) ---------------------------------------------------------
+// Every provider a player column credits in its header links to a /sources section.
+{
+  const { html } = await page("/game/2026_03_ATL_GB");
+  const players = /<section[^>]*data-players[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+  const credited = [...new Set([...players.matchAll(/<abbr[^>]*data-source="([a-z_]+)"/g)].map((m) => m[1]))].sort();
+  check(
+    `players: column-head providers (${credited.join(", ") || "none"}) each have a /sources section`,
+    credited.length === 3 && credited.every((id) => onPage.has(id)),
+    `credited=${credited} missing=${credited.filter((id) => !onPage.has(id))}`,
+  );
+}
+
 const width = Math.max(...results.map(([name]) => name.length));
 for (const [name, ok, detail] of results) console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(width)}  ${ok ? "" : detail}`.trimEnd());
 const allOk = results.every(([, ok]) => ok);

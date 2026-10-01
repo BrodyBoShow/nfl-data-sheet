@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -9,12 +10,13 @@ import { Lines } from "@/components/game/lines";
 import { MarketDetail } from "@/components/game/market-detail";
 import { PairingTable } from "@/components/game/pairings";
 import { RawSignals } from "@/components/game/raw-signals";
+import { PlayersNotYet, PlayersSection } from "@/components/game/players";
 import { LowStabilityNote } from "@/components/game/signal-cells";
 import { TeamSignals } from "@/components/game/team-signals";
 import { SnapCountsCredit } from "@/components/marks";
 import { backtest } from "@/lib/backtest";
 import type { Card } from "@/lib/card";
-import { card as loadCard, game, gameSignals, isGameId } from "@/lib/db";
+import { card as loadCard, game, gamePlayerEff, gamePlayerUsage, gameSignals, isGameId } from "@/lib/db";
 import { etDay, formatEtClock, formatEtStamp, formatGameday } from "@/lib/format";
 import { buildLines, gameStatus, isLowStability, type GameStatus } from "@/lib/game";
 import { normalizeTeam } from "@/lib/teams";
@@ -52,7 +54,7 @@ function StatusText({ s }: { s: GameStatus }) {
   }
 }
 
-function CardBody({ card, asOf, now }: { card: Card; asOf: string; now: Date }) {
+function CardBody({ card, asOf, now, players }: { card: Card; asOf: string; now: Date; players: ReactNode }) {
   const lines = buildLines(card);
   const status = gameStatus(card, now);
   const kickedOff = new Date(card.identity.kickoff) <= now;
@@ -107,6 +109,7 @@ function CardBody({ card, asOf, now }: { card: Card; asOf: string; now: Date }) 
             projection still shows efficiency values here. */}
         {showArithmetic ? null : <SnapCountsCredit use="efficiency" />}
       </section>
+      {players}
       <MarketDetail card={card} />
     </>
   );
@@ -118,11 +121,33 @@ export default async function GamePage({ params }: { params: Params }) {
   const g = await game(gameId);
   if (!g) notFound();
 
-  const [rec, rows] = await Promise.all([
+  const home = normalizeTeam(g.home_team);
+  const away = normalizeTeam(g.away_team);
+  // Players as of the week before the game, like the efficiency pairings. Week 1 has
+  // nothing to look up: a player row exists only after a team's first game.
+  const asOfWeek = g.week - 1;
+  const [rec, rows, usage, eff] = await Promise.all([
     loadCard(gameId),
-    gameSignals(g.season, g.week, g.game_id, normalizeTeam(g.home_team), normalizeTeam(g.away_team)),
+    gameSignals(g.season, g.week, g.game_id, home, away),
+    asOfWeek >= 1 ? gamePlayerUsage(g.season, asOfWeek, home, away) : Promise.resolve([]),
+    asOfWeek >= 1 ? gamePlayerEff(g.season, asOfWeek, home, away) : Promise.resolve([]),
   ]);
   const now = new Date();
+  const hasCard = rec?.card.ok === true;
+  const hasTeamTable = !hasCard && rows.some((r) => r.sector === "efficiency");
+  const players =
+    asOfWeek < 1 ? (
+      <PlayersNotYet />
+    ) : (
+      <PlayersSection
+        usage={usage}
+        eff={eff}
+        home={home}
+        away={away}
+        asOfWeek={asOfWeek}
+        teamSection={hasCard ? "Efficiency matchups" : hasTeamTable ? "Efficiency entering the week" : null}
+      />
+    );
   const neutral = g.location === "Neutral";
   const parsed = rec?.card;
   const kickoff =
@@ -145,7 +170,7 @@ export default async function GamePage({ params }: { params: Params }) {
       </div>
 
       {parsed?.ok === true ? (
-        <CardBody card={parsed.card} asOf={rec!.as_of} now={now} />
+        <CardBody card={parsed.card} asOf={rec!.as_of} now={now} players={players} />
       ) : parsed ? (
         <section className="section">
           <h2 className="section-label t-cap">Card</h2>
@@ -168,15 +193,18 @@ export default async function GamePage({ params }: { params: Params }) {
       )}
 
       {parsed?.ok !== true ? (
-        rows.some((r) => r.sector === "efficiency") ? (
-          <TeamSignals rows={rows} home={normalizeTeam(g.home_team)} away={normalizeTeam(g.away_team)} />
-        ) : (
-          <p className="t-small ink-2">
-            {g.season < 2019
-              ? "No signals for this game. Efficiency signals start in 2019."
-              : "No signals for this week yet."}
-          </p>
-        )
+        <>
+          {hasTeamTable ? (
+            <TeamSignals rows={rows} home={home} away={away} />
+          ) : (
+            <p className="t-small ink-2">
+              {g.season < 2019
+                ? "No signals for this game. Efficiency signals start in 2019."
+                : "No signals for this week yet."}
+            </p>
+          )}
+          {players}
+        </>
       ) : null}
 
       {rows.length ? <RawSignals rows={rows} /> : null}
