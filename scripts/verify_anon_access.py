@@ -1,4 +1,5 @@
-"""One-off script: verify migration 0026's anon surface (docs/phases/P6.md §2), live.
+"""One-off script: verify the anon surface of migrations 0026 and 0033 (docs/phases/P6.md
+§2), live.
 
 Two halves:
 - catalog: the pipeline's own DB connection reads what `anon` and `authenticated` may
@@ -49,13 +50,59 @@ ANON_COLUMNS: dict[str, set[str]] = {
         "season", "week", "game_id", "team", "player_id", "sector", "signal", "value",
         "league_pct", "sample_n", "stability", "as_of", "inputs_version",
     },
+    # 0033 (P7 step 9): the web player view's allow-lists.
+    "player_usage_week": {
+        "player_id", "season", "week", "season_type", "game_id", "team", "position_group",
+        "as_of", "usage_games_std", "usage_stability",
+        "off_snap_share_std", "off_snap_share_game", "def_snap_share_std",
+        "def_snap_share_game", "target_share_std", "target_share_game",
+        "air_yards_share_std", "air_yards_share_game", "carry_share_std",
+        "carry_share_game", "rz_target_share_std", "rz_target_share_game",
+        "rz_carry_share_std", "rz_carry_share_game",
+    },
+    "player_eff_week": {
+        "player_id", "season", "week", "season_type", "game_id", "team", "position_group",
+        "as_of",
+        "rec_targets_std", "rec_targets_l4", "rec_stability",
+        "rush_carries_std", "rush_carries_l4", "rush_stability",
+        "pass_dropbacks_std", "pass_dropbacks_l4", "pass_stability",
+        "def_snaps_std", "def_snaps_l4", "def_stability",
+        "epa_per_target_std", "epa_per_target_pct", "epa_per_target_l4",
+        "rec_success_rate_std", "yards_per_target_std", "rec_adot_std",
+        "yac_oe_per_reception_std", "avg_separation_std",
+        "epa_per_dropback_std", "epa_per_dropback_pct", "epa_per_dropback_l4",
+        "dropback_success_rate_std", "cpoe_std", "pass_adot_std", "sack_rate_std",
+        "pressure_rate_std", "avg_time_to_throw_std", "scramble_rate_std",
+        "epa_per_carry_std", "epa_per_carry_pct", "epa_per_carry_l4",
+        "rush_success_rate_std", "stuff_rate_std", "rush_explosive_rate_std",
+        "yards_before_contact_per_carry_std",
+        "tackles_per_snap_std", "tackles_per_snap_pct", "tackles_per_snap_l4",
+        "tfl_per_snap_std", "pressures_per_snap_std", "sacks_per_snap_std",
+        "qb_hits_per_snap_std", "targets_per_snap_std", "yards_per_target_allowed_std",
+        "missed_tackle_rate_std",
+        "hist_span", "rec_hist_n", "pass_hist_n",
+        "epa_per_target_vs_man_hist", "epa_per_target_vs_zone_hist",
+        "target_rate_vs_man_hist", "target_rate_vs_zone_hist",
+        "epa_per_dropback_vs_man_hist", "epa_per_dropback_vs_zone_hist",
+    },
+    "players": {"player_id", "display_name", "position"},
 }
 ANON_POLICIES = {
     ("games", "games_anon_read"),
     ("matchup_cards", "matchup_cards_anon_read"),
     ("signals", "signals_anon_read"),
+    ("player_usage_week", "player_usage_week_anon_read"),
+    ("player_eff_week", "player_eff_week_anon_read"),
+    ("players", "players_anon_read"),
 }
-WEB_VIEWS = ("games", "weeks", "week_cards", "cards", "signals")
+WEB_VIEWS = ("games", "weeks", "week_cards", "cards", "signals", "player_usage", "player_eff")
+# What each player view exposes: its base table's allow-list, plus the joined name and
+# position and the derived next_week.
+_PLAYER_VIEW_EXTRA = {"display_name", "position", "next_week"}
+PLAYER_VIEWS = {
+    "player_usage": (ANON_COLUMNS["player_usage_week"] | _PLAYER_VIEW_EXTRA),
+    "player_eff": (ANON_COLUMNS["player_eff_week"] | _PLAYER_VIEW_EXTRA),
+}
 _TABLE_PRIVS = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 _ROLES = ("anon", "authenticated")
 
@@ -87,7 +134,7 @@ def catalog_checks() -> list[Result]:
             want = {("web", v, "SELECT") for v in WEB_VIEWS} if role == "anon" else set()
             out.append((
                 f"catalog: {role} table-level privileges == "
-                + ("SELECT on the 5 web views" if role == "anon" else "none"),
+                + (f"SELECT on the {len(WEB_VIEWS)} web views" if role == "anon" else "none"),
                 got == want,
                 _diff(got, want),
             ))
@@ -112,7 +159,7 @@ def catalog_checks() -> list[Result]:
             )
             out.append((
                 f"catalog: {role} column privileges on public == "
-                + ("SELECT on games/matchup_cards/signals allow-list" if role == "anon"
+                + (f"SELECT on the {len(ANON_COLUMNS)} tables' allow-lists" if role == "anon"
                    else "none"),
                 got_cols == want_cols,
                 _diff(got_cols, want_cols),
@@ -156,7 +203,7 @@ def catalog_checks() -> list[Result]:
         got_pol = {(t, p) for t, p, _ in policies}
         non_select = [f"{t}.{p} ({c})" for t, p, c in policies if c != "SELECT"]
         out.append((
-            "catalog: anon-reachable policies == the 3 SELECT policies",
+            f"catalog: anon-reachable policies == the {len(ANON_POLICIES)} SELECT policies",
             got_pol == ANON_POLICIES and not non_select,
             "; ".join(filter(None, [_diff(got_pol, ANON_POLICIES), ", ".join(non_select)])),
         ))
@@ -170,7 +217,7 @@ def catalog_checks() -> list[Result]:
         ).fetchall()
         not_invoker = sorted(v for v, opts in views if "security_invoker=true" not in opts)
         out.append((
-            "catalog: web has the 5 views, all security_invoker",
+            f"catalog: web has the {len(WEB_VIEWS)} views, all security_invoker",
             {v for v, _ in views} == set(WEB_VIEWS) and not not_invoker,
             f"views={sorted(v for v, _ in views)} not_invoker={not_invoker}",
         ))
@@ -280,6 +327,38 @@ def api_checks(client: httpx.Client, n_player_rows: int) -> list[Result]:
     out.append(("api: web.games?select=home_score is an error", r.status_code >= 400,
                 f"{r.status_code} {_code(r)}"))
 
+    # 0033: each player view exposes exactly its allow-list, nothing the grant omits is
+    # selectable, and the page's as-of query (latest row per player with week <= W)
+    # works through PostgREST's filter syntax on the derived next_week.
+    for view, want in PLAYER_VIEWS.items():
+        r = client.get(f"/{view}", params={"limit": "1"}, headers=web)
+        rows = r.json() if r.status_code == 200 else None
+        keys = set(rows[0]) if isinstance(rows, list) and rows else set()
+        out.append((f"api: web.{view} exposes exactly its allow-list", keys == want,
+                    _diff(keys, want) or f"{r.status_code} {_code(r)}"))
+        for hidden in ("content_hash", "inputs_version"):
+            r = client.get(f"/{view}", params={"select": hidden, "limit": "1"}, headers=web)
+            out.append((f"api: web.{view}?select={hidden} is an error", r.status_code >= 400,
+                        f"{r.status_code} {_code(r)}"))
+        r = client.get(
+            f"/{view}",
+            params={
+                "select": "player_id,week,next_week",
+                "season": "eq.2026",
+                "week": "lte.3",
+                "or": "(next_week.is.null,next_week.gt.3)",
+            },
+            headers=web,
+        )
+        rows = r.json() if r.status_code == 200 else None
+        ids = [x["player_id"] for x in rows] if isinstance(rows, list) else []
+        out.append((
+            f"api: web.{view} as-of filter returns one row per player",
+            bool(ids) and len(ids) == len(set(ids))
+            and all(x["next_week"] is None or x["next_week"] > 3 for x in rows or []),
+            f"{r.status_code} {_code(r)} rows={len(ids)} distinct={len(set(ids))}",
+        ))
+
     r = client.get(
         "/signals", params={"player_id": "not.is.null", "limit": "1"}, headers=web
     )
@@ -341,7 +420,7 @@ def _print(results: list[Result]) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify migration 0026's anon surface.")
+    parser = argparse.ArgumentParser(description="Verify the anon surface (0026 + 0033).")
     parser.add_argument(
         "--catalog-only", action="store_true",
         help="check grants/policies only (run after migrate, before the dashboard change)",

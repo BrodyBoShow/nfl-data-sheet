@@ -30,16 +30,21 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`�
   pre-kickoff), and no signal carries that. Historical scores and lines are read only by
   the offline model-fitting/backtest scripts in `scripts/`, never by a scheduled L3 job.
   L3 never calls external sources.
-  - `/web` reads `signals` (no player rows), `matchup_cards`, and those `games` identity
-    columns, only through the `web` schema's views as anon, and only from
-    `web/lib/db.ts`. Grants and RLS enforce this (migration `0026`); widening what anon
-    can read is a new migration plus a `docs/phases/P6.md` §2 update, never a view tweak.
-    The backtest report and model file reach the app only as build-time content.
-  - The player tables are **not** readable by L3 or `/web` yet. The web player view
-    (P7 step 9) brings its own migration and amends this rule. PFR/NGS display is
-    approved with attribution on a provenance basis. We fetch only nflverse release
-    assets, never the providers' sites, and honor any takedown immediately
-    (`docs/sources.md`, nflverse bulk → License).
+  - `/web` reads `signals` (no player rows), `matchup_cards`, those `games` identity
+    columns, and the player tables' allow-listed columns, only through the `web`
+    schema's views as anon, and only from `web/lib/db.ts`. Grants and RLS enforce this
+    (migrations `0026`, `0033`); widening what anon can read is a new migration plus a
+    `docs/phases/P6.md` §2 update, never a view tweak. The backtest report and model
+    file reach the app only as build-time content.
+  - **The player tables are readable by `/web` only** (P7 step 9, migration `0033`):
+    - the columns granted on `player_usage_week`/`player_eff_week`, through
+      `web.player_usage`/`web.player_eff`;
+    - `players.display_name`/`position`, and only for players with a player-table row.
+    - L3 synthesis (`pipeline/synthesis/`) still doesn't read the player tables. A card
+      that needs player values amends this rule first.
+    - PFR/NGS display is approved with attribution on a provenance basis. We fetch only
+      nflverse release assets, never the providers' sites, and honor any takedown
+      immediately (`docs/sources.md`, nflverse bulk → License).
 - **L0** (`pipeline/orchestration/`) decides what runs, owns canonical keys, detects
   breakage, grades projections. The grader is the one scheduled job that reads `games`
   scores and lines, after the game. It writes only `projection_grades`/`grade_summary`,

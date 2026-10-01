@@ -83,9 +83,11 @@ registry under "Player tables (Phase 7)" below):
 - **Honesty:** `_game`/`_l4` values for rotational players rest on a handful of plays
   (`docs/phases/P7.md` sample-size table). Anything that displays them shows `stability`
   beside them.
-- **Access:** anon can't read these tables until the web player-view migration lands
-  (P7 step 9). Every PFR- or NGS-derived column carries attribution wherever it's shown
-  (`docs/sources.md`, nflverse bulk → License).
+- **Access:** anon reads an allow-list of columns through `web.player_usage` /
+  `web.player_eff` (migration `0033`, P7 step 9; the lists are in `docs/phases/P6.md`
+  §2). Nothing else in these tables is readable, including `content_hash` and
+  `inputs_version`. Every PFR- or NGS-derived column carries attribution wherever it's
+  shown (`docs/sources.md`, nflverse bulk → License).
 
 Registry entries for player-table metrics use this template, grouped by table and family:
 

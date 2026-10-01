@@ -170,9 +170,11 @@ flowchart TB
   and schedule only (`game_id, season, week, home_team, away_team, gameday, gametime,
   location`), and never calls external sources. The web app reads only our database:
   `signals` (team and game scope, never player rows), `matchup_cards`, and those eight
-  `games` identity columns. It reads them only through the `web` schema's views, as anon.
-  Grants and RLS enforce that (migration `0026`, `docs/phases/P6.md` §2); the views are
-  convenience. Scores and lines are unreadable to it at the grant level.
+  `games` identity columns. Since P7 step 9 it also reads an allow-list of player-table
+  columns, with names and positions from `players`. It reads all of them only through
+  the `web` schema's views, as anon. Grants and RLS enforce that (migrations `0026`,
+  `0033`, `docs/phases/P6.md` §2); the views are convenience. Scores and lines are
+  unreadable to it at the grant level. L3 synthesis doesn't read the player tables.
   - **Why `games` is allowed (amended 2026-09-23, P5):** the spine is canonical keys owned
     by L0, not staged source data. A card has to know which teams play, where, and when
     it kicks off (projections lock pre-kickoff), and no signal carries that. Scores,
@@ -186,11 +188,11 @@ flowchart TB
     - A week view and a game view: the matchup card plus the signals behind it.
     - `/method`, with the backtest report in a provenance frame, and `/sources`.
     - Freshness shows through `as_of` stamps, not auditor badges.
-    - The player view moved to P7 (step 9). It will read the player tables through new
-      `web` views, which takes its own migration, a P6 §2 update, and an L3 amendment
-      here. PFR/NGS values display with attribution (SRL credit on `/sources` and next to
-      each PFR-derived value; NGS likewise), per the position in `docs/sources.md`.
-      Signal cross-reference/filters are deferred to v2.
+    - The player view moved to P7 (step 9): a players section on the game view. It reads
+      `web.player_usage`/`web.player_eff` (migration `0033`), as of the week before the
+      game. PFR/NGS/FTN values carry their source at the column head, and `/sources`
+      has the full statements (`docs/sources.md`). Player values are never dimmed: the
+      stability is shown as a number. Signal cross-reference/filters are deferred to v2.
   - **Matchup narrator** (optional, Phase 8): on-demand prose from one card's signals,
     cached per game per day. Cannot introduce numbers not already on the card. It
     can't be built until `docs/phases/P8.md`'s start blocker (Sports Reference's AI
