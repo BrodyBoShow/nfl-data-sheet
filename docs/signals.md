@@ -46,7 +46,7 @@ registry under "Player tables (Phase 7)" below):
 - **Key:** (`player_id`, `season`, `week`). Also `season_type`, `team`, `game_id` (the
   game this row's per-game values come from), `position_group` (`players.position_group`),
   `as_of`, `inputs_version` (plain text, the same convention as `signals`), and
-  `content_hash` for `filter_changed`.
+  `content_hash` for `upsert_changed`'s server-side diff.
 - **As-of rows:** a row is written for week W only for players who played in week W. To
   read "as of week W", take each player's latest row with `week <= W` in that season.
   A player on bye or injured keeps their last row. No row is ever written for a player
@@ -1021,7 +1021,7 @@ the numerator, denominator, and source differ.
   - A run for `(season, W)` recomputes every week ≤ W of that season that has inputs,
     not only the latest.
     - Late inputs land that way: FTN charts within 48h, and nflverse revises stats.
-    - `filter_changed` writes only the rows whose `content_hash` moved.
+    - `upsert_changed` writes only the rows whose `content_hash` moved.
     - Each row still uses only games through its own week, so there's no leakage.
   - `Analyst.run()`'s signals cleanup doesn't reach these tables, and these two analysts
     declare no `signal_names`. Instead, each analyst's write deletes its own table's rows

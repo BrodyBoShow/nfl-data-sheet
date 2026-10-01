@@ -21,7 +21,7 @@ import nflreadpy as nfl
 import polars as pl
 
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import ChangedUpsert, upsert_changed
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 
@@ -284,7 +284,7 @@ class IdSpineCollector(Collector):
             validated["players"],
             validated["ff_playerids"],
         )
-        total_written = 0
+        stored: dict[str, ChangedUpsert] = {}
 
         team_rows = [
             _finalize(
@@ -296,13 +296,12 @@ class IdSpineCollector(Collector):
                 ["team_abbr", "team_name", "team_nick", "team_conf", "team_division"]
             ).to_dicts()
         ]
-        team_rows = filter_changed(conn, "teams", "team_abbr", team_rows)
-        total_written += upsert_rows(
+        stored["teams"] = upsert_changed(
             conn,
             "teams",
             team_rows,
-            conflict_cols=["team_abbr"],
-            update_cols=[
+            "team_abbr",
+            [
                 "team_name",
                 "team_nick",
                 "team_conf",
@@ -317,27 +316,24 @@ class IdSpineCollector(Collector):
             _finalize(r, ctx.now, [c for c in _GAME_COLS if c != "game_id"])
             for r in schedules.select(_GAME_COLS).to_dicts()
         ]
-        game_rows = filter_changed(conn, "games", "game_id", game_rows)
-        total_written += upsert_rows(
+        stored["games"] = upsert_changed(
             conn,
             "games",
             game_rows,
-            conflict_cols=["game_id"],
-            update_cols=[c for c in _GAME_COLS if c != "game_id"] + ["content_hash", "updated_at"],
+            "game_id",
+            [c for c in _GAME_COLS if c != "game_id"] + ["content_hash", "updated_at"],
         )
 
         player_rows = [
             _finalize(r, ctx.now, [c for c in _PLAYER_COLS if c != "gsis_id"])
             for r in players_df.select(_PLAYER_COLS).rename({"gsis_id": "player_id"}).to_dicts()
         ]
-        player_rows = filter_changed(conn, "players", "player_id", player_rows)
-        total_written += upsert_rows(
+        stored["players"] = upsert_changed(
             conn,
             "players",
             player_rows,
-            conflict_cols=["player_id"],
-            update_cols=[c for c in _PLAYER_COLS if c != "gsis_id"]
-            + ["content_hash", "updated_at"],
+            "player_id",
+            [c for c in _PLAYER_COLS if c != "gsis_id"] + ["content_hash", "updated_at"],
         )
 
         crosswalk_df = players_df.select(
@@ -362,13 +358,12 @@ class IdSpineCollector(Collector):
             _finalize(r, ctx.now, crosswalk_cols)
             for r in crosswalk_df.rename({"gsis_id": "player_id"}).to_dicts()
         ]
-        crosswalk_rows = filter_changed(conn, "player_id_crosswalk", "player_id", crosswalk_rows)
-        total_written += upsert_rows(
+        stored["player_id_crosswalk"] = upsert_changed(
             conn,
             "player_id_crosswalk",
             crosswalk_rows,
-            conflict_cols=["player_id"],
-            update_cols=crosswalk_cols + ["content_hash", "updated_at"],
+            "player_id",
+            crosswalk_cols + ["content_hash", "updated_at"],
         )
 
         for tag, value in self._live_timestamps.items():
@@ -381,5 +376,9 @@ class IdSpineCollector(Collector):
             set_last_value(conn, _SLEEPER_CROSSWALK_FRESHNESS_KEY, ctx.now.date().isoformat())
 
         return WorkResult(
-            total_written, meta={"sleeper_crosswalk_filled": sleeper_crosswalk_filled}
+            sum(s.rows_changed for s in stored.values()),
+            meta={
+                "sleeper_crosswalk_filled": sleeper_crosswalk_filled,
+                "upserts": {table: s.meta() for table, s in stored.items()},
+            },
         )

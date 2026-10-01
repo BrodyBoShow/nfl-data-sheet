@@ -332,9 +332,29 @@ def test_build_grades_meta_reports_parity_failures():
 # --- write --------------------------------------------------------------------------------
 
 
+class _FakeCopy:
+    def __init__(self, rows: list[list[Any]]) -> None:
+        self.rows = rows
+
+    def __enter__(self) -> _FakeCopy:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+    def write_row(self, row: list[Any]) -> None:
+        self.rows.append(row)
+
+
 class _FakeCursor:
+    """Logs every statement. upsert_changed's COPY is recorded, and its INSERT returns
+    every copied row as inserted, with the requested RETURNING columns."""
+
     def __init__(self, log: list[str]) -> None:
         self.log = log
+        self.copy_cols: list[str] = []
+        self.copied: list[list[Any]] = []
+        self.returned: list[tuple[Any, ...]] = []
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -344,9 +364,22 @@ class _FakeCursor:
 
     def execute(self, sql: str, params: Any = None) -> None:
         self.log.append(sql)
+        if sql.startswith("INSERT INTO") and "RETURNING" in sql:
+            wanted = [c.strip() for c in sql.split("RETURNING", 1)[1].split(",")[1:]]
+            self.returned = [
+                (True, *(row[self.copy_cols.index(c)] for c in wanted)) for row in self.copied
+            ]
 
     def executemany(self, sql: str, rows: Any) -> None:
         self.log.append(sql)
+
+    def copy(self, sql: str) -> _FakeCopy:
+        self.log.append(sql)
+        self.copy_cols = sql.split("(", 1)[1].split(")", 1)[0].split(", ")
+        return _FakeCopy(self.copied)
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self.returned
 
 
 class _FakeConn:
@@ -357,8 +390,7 @@ class _FakeConn:
         return _FakeCursor(self.log)
 
 
-def test_write_never_touches_projection_log_and_keeps_first_result_time(monkeypatch):
-    monkeypatch.setattr(gr, "filter_changed", lambda conn, table, pk, rows: rows)
+def test_write_never_touches_projection_log_and_keeps_first_result_time():
     result = build_grades([_game()], {GID: _lock()}, {}, {GID: [_AT_LOCK]}, NOW)
     conn = _FakeConn()
     ctx: Any = type("Ctx", (), {"conn": conn})()

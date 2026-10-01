@@ -24,7 +24,7 @@ import nflreadpy as nfl
 import polars as pl
 
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import ChangedUpsert, upsert_changed
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
@@ -1258,17 +1258,10 @@ def _upsert_staged(
     cols: list[str],
     key_cols: list[str],
     now: datetime,
-) -> int:
+) -> ChangedUpsert:
     value_cols = [c for c in cols if c not in key_cols]
     rows = [_finalize(r, now, value_cols) for r in df.select(cols).to_dicts()]
-    rows = filter_changed(conn, table, key_cols, rows)
-    return upsert_rows(
-        conn,
-        table,
-        rows,
-        conflict_cols=key_cols,
-        update_cols=value_cols + ["content_hash", "updated_at"],
-    )
+    return upsert_changed(conn, table, rows, key_cols, value_cols + ["content_hash", "updated_at"])
 
 
 def _resolve_pfr_player_ids(conn: Any, pfr_ids: list[str]) -> dict[str, str]:
@@ -1467,45 +1460,28 @@ class NflverseBulkCollector(Collector):
 
     def store(self, ctx: RunContext, validated: dict[str, pl.DataFrame]) -> WorkResult:
         conn = ctx.conn
-        # Rows changed per dataset: each upsert gets only filter_changed's output and
-        # returns its length, so this is what actually changed, not what was fetched.
-        written: dict[str, int] = {}
+        # Per dataset: what the server-side hash diff actually wrote (rows_changed), not
+        # what was fetched, and how many duplicate-key rows it dropped first.
+        stored: dict[str, ChangedUpsert] = {}
+
+        def put(table: str, rows: list[dict[str, Any]], pk: list[str], values: list[str]) -> None:
+            stored[table] = upsert_changed(
+                conn, table, rows, pk, values + ["content_hash", "updated_at"]
+            )
 
         if "player_week" in validated:
+            pw_values = [c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")]
             player_week_rows = [
-                _finalize(
-                    r,
-                    ctx.now,
-                    [c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")],
-                )
-                for r in validated["player_week"].to_dicts()
+                _finalize(r, ctx.now, pw_values) for r in validated["player_week"].to_dicts()
             ]
-            player_week_rows = filter_changed(
-                conn, "player_week", ["player_id", "game_id"], player_week_rows
-            )
-            written["player_week"] = upsert_rows(
-                conn,
-                "player_week",
-                player_week_rows,
-                conflict_cols=["player_id", "game_id"],
-                update_cols=[c for c in _PLAYER_WEEK_COLS if c not in ("player_id", "game_id")]
-                + ["content_hash", "updated_at"],
-            )
+            put("player_week", player_week_rows, ["player_id", "game_id"], pw_values)
 
         if "team_week" in validated:
+            tw_values = [c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")]
             team_week_rows = [
-                _finalize(r, ctx.now, [c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")])
-                for r in validated["team_week"].to_dicts()
+                _finalize(r, ctx.now, tw_values) for r in validated["team_week"].to_dicts()
             ]
-            team_week_rows = filter_changed(conn, "team_week", ["game_id", "team"], team_week_rows)
-            written["team_week"] = upsert_rows(
-                conn,
-                "team_week",
-                team_week_rows,
-                conflict_cols=["game_id", "team"],
-                update_cols=[c for c in _TEAM_WEEK_COLS if c not in ("game_id", "team")]
-                + ["content_hash", "updated_at"],
-            )
+            put("team_week", team_week_rows, ["game_id", "team"], tw_values)
 
         if "ngs" in validated:
             ngs_cols = [
@@ -1516,48 +1492,15 @@ class NflverseBulkCollector(Collector):
                 "stat_type",
                 "team",
             ] + _NGS_ALL_METRIC_COLS
-            ngs_rows = [
-                _finalize(
-                    r,
-                    ctx.now,
-                    [
-                        c
-                        for c in ngs_cols
-                        if c not in ("player_id", "season", "week", "season_type", "stat_type")
-                    ],
-                )
-                for r in validated["ngs"].to_dicts()
-            ]
-            ngs_rows = filter_changed(
-                conn, "ngs", ["player_id", "season", "week", "season_type", "stat_type"], ngs_rows
-            )
-            written["ngs"] = upsert_rows(
-                conn,
-                "ngs",
-                ngs_rows,
-                conflict_cols=["player_id", "season", "week", "season_type", "stat_type"],
-                update_cols=[
-                    c
-                    for c in ngs_cols
-                    if c not in ("player_id", "season", "week", "season_type", "stat_type")
-                ]
-                + ["content_hash", "updated_at"],
-            )
+            ngs_pk = ["player_id", "season", "week", "season_type", "stat_type"]
+            ngs_values = [c for c in ngs_cols if c not in ngs_pk]
+            ngs_rows = [_finalize(r, ctx.now, ngs_values) for r in validated["ngs"].to_dicts()]
+            put("ngs", ngs_rows, ngs_pk, ngs_values)
 
         if "ftn" in validated:
-            ftn_rows = [
-                _finalize(r, ctx.now, [c for c in _FTN_COLS if c not in ("game_id", "play_id")])
-                for r in validated["ftn"].to_dicts()
-            ]
-            ftn_rows = filter_changed(conn, "ftn", ["game_id", "play_id"], ftn_rows)
-            written["ftn"] = upsert_rows(
-                conn,
-                "ftn",
-                ftn_rows,
-                conflict_cols=["game_id", "play_id"],
-                update_cols=[c for c in _FTN_COLS if c not in ("game_id", "play_id")]
-                + ["content_hash", "updated_at"],
-            )
+            ftn_values = [c for c in _FTN_COLS if c not in ("game_id", "play_id")]
+            ftn_rows = [_finalize(r, ctx.now, ftn_values) for r in validated["ftn"].to_dicts()]
+            put("ftn", ftn_rows, ["game_id", "play_id"], ftn_values)
 
         if "pfr_advstats" in validated:
             pfr_df = validated["pfr_advstats"]
@@ -1573,31 +1516,14 @@ class NflverseBulkCollector(Collector):
                 "team",
                 "opponent_team",
             ] + _PFR_ALL_METRIC_COLS
+            pfr_pk = ["game_id", "pfr_player_id", "stat_type"]
+            pfr_values = [c for c in pfr_cols if c not in pfr_pk] + ["player_id"]
             pfr_rows = []
             for r in pfr_df.to_dicts():
                 r = dict(r)
                 r["player_id"] = pfr_crosswalk.get(r["pfr_player_id"])
-                pfr_rows.append(
-                    _finalize(
-                        r,
-                        ctx.now,
-                        [c for c in pfr_cols if c not in ("game_id", "pfr_player_id", "stat_type")]
-                        + ["player_id"],
-                    )
-                )
-            pfr_rows = filter_changed(
-                conn, "pfr_advstats", ["game_id", "pfr_player_id", "stat_type"], pfr_rows
-            )
-            written["pfr_advstats"] = upsert_rows(
-                conn,
-                "pfr_advstats",
-                pfr_rows,
-                conflict_cols=["game_id", "pfr_player_id", "stat_type"],
-                update_cols=[
-                    c for c in pfr_cols if c not in ("game_id", "pfr_player_id", "stat_type")
-                ]
-                + ["player_id", "content_hash", "updated_at"],
-            )
+                pfr_rows.append(_finalize(r, ctx.now, pfr_values))
+            put("pfr_advstats", pfr_rows, pfr_pk, pfr_values)
 
         if "snaps" in validated:
             snaps_df = validated["snaps"]
@@ -1619,54 +1545,27 @@ class NflverseBulkCollector(Collector):
                 "st_snaps",
                 "st_pct",
             ]
+            snap_values = [c for c in snap_cols if c not in ("game_id", "pfr_player_id")] + [
+                "player_id"
+            ]
             snap_rows = []
             for r in snaps_df.to_dicts():
                 r = dict(r)
                 r["player_id"] = snap_crosswalk.get(r["pfr_player_id"])
-                snap_rows.append(
-                    _finalize(
-                        r,
-                        ctx.now,
-                        [c for c in snap_cols if c not in ("game_id", "pfr_player_id")]
-                        + ["player_id"],
-                    )
-                )
-            snap_rows = filter_changed(conn, "snaps", ["game_id", "pfr_player_id"], snap_rows)
-            written["snaps"] = upsert_rows(
-                conn,
-                "snaps",
-                snap_rows,
-                conflict_cols=["game_id", "pfr_player_id"],
-                update_cols=[c for c in snap_cols if c not in ("game_id", "pfr_player_id")]
-                + ["player_id", "content_hash", "updated_at"],
-            )
+                snap_rows.append(_finalize(r, ctx.now, snap_values))
+            put("snaps", snap_rows, ["game_id", "pfr_player_id"], snap_values)
 
         if "depth" in validated:
             depth_cols = ["team", "pos_grp", "pos_abb", "pos_rank", "player_id", "as_of"]
+            depth_pk = ["team", "pos_grp", "pos_abb", "pos_rank"]
+            depth_values = [c for c in depth_cols if c not in depth_pk]
             depth_rows = [
-                _finalize(
-                    r,
-                    ctx.now,
-                    [c for c in depth_cols if c not in ("team", "pos_grp", "pos_abb", "pos_rank")],
-                )
-                for r in validated["depth"].to_dicts()
+                _finalize(r, ctx.now, depth_values) for r in validated["depth"].to_dicts()
             ]
-            depth_rows = filter_changed(
-                conn, "depth", ["team", "pos_grp", "pos_abb", "pos_rank"], depth_rows
-            )
-            written["depth"] = upsert_rows(
-                conn,
-                "depth",
-                depth_rows,
-                conflict_cols=["team", "pos_grp", "pos_abb", "pos_rank"],
-                update_cols=[
-                    c for c in depth_cols if c not in ("team", "pos_grp", "pos_abb", "pos_rank")
-                ]
-                + ["content_hash", "updated_at"],
-            )
+            put("depth", depth_rows, depth_pk, depth_values)
 
         if "player_game_pbp" in validated:
-            written["player_game_pbp"] = _upsert_staged(
+            stored["player_game_pbp"] = _upsert_staged(
                 conn,
                 "player_game_pbp",
                 validated["player_game_pbp"],
@@ -1676,7 +1575,7 @@ class NflverseBulkCollector(Collector):
             )
 
         if "participation_player_season" in validated:
-            written["participation_player_season"] = _upsert_staged(
+            stored["participation_player_season"] = _upsert_staged(
                 conn,
                 "participation_player_season",
                 validated["participation_player_season"],
@@ -1701,15 +1600,16 @@ class NflverseBulkCollector(Collector):
         # Per-dataset log for the analysts' freshness-gate decision (docs/phases/P7.md, step
         # 9): does a tag move without its content changing? `live` is each source tag's
         # timestamp.json value (None on a forced run), `key_moved` whether this dataset's
-        # own stored key differed from live (None when should_run didn't decide), and
-        # `rows_changed` the rows filter_changed let through.
+        # own stored key differed from live (None when should_run didn't decide),
+        # `rows_changed` the rows the server-side hash diff wrote, and `duplicates_dropped`
+        # the duplicate-key rows dropped before it (last row wins).
         meta = dict(self._run_meta)
         meta["datasets"] = {
             dataset: {
                 "live": {t: self._live_timestamps.get(t) for t in _DATASET_SOURCES[dataset]},
                 "key_moved": self._key_moved.get(dataset),
-                "rows_changed": written.get(dataset, 0),
+                **stored.get(dataset, ChangedUpsert(0, 0, 0)).meta(),
             }
             for dataset in sorted(validated)
         }
-        return WorkResult(sum(written.values()), meta)
+        return WorkResult(sum(s.rows_changed for s in stored.values()), meta)

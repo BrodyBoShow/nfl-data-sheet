@@ -1000,5 +1000,8 @@ class PlayerEfficiencyAnalyst(Analyst):
         return 0
 
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:
-        deleted, written = write_player_rows(ctx.conn, TABLE, ctx.season, ctx.week, self._rows)
-        return WorkResult(written, {**self._meta, "stale_rows_deleted": deleted})
+        deleted, upserted = write_player_rows(ctx.conn, TABLE, ctx.season, ctx.week, self._rows)
+        return WorkResult(
+            upserted.rows_changed,
+            {**self._meta, "stale_rows_deleted": deleted, "upserts": {TABLE: upserted.meta()}},
+        )

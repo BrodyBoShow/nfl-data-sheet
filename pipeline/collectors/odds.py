@@ -22,7 +22,7 @@ import psycopg
 from pipeline.collectors import odds_schedule
 from pipeline.collectors.odds_schedule import Target
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import upsert_changed
 from pipeline.core.hashing import hash_row
 from pipeline.core.schedule import resolve_season_week, to_gameday
 
@@ -339,25 +339,24 @@ class OddsCollector(Collector):
         # Pass-through, same as injuries (pipeline/collectors/availability.py) -- as_of
         # is unique per run, so every row is "new" by PK; kept for a uniform store()
         # shape across collectors, not because it drops anything here.
-        snapshot_rows = filter_changed(conn, "odds_snapshots", _SNAPSHOT_PK, snapshot_rows)
-        written = upsert_rows(
+        snapshots = upsert_changed(
             conn,
             "odds_snapshots",
             snapshot_rows,
-            conflict_cols=_SNAPSHOT_PK,
-            update_cols=snapshot_hash_fields + ["content_hash", "updated_at"],
+            _SNAPSHOT_PK,
+            snapshot_hash_fields + ["content_hash", "updated_at"],
         )
 
         consensus_hash_fields = [c for c in _CONSENSUS_COLS if c not in _CONSENSUS_PK]
         consensus_rows = [_finalize(r, ctx.now, consensus_hash_fields) for r in consensus_rows]
-        consensus_rows = filter_changed(conn, "odds_consensus", _CONSENSUS_PK, consensus_rows)
-        written += upsert_rows(
+        consensus = upsert_changed(
             conn,
             "odds_consensus",
             consensus_rows,
-            conflict_cols=_CONSENSUS_PK,
-            update_cols=consensus_hash_fields + ["content_hash", "updated_at"],
+            _CONSENSUS_PK,
+            consensus_hash_fields + ["content_hash", "updated_at"],
         )
+        written = snapshots.rows_changed + consensus.rows_changed
 
         odds_schedule.record_capture(conn, ctx.season, ctx.week, target_id, credits_spent, ctx.now)
 
@@ -367,9 +366,13 @@ class OddsCollector(Collector):
                 "target_id": target_id,
                 "credits_spent": credits_spent,
                 "credits_remaining": validated["credits_remaining"],
-                "events_written": len(consensus_rows),
-                "bookmaker_rows_written": len(snapshot_rows),
+                "events_written": consensus.rows_changed,
+                "bookmaker_rows_written": snapshots.rows_changed,
                 "unresolved_team": unresolved_team,
                 "unresolved_game": unresolved_game,
+                "upserts": {
+                    "odds_snapshots": snapshots.meta(),
+                    "odds_consensus": consensus.meta(),
+                },
             },
         )

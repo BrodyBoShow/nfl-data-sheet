@@ -59,7 +59,7 @@ from pipeline.analysts.market import (
     pre_kickoff_captures,
 )
 from pipeline.core.base import Grader, RunContext, WorkResult
-from pipeline.core.db import filter_changed
+from pipeline.core.db import ChangedUpsert, upsert_changed
 from pipeline.core.hashing import hash_row
 from pipeline.core.schedule import kickoff_utc, to_gameday
 from pipeline.core.stats import bootstrap_corr, bootstrap_mean_ci, wilson_ci
@@ -725,26 +725,22 @@ def build_grades(
     return GradeResult(grades, summarize(grades, now), meta)
 
 
-def _upsert_grades(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> int:
-    """Upsert keyed on game_id. result_first_seen_at keeps its first non-null value, so
-    result lag stays measurable across re-grades."""
-    if not rows:
-        return 0
-    cols = list(rows[0])
-    updates = [
-        "result_first_seen_at = COALESCE(projection_grades.result_first_seen_at, "
-        "EXCLUDED.result_first_seen_at)"
-        if c == "result_first_seen_at" else f"{c} = EXCLUDED.{c}"
-        for c in cols if c != "game_id"
-    ]
-    query = (
-        f"INSERT INTO projection_grades ({', '.join(cols)}) "
-        f"VALUES ({', '.join(f'%({c})s' for c in cols)}) "
-        f"ON CONFLICT (game_id) DO UPDATE SET {', '.join(updates)}"
+def _upsert_grades(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> ChangedUpsert:
+    """Hash-diffed upsert keyed on game_id. result_first_seen_at keeps its first non-null
+    value, so result lag stays measurable across re-grades. Returns each changed row's
+    game_id and grade_status."""
+    return upsert_changed(
+        conn,
+        "projection_grades",
+        rows,
+        "game_id",
+        [c for c in (rows[0] if rows else {}) if c != "game_id"],
+        update_exprs={
+            "result_first_seen_at": "COALESCE(projection_grades.result_first_seen_at, "
+            "EXCLUDED.result_first_seen_at)"
+        },
+        returning=("game_id", "grade_status"),
     )
-    with conn.cursor() as cur:
-        cur.executemany(query, rows)
-    return len(rows)
 
 
 def _replace_summary(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> int:
@@ -789,14 +785,13 @@ class ProjectionGrader(Grader):
         )
 
     def write(self, ctx: RunContext, computed: GradeResult) -> WorkResult:
-        changed = filter_changed(ctx.conn, "projection_grades", "game_id", computed.grades)
-        written = _upsert_grades(ctx.conn, changed)
+        grades = _upsert_grades(ctx.conn, computed.grades)
         summary = _replace_summary(ctx.conn, computed.summary)
         meta = {
             **computed.meta,
-            "grades_written": written,
+            "grades_written": grades.rows_changed,
             "summary_rows": summary,
-            "graded_now": sorted(r["game_id"] for r in changed
-                                 if r["grade_status"] == "graded"),
+            "graded_now": sorted(gid for gid, status in grades.returned if status == "graded"),
+            "upserts": {"projection_grades": grades.meta()},
         }
-        return WorkResult(written + summary, meta)
+        return WorkResult(grades.rows_changed + summary, meta)

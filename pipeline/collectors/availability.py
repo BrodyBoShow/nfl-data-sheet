@@ -21,7 +21,7 @@ import httpx
 import psycopg
 
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import delete_rows, filter_changed, upsert_rows
+from pipeline.core.db import delete_rows, upsert_changed, upsert_rows
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 from pipeline.core.injury_changelog import (
@@ -509,17 +509,16 @@ class AvailabilityCollector(Collector):
 
         injuries_hash_fields = [c for c in _INJURIES_COLS if c not in _INJURIES_PK]
         injuries_rows = [_finalize(r, ctx.now, injuries_hash_fields) for r in to_write]
-        # A pass-through here since as_of is unique per run -- every row is "new" by PK,
-        # so this never actually drops anything, but it's kept for the same reason every
-        # other collector runs writes through it: a uniform store() shape. The real dedup
-        # now happens above, in decide_injury_row, before rows are even built.
-        injuries_rows = filter_changed(conn, "injuries", _INJURIES_PK, injuries_rows)
-        written = upsert_rows(
+        # The hash diff is a pass-through here since as_of is unique per run -- every row is
+        # "new" by PK, so it never actually drops anything, but it's kept for the same
+        # reason every other collector writes through it: a uniform store() shape. The real
+        # dedup now happens above, in decide_injury_row, before rows are even built.
+        injuries = upsert_changed(
             conn,
             "injuries",
             injuries_rows,
-            conflict_cols=_INJURIES_PK,
-            update_cols=injuries_hash_fields + ["content_hash", "updated_at"],
+            _INJURIES_PK,
+            injuries_hash_fields + ["content_hash", "updated_at"],
         )
 
         if sleeper_fetched:
@@ -531,8 +530,9 @@ class AvailabilityCollector(Collector):
             "espn_id_extraction_failed": validated["espn_id_extraction_failed"],
             "sleeper_fetched": sleeper_fetched,
             **counts,
+            "upserts": {"injuries": injuries.meta()},
         }
         if outage_guard:
             meta["outage_guard"] = outage_guard
 
-        return WorkResult(written, meta=meta)
+        return WorkResult(injuries.rows_changed, meta=meta)

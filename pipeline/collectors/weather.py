@@ -20,7 +20,7 @@ import psycopg
 from pipeline.collectors import weather_schedule
 from pipeline.collectors.weather_schedule import Target
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import upsert_changed
 from pipeline.core.hashing import hash_row
 
 # The venue guard lives in pipeline/core/venue.py so the Environment analyst applies the
@@ -346,14 +346,13 @@ class WeatherCollector(Collector):
             captured.append(label)
 
         # Pass-through like odds_snapshots: as_of is unique per run, so every row is new.
-        rows = filter_changed(conn, "weather_snapshots", _ROW_PK, rows)
         hash_fields = [c for c in _ROW_COLS if c not in _ROW_PK]
-        written = upsert_rows(
+        snapshots = upsert_changed(
             conn,
             "weather_snapshots",
             rows,
-            conflict_cols=_ROW_PK,
-            update_cols=hash_fields + ["content_hash", "updated_at"],
+            _ROW_PK,
+            hash_fields + ["content_hash", "updated_at"],
         )
         # Mark captured only after the rows are written in this same transaction.
         for r in validated:
@@ -362,7 +361,7 @@ class WeatherCollector(Collector):
                 weather_schedule.record_captured(conn, item.target, ctx.now)
 
         return WorkResult(
-            written,
+            snapshots.rows_changed,
             meta={
                 "due": len(validated),
                 "captured": captured,
@@ -370,5 +369,6 @@ class WeatherCollector(Collector):
                 "unresolved": unresolved,
                 "roof_conflicts": sorted(set(roof_conflicts)),
                 "fetch_errors": fetch_errors,
+                "upserts": {"weather_snapshots": snapshots.meta()},
             },
         )

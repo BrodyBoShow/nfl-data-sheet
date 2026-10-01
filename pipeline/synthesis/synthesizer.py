@@ -66,7 +66,7 @@ from pipeline.analysts.market import (
     STATUS_SINGLE_CAPTURE,
 )
 from pipeline.core.base import RunContext, Synthesizer, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import upsert_changed
 from pipeline.core.hashing import hash_row
 from pipeline.core.schedule import LOCK_LEAD, kickoff_utc
 from pipeline.core.team_aliases import normalize_team_abbr
@@ -849,15 +849,13 @@ class MatchupSynthesizer(Synthesizer):
                     # the next run rebuilds the card from the stored lock.
                     lost.add(lock["game_id"])
         cards = [c for c in computed.cards if c["game_id"] not in lost]
-        changed = filter_changed(conn, "matchup_cards", "game_id", cards)
-        update_cols = [c for c in (changed[0] if changed else {}) if c != "game_id"]
-        written = upsert_rows(
-            conn, "matchup_cards", changed, conflict_cols=["game_id"], update_cols=update_cols
-        )
+        update_cols = [c for c in (cards[0] if cards else {}) if c != "game_id"]
+        written = upsert_changed(conn, "matchup_cards", cards, "game_id", update_cols)
         meta = {
             **computed.meta,
             "locks_inserted": inserted,
             "locks_lost_to_concurrent_run": sorted(lost),
-            "cards_written": written,
+            "cards_written": written.rows_changed,
+            "upserts": {"matchup_cards": written.meta()},
         }
-        return WorkResult(written + len(inserted), meta)
+        return WorkResult(written.rows_changed + len(inserted), meta)

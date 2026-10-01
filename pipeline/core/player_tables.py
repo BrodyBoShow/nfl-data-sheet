@@ -17,7 +17,7 @@ from typing import Any
 import polars as pl
 import psycopg
 
-from .db import delete_rows, filter_changed, upsert_rows
+from .db import ChangedUpsert, delete_rows, upsert_changed
 from .hashing import hash_row
 
 _ROUND_DIGITS = 6
@@ -26,7 +26,7 @@ _ROUND_DIGITS = 6
 KEY_COLS = ["player_id", "season", "week"]
 IDENTITY_COLS = ["season_type", "game_id", "team", "position_group"]
 # Written, but not hashed: a run whose only change is when it ran, or which nflverse
-# timestamps it read, rewrites nothing (filter_changed compares content_hash).
+# timestamps it read, rewrites nothing (upsert_changed compares content_hash).
 UNHASHED_COLS = frozenset({"as_of", "inputs_version", "content_hash", "updated_at"})
 
 
@@ -275,21 +275,20 @@ def write_player_rows(
     season: int,
     through_week: int,
     rows: list[dict[str, Any]],
-) -> tuple[int, int]:
+) -> tuple[int, ChangedUpsert]:
     """The scoped stale delete, then a hash-diffed upsert, in the caller's transaction.
-    Returns (deleted, written)."""
+    Returns (deleted, what the upsert wrote)."""
     deleted = delete_stale_player_rows(
         conn, table, season, through_week, ((r["player_id"], r["week"]) for r in rows)
     )
-    changed = filter_changed(conn, table, KEY_COLS, rows)
-    written = upsert_rows(
+    upserted = upsert_changed(
         conn,
         table,
-        changed,
-        conflict_cols=KEY_COLS,
-        update_cols=[col for col in (changed[0] if changed else {}) if col not in KEY_COLS],
+        rows,
+        KEY_COLS,
+        [col for col in (rows[0] if rows else {}) if col not in KEY_COLS],
     )
-    return deleted, written
+    return deleted, upserted
 
 
 def column_list(migration_sql: str) -> list[str]:

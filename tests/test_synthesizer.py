@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from pipeline.core.db import ChangedUpsert
 from pipeline.synthesis import synthesizer as syn
 from pipeline.synthesis.model import BucketCalibration, ModelFile
 from pipeline.synthesis.synthesizer import (
@@ -375,13 +376,12 @@ class _FakeConn:
 
 def _write(result: syn.SynthesisResult, conflicts: set[str], monkeypatch) -> tuple:
     written: list[dict] = []
-    monkeypatch.setattr(syn, "filter_changed", lambda conn, table, pk, rows: rows)
 
-    def fake_upsert(conn, table, rows, conflict_cols, update_cols):
+    def fake_upsert(conn, table, rows, pk_cols, update_cols):
         written.extend(rows)
-        return len(rows)
+        return ChangedUpsert(inserted=len(rows), updated=0, duplicates_dropped=0)
 
-    monkeypatch.setattr(syn, "upsert_rows", fake_upsert)
+    monkeypatch.setattr(syn, "upsert_changed", fake_upsert)
     ctx: Any = type("Ctx", (), {"conn": _FakeConn(conflicts)})()
     return syn.MatchupSynthesizer().write(ctx, result), written
 

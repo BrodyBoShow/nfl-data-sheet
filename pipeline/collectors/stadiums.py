@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, field_validator, model_validator
 
 from pipeline.core.base import Collector, RunContext, WorkResult
-from pipeline.core.db import filter_changed, upsert_rows
+from pipeline.core.db import upsert_changed
 from pipeline.core.freshness import get_last_value, set_last_value
 from pipeline.core.hashing import hash_row
 
@@ -152,15 +152,17 @@ class StadiumsCollector(Collector):
             row["updated_at"] = ctx.now
             rows.append(row)
 
-        changed = filter_changed(ctx.conn, "stadiums", "stadium_id", rows)
-        written = upsert_rows(
+        stadiums = upsert_changed(
             ctx.conn,
             "stadiums",
-            changed,
-            conflict_cols=["stadium_id"],
-            update_cols=hash_fields + ["content_hash", "updated_at"],
+            rows,
+            "stadium_id",
+            hash_fields + ["content_hash", "updated_at"],
         )
         # No deletes: a stadium dropped from the CSV may still be referenced by
         # weather_snapshots (FK). Removing a venue is a deliberate manual step.
         set_last_value(ctx.conn, _FRESHNESS_KEY, validated["file_hash"])
-        return WorkResult(written, meta={"csv_rows": len(rows)})
+        return WorkResult(
+            stadiums.rows_changed,
+            meta={"csv_rows": len(rows), "upserts": {"stadiums": stadiums.meta()}},
+        )

@@ -35,6 +35,7 @@ from pipeline.collectors.nflverse_bulk import (
     _player_play_scope,
 )
 from pipeline.core.base import RunContext, WorkResult
+from pipeline.core.db import ChangedUpsert
 from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -819,10 +820,12 @@ class _FakeNflverse:
         self.freshness: dict[str, str] = {}
         self.calls: list[tuple[str, list[int] | int]] = []
         self.upserted: dict[str, int] = {}
-        # filter_changed: rows offered per table, and how many leading rows to treat as
-        # unchanged (dropped) per table. Nothing is dropped unless a test says so.
+        # upsert_changed: rows offered per table, how many leading rows to treat as
+        # unchanged (not written), and how many duplicate-key rows to report dropped, per
+        # table. Nothing is unchanged or duplicated unless a test says so.
         self.offered: dict[str, int] = {}
         self.unchanged: dict[str, int] = {}
+        self.duplicates: dict[str, int] = {}
         self.result: WorkResult | None = None
         raw = _load_raw()
 
@@ -844,9 +847,16 @@ class _FakeNflverse:
             load_participation=loader("load_participation", raw["participation"]),
         )
 
-        def upsert(conn, table, rows, conflict_cols, update_cols):
-            self.upserted[table] = self.upserted.get(table, 0) + len(rows)
-            return len(rows)
+        def upsert_changed(conn, table, rows, pk_cols, update_cols):
+            # Stands in for the server-side diff: the first `unchanged[table]` rows match
+            # what's stored, the rest are written.
+            rows = list(rows)
+            self.offered[table] = self.offered.get(table, 0) + len(rows)
+            changed = len(rows[self.unchanged.get(table, 0) :])
+            self.upserted[table] = self.upserted.get(table, 0) + changed
+            return ChangedUpsert(
+                inserted=changed, updated=0, duplicates_dropped=self.duplicates.get(table, 0)
+            )
 
         monkeypatch.setattr(nflverse_bulk, "nfl", fake_nfl)
         monkeypatch.setattr(nflverse_bulk, "_fetch_timestamp", lambda tag: self.live[tag])
@@ -855,12 +865,7 @@ class _FakeNflverse:
             nflverse_bulk, "set_last_value", lambda c, k, v: self.freshness.__setitem__(k, v)
         )
 
-        def filter_changed(conn, table, pk_cols, rows):
-            self.offered[table] = self.offered.get(table, 0) + len(rows)
-            return rows[self.unchanged.get(table, 0) :]
-
-        monkeypatch.setattr(nflverse_bulk, "filter_changed", filter_changed)
-        monkeypatch.setattr(nflverse_bulk, "upsert_rows", upsert)
+        monkeypatch.setattr(nflverse_bulk, "upsert_changed", upsert_changed)
         monkeypatch.setattr(nflverse_bulk, "_resolve_pfr_player_ids", lambda c, ids: {})
 
     def fetched(self, name: str) -> list:
@@ -997,6 +1002,7 @@ def test_run_meta_logs_live_tags_and_which_datasets_own_key_moved(fake):
         "live": {"pbp": "t2"},
         "key_moved": True,
         "rows_changed": fake.upserted["team_week"],
+        "duplicates_dropped": 0,
     }
     assert logged["player_game_pbp"]["live"] == {"pbp": "t2", "ftn_charting": "t1"}
     assert logged["player_game_pbp"]["key_moved"] is True
@@ -1005,7 +1011,21 @@ def test_run_meta_logs_live_tags_and_which_datasets_own_key_moved(fake):
     assert fake.result.meta["pgp_ftn_unmatched_plays"] == 0  # existing meta kept
 
 
-def test_run_meta_rows_changed_is_what_filter_changed_let_through(fake):
+def test_run_meta_duplicates_dropped_is_logged_per_dataset(fake):
+    """Duplicate-key rows dropped before the diff are recorded per dataset, next to
+    rows_changed, and are zero where nothing was dropped."""
+    fake.live["snap_counts"] = "t2"
+    fake.duplicates = {"snaps": 4, "depth": 1}
+    assert fake.cycle(NflverseBulkCollector()) == _CORE
+    assert fake.result is not None
+    logged = fake.result.meta["datasets"]
+    assert logged["snaps"]["duplicates_dropped"] == 4
+    assert logged["depth"]["duplicates_dropped"] == 1
+    for dataset in _CORE - {"snaps", "depth"}:
+        assert logged[dataset]["duplicates_dropped"] == 0, dataset
+
+
+def test_run_meta_rows_changed_is_what_the_hash_diff_wrote(fake):
     """rows_changed counts rows after the hash diff, per dataset: a marker that moves with
     unchanged content must log 0, not the rows fetched."""
     fake.live["snap_counts"] = "t2"

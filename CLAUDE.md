@@ -100,8 +100,9 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`�
   and `should_run`/`inputs_ready` can query state like `source_freshness` through it too).
 - `run()` wraps everything, logs to `agent_runs`, never raises past the run boundary —
   one job's exception is caught, logged as `status="failed"`, and swallowed. Both
-  hash-diff before upserting (`pipeline/core/db.py`'s `filter_changed`, keyed on a
-  `content_hash` column each table carries).
+  hash-diff in Postgres as they upsert (`pipeline/core/db.py`'s `upsert_changed`, keyed
+  on a `content_hash` column each table carries). No stored hash comes back to the client,
+  and `updated_at` moves only when content changes.
 - `source_freshness` table (`source text PK, last_value text, checked_at`): generic
   freshness-gate state for any collector checking a cheap upstream marker (e.g.
   nflverse's `timestamp.json`) before a full fetch — not in the original P1 file list,
