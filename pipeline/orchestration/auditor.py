@@ -13,12 +13,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import psycopg
 
 from pipeline.core.config import get_settings
 from pipeline.core.db import get_connection
+from pipeline.core.input_gate import LAST_SUCCESS_WHERE, InputGate
 from pipeline.core.schedule import kickoff_utc, to_gameday
 
 # Max allowed staleness before flagging, matching docs/architecture.md's freshness tiers.
@@ -328,6 +330,102 @@ def check_availability_outage(conn: psycopg.Connection) -> dict[str, str]:
         )
         for source, info in outage_guard.items()
     }
+
+
+def summarize_gate_audit(
+    agent: str,
+    season: int,
+    week: int,
+    success: tuple[int, datetime],
+    changed: dict[str, datetime],
+    wrong_skips: list[int],
+    unserved_tick: int | None,
+) -> list[str]:
+    """Pure. `changed` holds each audited input whose max(updated_at) in the analyst's
+    window is after its last success started. Alerts when the inputs changed and either
+    a later `skipped_unchanged` run of the analyst started after the change (the gate is
+    wrong), or a later tick ran (`unserved_tick`, a synthesizer run) with no run of the
+    analyst at all (a tick-level rule kept it from running). At most one message."""
+    if not changed or (not wrong_skips and unserved_tick is None):
+        return []
+    run_id, started = success
+    moved = ", ".join(f"{t} {ts.isoformat()}" for t, ts in sorted(changed.items()))
+    detail = []
+    if wrong_skips:
+        detail.append(f"skipped_unchanged after the change: run(s) {wrong_skips}")
+    if unserved_tick is not None:
+        detail.append(f"tick ran without it (synthesizer run {unserved_tick})")
+    return [
+        f"input gate: {agent} {season} week {week} inputs changed after its last success "
+        f"(run {run_id}, started {started.isoformat()}): {moved} -- {'; '.join(detail)}"
+    ]
+
+
+def check_gate_inputs(
+    conn: psycopg.Connection, gate: InputGate, season: int, week: int
+) -> list[str]:
+    """The gate spec's auditor check (docs/phases/P7.md, step 9, item 5), which doesn't
+    trust the gate: it reads `updated_at`, never the gate's key or digests. A staged
+    row's `updated_at` moves only when its content does (`upsert_changed`'s guard).
+
+    - The window is each input's own digest filter, the analyst's `_fetch` constants.
+    - Inputs with `audit=False` are skipped: `players`, whose `updated_at` moves on
+      columns the analysts don't read.
+    - Never uses elapsed time, so irregular ticks don't false-alarm.
+    - Blind to deletes, which move no timestamp. The content branch's digest sees them.
+    - `updated_at` is the collector's run start, not its commit, so a skip that ran
+      concurrently with a collector's write can false-alarm. The dispatcher runs jobs in
+      sequence, so only overlapping manual runs can do that.
+
+    Cost: one `max(updated_at)` per audited input, plus two small agent_runs reads."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id, started_at FROM agent_runs WHERE {LAST_SUCCESS_WHERE} "
+            "ORDER BY started_at DESC, id DESC LIMIT 1",
+            (gate.agent, str(season), str(week)),
+        )
+        success = cur.fetchone()
+        if success is None:
+            return []
+        audited = [i for i in gate.inputs if i.audit]
+        subqueries: list[str] = []
+        params: list[Any] = []
+        for i in audited:
+            where, p = i.digest_filter(season, week)
+            subqueries.append(f"(SELECT max(updated_at) FROM {i.table} WHERE {where})")
+            params += p
+        cur.execute("SELECT " + ", ".join(subqueries), tuple(params))
+        latest = cur.fetchone() or ()
+        changed = {
+            i.table: ts for i, ts in zip(audited, latest, strict=True) if ts and ts > success[1]
+        }
+        if not changed:
+            return []
+        first_change = min(changed.values())
+        cur.execute(
+            "SELECT "
+            "(SELECT coalesce(array_agg(id ORDER BY id), '{}') FROM agent_runs "
+            "WHERE agent = %s AND status = 'skipped_unchanged' AND started_at > %s "
+            "AND meta->'gate'->>'season' = %s AND meta->'gate'->>'week' = %s), "
+            "(SELECT min(id) FROM agent_runs WHERE agent = 'synthesizer' AND started_at > %s), "
+            "(SELECT count(*) FROM agent_runs WHERE agent = %s AND started_at > %s)",
+            (
+                gate.agent,
+                first_change,
+                str(season),
+                str(week),
+                first_change,
+                gate.agent,
+                first_change,
+            ),
+        )
+        later = cur.fetchone()
+    assert later is not None
+    wrong_skips, synth_after, analyst_runs_after = later
+    unserved = synth_after if analyst_runs_after == 0 else None
+    return summarize_gate_audit(
+        gate.agent, season, week, success, changed, list(wrong_skips), unserved
+    )
 
 
 def check_row_count(conn: psycopg.Connection, table: str, min_rows: int) -> bool:

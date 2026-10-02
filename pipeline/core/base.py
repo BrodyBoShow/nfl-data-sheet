@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar, Protocol
 
 import polars as pl
 import psycopg
@@ -65,14 +65,30 @@ class RunResult:
     error: str | None = None
 
 
-def _resolve_skip_status(ready_result: bool | str) -> run_log.RunStatus | None:
+@dataclass(frozen=True)
+class Readiness:
+    """A readiness answer that carries `agent_runs.meta`, for a check that has to record
+    why it decided (the input gate, `pipeline/core/input_gate.py`). `status` None
+    proceeds; any other status skips as exactly that status. `meta` is logged however the
+    run ends: on the skip, merged into a success's meta, and on a failure."""
+
+    status: run_log.RunStatus | None
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+ReadyResult = bool | str | Readiness
+
+
+def _resolve_skip_status(ready_result: ReadyResult) -> run_log.RunStatus | None:
     """`None` means proceed. Otherwise, the exact status to log and return.
 
     `is_ready` returning `True` proceeds, `False` is the generic "nothing changed"
     skip (`skipped_fresh`), and any other string is that exact status verbatim (e.g.
     `EfficiencyAnalyst.inputs_ready`'s `"skipped_no_prior"`) — a more specific reason
-    than a routine freshness-gate skip.
+    than a routine freshness-gate skip. A `Readiness` is its own `status`.
     """
+    if isinstance(ready_result, Readiness):
+        return ready_result.status
     if ready_result is True:
         return None
     if isinstance(ready_result, str):
@@ -86,7 +102,7 @@ def _execute(
     season: int,
     week: int,
     season_type: str,
-    is_ready: Callable[[RunContext], bool | str],
+    is_ready: Callable[[RunContext], ReadyResult],
     do_work: Callable[[RunContext], WorkResult],
 ) -> RunResult:
     settings = get_settings()
@@ -103,10 +119,15 @@ def _execute(
             settings=settings,
             conn=conn,
         )
+        # A Readiness's meta (the gate's key and decision) is logged however the run ends.
+        ready_meta: dict[str, Any] = {}
         try:
-            skip_status = _resolve_skip_status(is_ready(ctx))
+            ready = is_ready(ctx)
+            if isinstance(ready, Readiness):
+                ready_meta = ready.meta
+            skip_status = _resolve_skip_status(ready)
             if skip_status is not None:
-                run_log.finish_run(conn, run_id, status=skip_status)
+                run_log.finish_run(conn, run_id, status=skip_status, meta=ready_meta)
                 conn.commit()
                 return RunResult(name, skip_status, 0, time.monotonic() - started)
 
@@ -117,17 +138,24 @@ def _execute(
                 run_id,
                 status="success",
                 rows_written=result.rows_written,
-                meta=result.meta,
+                meta={**result.meta, **ready_meta},
             )
             conn.commit()
             return RunResult(name, "success", result.rows_written, time.monotonic() - started)
         except Exception as exc:
             conn.rollback()
             error = f"{type(exc).__name__}: {exc}"
-            run_log.finish_run(conn, run_id, status="failed", error=error)
+            run_log.finish_run(conn, run_id, status="failed", error=error, meta=ready_meta)
             conn.commit()
             print(f"[{name}] FAILED: {error.splitlines()[0]}", file=sys.stderr)
             return RunResult(name, "failed", 0, time.monotonic() - started, error=error)
+
+
+class InputGateCheck(Protocol):
+    """What `Analyst.run` calls on a gated analyst (`pipeline/core/input_gate.py`'s
+    `InputGate`). A Protocol so this module doesn't import the gate, which imports it."""
+
+    def check(self, ctx: RunContext, *, force: bool) -> Readiness: ...
 
 
 class Collector(ABC):
@@ -184,11 +212,28 @@ class Analyst(ABC):
     name: str
     sector: str
     signal_names: frozenset[str]
+    # The per-analyst input gate (docs/phases/P7.md, step 9, the gate spec). None for an
+    # ungated analyst, which runs exactly as before.
+    input_gate: ClassVar[InputGateCheck | None] = None
 
     @abstractmethod
     def inputs_ready(self, ctx: RunContext) -> bool | str:
         """`False` skips as `skipped_fresh` if required staged data isn't there yet; a
         string skips as that exact status instead (e.g. `"skipped_no_prior"`)."""
+
+    def _ready(self, ctx: RunContext, force: bool) -> ReadyResult:
+        """`inputs_ready` first, as before, then the input gate if the analyst has one.
+
+        The gate is called here, not from `inputs_ready`, because `--force` never calls
+        `inputs_ready`, and the gate still has to take its key on a forced run (spec item
+        4). A forced run skips `inputs_ready`'s no-data check and the gate's comparison."""
+        if not force:
+            ready = self.inputs_ready(ctx)
+            if ready is not True:
+                return ready
+        if self.input_gate is None:
+            return True
+        return self.input_gate.check(ctx, force=force)
 
     @abstractmethod
     def compute(self, ctx: RunContext) -> pl.DataFrame:
@@ -235,7 +280,7 @@ class Analyst(ABC):
             season=season,
             week=week,
             season_type=season_type,
-            is_ready=(lambda ctx: True) if force else self.inputs_ready,
+            is_ready=lambda ctx: self._ready(ctx, force),
             do_work=do_work,
         )
 

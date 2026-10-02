@@ -3,7 +3,8 @@ Job: Compute each player's receiving, rushing, passing and defense rate stats pe
      over his last 4 games and season to date (prior-blended), with league percentiles
      and participation-derived multi-season priors (_hist).
 Reads: player_game_pbp, snaps, pfr_advstats, ngs, player_week (def_* only),
-       participation_player_season, players (position_group)
+       participation_player_season, players (position_group); its input gate also reads
+       source_freshness or digests of those tables, and agent_runs
 Writes: player_eff_week
 Tier: T2
 Phase: P7
@@ -19,6 +20,7 @@ import psycopg
 
 from pipeline.core.base import Analyst, RunContext, WorkResult
 from pipeline.core.freshness import get_last_value
+from pipeline.core.input_gate import GateInput, InputGate, players_input
 from pipeline.core.player_tables import (
     as_of_percentiles,
     blend_exprs,
@@ -906,47 +908,110 @@ def _query(conn: psycopg.Connection, sql: str, params: tuple[Any, ...]) -> pl.Da
 _TEXT = {"player_id", "game_id", "team", "season_type", "stat_type", "position_group"}
 
 
+# Each read's WHERE, shared by _fetch and the input gate's digest, so the two can't drift.
+# The current season through the run's week, plus all of season-1 (the prior).
+_WINDOW = "((season = %s AND week <= %s) OR season = %s) AND season_type IN ('REG','POST')"
+_PGP_WHERE = _WINDOW
+_SNAPS_WHERE = f"player_id IS NOT NULL AND {_WINDOW}"
+_PFR_WHERE = f"player_id IS NOT NULL AND {_WINDOW}"
+_NGS_WHERE = f"week > 0 AND {_WINDOW}"
+_PW_WHERE = _WINDOW
+_PART_WHERE = "season BETWEEN %s AND %s"
+_POSITIONS_WHERE = "player_id = ANY(%s)"
+
+
+def _window(season: int, through_week: int) -> tuple[int, int, int]:
+    return (season, through_week, season - 1)
+
+
+def _hist_window(season: int, through_week: int) -> tuple[int, int]:
+    return (season - _HIST_SEASONS, season - 1)
+
+
 def _fetch(conn: psycopg.Connection, season: int, through_week: int) -> EffInputs:
-    window = "((season = %s AND week <= %s) OR season = %s) AND season_type IN ('REG','POST')"
-    params = (season, through_week, season - 1)
-    pgp = _query(conn, f"SELECT {', '.join(_PGP_COLS)} FROM player_game_pbp WHERE {window}", params)
+    params = _window(season, through_week)
+    pgp = _query(
+        conn, f"SELECT {', '.join(_PGP_COLS)} FROM player_game_pbp WHERE {_PGP_WHERE}", params
+    )
     snaps = _query(
         conn,
         "SELECT player_id, game_id, season, week, season_type, team, "
-        "offense_snaps, defense_snaps, st_snaps FROM snaps "
-        f"WHERE player_id IS NOT NULL AND {window}",
+        f"offense_snaps, defense_snaps, st_snaps FROM snaps WHERE {_SNAPS_WHERE}",
         params,
     )
     pfr = _query(
         conn,
         "SELECT player_id, season, week, season_type, stat_type, "
-        f"{', '.join(_PFR_COLS)} FROM pfr_advstats "
-        f"WHERE player_id IS NOT NULL AND {window}",
+        f"{', '.join(_PFR_COLS)} FROM pfr_advstats WHERE {_PFR_WHERE}",
         params,
     )
     ngs = _query(
         conn,
         "SELECT player_id, season, week, season_type, stat_type, "
-        f"{', '.join(_NGS_COLS)} FROM ngs WHERE week > 0 AND {window}",
+        f"{', '.join(_NGS_COLS)} FROM ngs WHERE {_NGS_WHERE}",
         params,
     )
     pw = _query(
         conn,
         "SELECT player_id, season, week, season_type, "
-        f"{', '.join(_PW_DEF_COLS)} FROM player_week WHERE {window}",
+        f"{', '.join(_PW_DEF_COLS)} FROM player_week WHERE {_PW_WHERE}",
         params,
     )
     part = _query(
         conn,
         f"SELECT player_id, season, {', '.join(_PART_COLS)} "
-        "FROM participation_player_season WHERE season BETWEEN %s AND %s",
-        (season - _HIST_SEASONS, season - 1),
+        f"FROM participation_player_season WHERE {_PART_WHERE}",
+        _hist_window(season, through_week),
     )
     ids = sorted(set(pgp["player_id"].to_list()) | set(snaps["player_id"].to_list()))
     positions = _query(
-        conn, "SELECT player_id, position_group FROM players WHERE player_id = ANY(%s)", (ids,)
+        conn, f"SELECT player_id, position_group FROM players WHERE {_POSITIONS_WHERE}", (ids,)
     )
     return EffInputs(pgp, snaps, pfr, ngs, pw, part, positions)
+
+
+# Every table _fetch reads (tests/test_input_gate.py holds it to that). Markers are
+# _INPUTS_VERSION_KEYS plus nflverse:players (P7 open item 12).
+_PGP_INPUT = GateInput(
+    "player_game_pbp", "nflverse:player_game_pbp", ("game_id", "player_id"), _PGP_WHERE, _window
+)
+_SNAPS_INPUT = GateInput(
+    "snaps", "nflverse:snap_counts", ("game_id", "pfr_player_id"), _SNAPS_WHERE, _window
+)
+INPUT_GATE = InputGate(
+    agent="player_efficiency",
+    module=__name__,
+    inputs=(
+        _PGP_INPUT,
+        _SNAPS_INPUT,
+        GateInput(
+            "pfr_advstats",
+            "nflverse:pfr_advstats",
+            ("game_id", "pfr_player_id", "stat_type"),
+            _PFR_WHERE,
+            _window,
+        ),
+        GateInput(
+            "ngs",
+            "nflverse:nextgen_stats",
+            ("player_id", "season", "week", "season_type", "stat_type"),
+            _NGS_WHERE,
+            _window,
+        ),
+        GateInput(
+            "player_week", "nflverse:stats_player", ("player_id", "game_id"), _PW_WHERE, _window
+        ),
+        GateInput(
+            "participation_player_season",
+            "nflverse:participation_player_season",
+            ("player_id", "season"),
+            _PART_WHERE,
+            _hist_window,
+        ),
+        players_input(_POSITIONS_WHERE, ids_from=(_PGP_INPUT, _SNAPS_INPUT)),
+    ),
+    extra_files=(_MIGRATION,),
+)
 
 
 def _inputs_version(conn: psycopg.Connection) -> str:
@@ -961,6 +1026,7 @@ class PlayerEfficiencyAnalyst(Analyst):
     # sector of its own so the dispatcher's distinct-sector invariant holds.
     sector = "player_efficiency"
     signal_names: frozenset[str] = frozenset()
+    input_gate = INPUT_GATE
 
     _rows: list[dict[str, Any]]
     _meta: dict[str, Any]

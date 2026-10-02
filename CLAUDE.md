@@ -152,6 +152,18 @@ web/                      # Phase 6+
   `pipeline/analysts/efficiency.py`'s own current-starter/prior-attempts functions
   instead). When a one-off diagnostic needs to show what an agent's logic produces,
   import and call that logic — don't re-derive it.
+- **Missing row ≠ NULL column.** When a read joins through `players` (or any identity
+  table), the code states what a missing row means and what a NULL column means, and
+  the two never silently collapse to the same value. Where downstream code treats them
+  differently, a test shows they produce different results (for SQL the fakes can't
+  evaluate, a real-engine check in a `scripts/verify_*.py`). It's a shape this codebase
+  keeps producing:
+  - `docs/phases/P7.md`, "Defense missing-row question": a missing `player_week` row
+    means zero, but a missing PFR def row doesn't (59.6% of them had pbp credits).
+  - `docs/phases/P9.md` §2, "Drop risk": a player absent from `players` is dropped from
+    `player_usage_week`, so the view names the wrong primary.
+  - `docs/phases/P7.md`, "Gate mechanism", approved change 3: a NULL `position_group`
+    digested the same as a player absent from `players`.
 
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector — never combine two sources or

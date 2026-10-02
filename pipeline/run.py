@@ -60,6 +60,9 @@ _USAGE = (
     "  --delete: retention only; without it, retention is a dry run that deletes nothing"
 )
 
+# Skips that exit 0, like success. skipped_unchanged is the input gate's.
+_SKIP_STATUSES = ("skipped_fresh", "skipped_no_prior", "skipped_no_injuries", "skipped_unchanged")
+
 
 _ParsedArgs = tuple[str, bool, "int | None", "int | None", "str | None", "str | None", bool]
 
@@ -150,13 +153,12 @@ def main(argv: list[str] | None = None) -> int:
     if result.status == "success":
         rows = f"{result.rows_written:,} rows written"
         print(f"{result.name}: success, {rows}, {result.duration_s:.1f}s")
-    elif result.status in ("skipped_fresh", "skipped_no_prior", "skipped_no_injuries"):
+    elif result.status in _SKIP_STATUSES:
         print(f"{result.name}: {result.status}")
     else:
         print(f"{result.name}: {result.status} - {result.error}")
 
-    ok_statuses = ("success", "skipped_fresh", "skipped_no_prior", "skipped_no_injuries")
-    return 0 if result.status in ok_statuses else 1
+    return 0 if result.status == "success" or result.status in _SKIP_STATUSES else 1
 
 
 if __name__ == "__main__":

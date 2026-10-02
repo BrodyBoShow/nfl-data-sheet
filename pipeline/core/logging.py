@@ -20,6 +20,9 @@ RunStatus = Literal[
     "skipped_fresh",
     "skipped_no_prior",
     "skipped_no_injuries",
+    # The input gate's skip (pipeline/core/input_gate.py): the inputs and code match the
+    # last success for this season/week. Never mixed with skipped_fresh. Migration 0034.
+    "skipped_unchanged",
     "partial",
     "failed",
 ]

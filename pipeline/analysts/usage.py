@@ -2,7 +2,8 @@
 Job: Compute each player's usage shares (snap, target, air-yards, carry, dropback,
      red-zone, end-zone, goal-line) per game, over his last 4 games and season to date,
      with week-over-week deltas and league percentiles.
-Reads: snaps, player_game_pbp, players (position_group)
+Reads: snaps, player_game_pbp, players (position_group); its input gate also reads
+       source_freshness or digests of those tables, and agent_runs
 Writes: player_usage_week
 Tier: T2
 Phase: P7
@@ -18,6 +19,7 @@ import psycopg
 
 from pipeline.core.base import Analyst, RunContext, WorkResult
 from pipeline.core.freshness import get_last_value
+from pipeline.core.input_gate import GateInput, InputGate, players_input
 from pipeline.core.player_tables import (
     as_of_percentiles,
     check_one_game_per_week,
@@ -209,26 +211,52 @@ def _frame(rows: list[tuple[Any, ...]], schema: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema, orient="row") if rows else pl.DataFrame(schema=schema)
 
 
+# Each read's WHERE, shared by _fetch and the input gate's digest, so the two can't drift.
+_SNAPS_WHERE = (
+    "season = %s AND week <= %s AND player_id IS NOT NULL AND season_type IN ('REG', 'POST')"
+)
+_PGP_WHERE = "season = %s AND week <= %s"
+_POSITIONS_WHERE = "player_id = ANY(%s)"
+
+
+def _window(season: int, through_week: int) -> tuple[int, int]:
+    return (season, through_week)
+
+
 def _fetch(conn: psycopg.Connection, season: int, through_week: int) -> tuple[pl.DataFrame, ...]:
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT {', '.join(_SNAPS_SCHEMA)} FROM snaps WHERE season = %s AND week <= %s "
-            "AND player_id IS NOT NULL AND season_type IN ('REG', 'POST')",
-            (season, through_week),
+            f"SELECT {', '.join(_SNAPS_SCHEMA)} FROM snaps WHERE {_SNAPS_WHERE}",
+            _window(season, through_week),
         )
         snaps = _frame(cur.fetchall(), _SNAPS_SCHEMA)
         cur.execute(
-            f"SELECT {', '.join(_PGP_SCHEMA)} FROM player_game_pbp "
-            "WHERE season = %s AND week <= %s",
-            (season, through_week),
+            f"SELECT {', '.join(_PGP_SCHEMA)} FROM player_game_pbp WHERE {_PGP_WHERE}",
+            _window(season, through_week),
         )
         pgp = _frame(cur.fetchall(), _PGP_SCHEMA)
         cur.execute(
-            "SELECT player_id, position_group FROM players WHERE player_id = ANY(%s)",
+            f"SELECT player_id, position_group FROM players WHERE {_POSITIONS_WHERE}",
             (snaps["player_id"].unique().to_list(),),
         )
         positions = _frame(cur.fetchall(), {"player_id": pl.Utf8, "position_group": pl.Utf8})
     return snaps, pgp, positions
+
+
+# Every table _fetch reads (tests/test_input_gate.py holds it to that). Markers are
+# _INPUTS_VERSION_KEYS plus nflverse:players (P7 open item 12).
+_SNAPS_INPUT = GateInput(
+    "snaps", "nflverse:snap_counts", ("game_id", "pfr_player_id"), _SNAPS_WHERE, _window
+)
+_PGP_INPUT = GateInput(
+    "player_game_pbp", "nflverse:player_game_pbp", ("game_id", "player_id"), _PGP_WHERE, _window
+)
+INPUT_GATE = InputGate(
+    agent="usage",
+    module=__name__,
+    inputs=(_SNAPS_INPUT, _PGP_INPUT, players_input(_POSITIONS_WHERE, ids_from=(_SNAPS_INPUT,))),
+    extra_files=(_MIGRATION,),
+)
 
 
 def _inputs_version(conn: psycopg.Connection) -> str:
@@ -243,6 +271,7 @@ class UsageAnalyst(Analyst):
     # signal names and signals cleanup doesn't apply; see _delete_stale_signals.
     sector = "usage"
     signal_names: frozenset[str] = frozenset()
+    input_gate = INPUT_GATE
 
     _rows: list[dict[str, Any]]
     _meta: dict[str, Any]
