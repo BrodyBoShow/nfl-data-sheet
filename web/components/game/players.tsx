@@ -7,8 +7,10 @@ import {
   HIST_TABLES,
   ROLE_GROUPS,
   TAGS,
+  TACKLE_L4_MIN_DEF_SNAPS,
   defSnapShare,
   familyRows,
+  headlineL4,
   formatPlayerValue,
   histRows,
   parseSpan,
@@ -174,7 +176,8 @@ function FamilyTable({
   if (rows.length === 0) return null;
   const h = family.headline;
   // A league percentile column only when some row has one (P6.md §4). Defense has none
-  // while Pro Football Reference's defensive rows stay gated (P7 open item 9).
+  // while Pro Football Reference's defensive rows stay gated (P7 step 7; open item 9 closed
+  // without a source switch).
   const showPct = rows.some((r) => r[h.pct] != null);
   const isDefense = family.id === "defense";
   const approx = family.cols.filter((c) => c.approx);
@@ -212,7 +215,7 @@ function FamilyTable({
                 </td>
                 <Value col={h.std} fmt={h.fmt} v={r[h.std] as number | null} />
                 {showPct ? <Value col={h.pct} fmt="rank" v={r[h.pct] as number | null} /> : null}
-                <Value col={h.l4} fmt={h.fmt} v={r[h.l4] as number | null} />
+                <Value col={h.l4} fmt={h.fmt} v={headlineL4(family, r)} />
                 <Value col={family.sample.l4} fmt="count" v={r[family.sample.l4] as number | null} />
                 {family.cols.map((c) => (
                   <Value key={c.key} col={c.key} fmt={c.fmt} v={r[c.key] as number | null} />
@@ -234,7 +237,8 @@ function FamilyTable({
       {isDefense ? (
         <p className="legend t-small ink-2">
           ‡ Defense stability rests on tackles, counted over games with a Pro Football Reference defensive row.
-          Rates are per 100 defensive snaps.
+          Rates are per 100 defensive snaps. Tackle rates need a minimum of defensive snaps to mean anything, so
+          Last 4 is blank under {TACKLE_L4_MIN_DEF_SNAPS}.
         </p>
       ) : null}
     </div>

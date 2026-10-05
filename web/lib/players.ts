@@ -98,8 +98,34 @@ export interface Family {
   title: string;
   sample: { std: EffKey; l4: EffKey; label: string; tags: Tag[] };
   stability: { key: EffKey; tags: Tag[]; title: string };
-  headline: { std: EffKey; pct: EffKey; l4: EffKey; label: string; fmt: Fmt; tags: Tag[] };
+  headline: {
+    std: EffKey;
+    pct: EffKey;
+    l4: EffKey;
+    label: string;
+    fmt: Fmt;
+    tags: Tag[];
+    /** Withhold the last-4 value below this last-4 sample (see TACKLE_L4_MIN_DEF_SNAPS). */
+    l4MinSample?: number;
+  };
   cols: Col<PlayerEff>[];
+}
+
+/** PFR's tackles include special-teams coverage tackles, but the denominator is defensive
+ *  snaps (docs/phases/P7.md open item 15). Below 80 defensive snaps in the last-4 window,
+ *  special teams made up more than ~10% of the shown rate in 2025's 4-game windows (12.7%
+ *  at 60-79), so the value isn't shown. A display mitigation, not the fix: item 15 stays
+ *  open, and the blended season value is unchanged. */
+export const TACKLE_L4_MIN_DEF_SNAPS = 80;
+
+/** The family's last-4 headline value, or null where its last-4 sample is under the
+ *  family's floor (a null sample counts as under it). */
+export function headlineL4(family: Family, row: PlayerEff): number | null {
+  const v = row[family.headline.l4] as number | null;
+  const min = family.headline.l4MinSample;
+  if (min === undefined) return v;
+  const n = row[family.sample.l4] as number | null;
+  return n !== null && n >= min ? v : null;
 }
 
 const STAB_TITLE =
@@ -202,6 +228,7 @@ export const FAMILIES: Family[] = [
       label: "Tackles /100 snaps",
       fmt: "per100",
       tags: ["PFR"],
+      l4MinSample: TACKLE_L4_MIN_DEF_SNAPS,
     },
     cols: [
       { key: "tfl_per_snap_std", label: "TFL /100 snaps", fmt: "per100", tags: ["PFR"] },

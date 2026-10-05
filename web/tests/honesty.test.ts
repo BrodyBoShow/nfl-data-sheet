@@ -22,7 +22,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import report from "../content/backtest-report.json";
 import { PlayersSection } from "../components/game/players";
 import type { PlayerEff, PlayerUsage } from "../lib/db";
-import { FAMILIES, HIST_TABLES, ROLE_GROUPS, TAGS, type Tag } from "../lib/players";
+import {
+  FAMILIES,
+  HIST_TABLES,
+  ROLE_GROUPS,
+  TACKLE_L4_MIN_DEF_SNAPS,
+  TAGS,
+  formatPlayerValue,
+  headlineL4,
+  type Tag,
+} from "../lib/players";
 import { SOURCES } from "../lib/sources";
 import effFixture from "./fixtures/player_eff_2026_03_ATL_GB.json";
 import usageFixture from "./fixtures/player_usage_2026_03_ATL_GB.json";
@@ -564,6 +573,46 @@ describe("players section", () => {
     const cell = (col: string) => text(new RegExp(`<td[^>]*data-col="${col}"[^>]*>([\\s\\S]*?)</td>`).exec(tr)![1]!);
     expect(cell("rz_target_share_std")).toBe("0.0%");
     expect(cell("air_yards_share_std")).toBe("—");
+  });
+
+  it("11. the defense last-4 tackle rate is withheld under 80 last-4 defensive snaps", () => {
+    // P7 open item 15: PFR's tackles include special-teams tackles over defensive snaps.
+    expect(TACKLE_L4_MIN_DEF_SNAPS).toBe(80);
+    const def = FAMILIES.find((f) => f.id === "defense")!;
+    // Ale Kaho's live week-3 row: 150/100 on 2 defensive snaps, all special-teams tackles.
+    const kaho = EFF.find((r) => r.team === "ATL" && r.def_snaps_std !== null && r.tackles_per_snap_std !== null)!;
+    const at = (n: number | null) => ({ ...kaho, player_id: `n${n}`, def_snaps_l4: n, tackles_per_snap_l4: 1.5 });
+    const rows = [at(2), at(79), at(80), at(null)];
+    const html = renderSection(USAGE, [...EFF, ...rows]);
+    const atl = tables(html).find((t) => t[1] === "defense" && t[0].includes("ATL defense"))![0];
+    const cell = (id: string, col: string) => {
+      const tr = new RegExp(`<tr data-row="${id}">[\\s\\S]*?</tr>`).exec(atl)![0];
+      return text(new RegExp(`<td[^>]*data-col="${col}"[^>]*>([\\s\\S]*?)</td>`).exec(tr)![1]!);
+    };
+    expect(cell("n2", "tackles_per_snap_l4")).toBe("—");
+    expect(cell("n79", "tackles_per_snap_l4")).toBe("—");
+    expect(cell("nnull", "tackles_per_snap_l4")).toBe("—");
+    expect(cell("n80", "tackles_per_snap_l4")).toBe("150.0");
+    // The L4 n stays shown, and the blended season value is untouched.
+    expect(cell("n2", "def_snaps_l4")).toBe("2");
+    expect(cell("n2", "tackles_per_snap_std")).toBe(formatPlayerValue("per100", kaho.tackles_per_snap_std)!);
+    // Real fixture rows under the floor lose their last-4 value; rows at or over it keep it.
+    const baseDef = tables(renderSection())
+      .filter((t) => t[1] === "defense")
+      .map((t) => t[0])
+      .join("");
+    for (const r of EFF.filter((e) => e.def_snaps_std !== null && e.tackles_per_snap_l4 !== null)) {
+      const under = r.def_snaps_l4! < 80;
+      expect(headlineL4(def, r), r.player_id).toBe(under ? null : r.tackles_per_snap_l4);
+      const shown = formatPlayerValue("per100", r.tackles_per_snap_l4)!;
+      const tr = new RegExp(`<tr data-row="${r.player_id}">[\\s\\S]*?</tr>`).exec(baseDef)![0];
+      const l4 = text(/<td[^>]*data-col="tackles_per_snap_l4"[^>]*>([\s\S]*?)<\/td>/.exec(tr)![1]!);
+      expect(l4, r.player_id).toBe(under ? "—" : shown);
+    }
+    expect(EFF.some((e) => e.def_snaps_std !== null && e.tackles_per_snap_l4 !== null && e.def_snaps_l4! < 80)).toBe(true);
+    // No other family has a floor, and the block says why the cell is blank.
+    for (const f of FAMILIES) expect(f.headline.l4MinSample, f.id).toBe(f.id === "defense" ? 80 : undefined);
+    expect(text(html)).toContain("tackle rates need a minimum of defensive snaps to mean anything, so last 4 is blank under 80");
   });
 
   it("10. week 1 sends no player query and says why", async () => {
