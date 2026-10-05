@@ -663,6 +663,12 @@ def test_cli_exits_zero_on_a_gate_skip(monkeypatch, capsys):
 # --------------------------------------------------------------------------------------
 # The auditor check: timestamps, never the gate's verdict
 # --------------------------------------------------------------------------------------
+# Coverage gap, found 2026-10-05: these tests didn't catch check_gate_inputs treating "no
+# gated success" as a success at the epoch, because their never-run case has no changed
+# inputs. "A never-run analyst must not alert" is tested in tests/test_auditor.py
+# (test_gate_audit_of_a_never_run_analyst_is_a_noop and the audit_and_alert tests), which
+# count as part of this check's coverage. docs/phases/P7.md, "Coverage gap found by
+# break 4".
 
 SUCCESS_AT = datetime(2026, 10, 6, 12, tzinfo=UTC)
 

@@ -1,9 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
+from pipeline.analysts.player_efficiency import INPUT_GATE as EFF_GATE
+from pipeline.analysts.usage import INPUT_GATE as USAGE_GATE
 from pipeline.orchestration.auditor import (
     FreshnessCheck,
     _clear_alert,
     _send_if_new,
+    audit_and_alert,
+    audit_gate_inputs,
     check_availability_outage,
     check_freshness,
     check_odds_targets,
@@ -423,3 +427,127 @@ def test_ungraded_lock_alerts_after_36h_with_the_reason():
 
 def test_recent_ungraded_lock_does_not_alert_yet():
     assert summarize_grades([("G", _NOW - timedelta(hours=30), False, None)], _NOW) == []
+
+
+# --- input gate (audit_gate_inputs, wired into audit_and_alert) ----------------------------
+# check_gate_inputs' own logic is tested in tests/test_input_gate.py. These cover the
+# alerting around it.
+
+_GATE_SUCCESS_AT = _NOW - timedelta(hours=3)
+
+
+class _FakeGateCursor:
+    def __init__(self, conn: "_FakeGateConn") -> None:
+        self._conn = conn
+        self._rows: list[tuple] = []
+
+    def execute(self, query: str, params: tuple = ()) -> None:
+        self._conn.statements.append(query)
+        self._rows = self._conn.respond(query, params)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def __enter__(self) -> "_FakeGateCursor":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+
+class _FakeGateConn:
+    """agent_runs and updated_at reads for check_gate_inputs, plus an in-memory
+    auditor_alerts. `success` None means the analyst has no gated success for the week:
+    it has never run."""
+
+    def __init__(self, success: tuple[int, datetime] | None) -> None:
+        self.success = success
+        self.alerts: dict[str, str] = {}
+        self.statements: list[str] = []
+
+    def respond(self, query: str, params: tuple) -> list[tuple]:
+        if query.startswith("SELECT id, started_at FROM agent_runs"):
+            return [self.success] if self.success else []
+        if query.startswith("SELECT (SELECT max(updated_at)"):
+            # Every audited input changed an hour after the success.
+            changed_at = _GATE_SUCCESS_AT + timedelta(hours=1)
+            return [tuple(changed_at for _ in range(query.count("max(updated_at)")))]
+        if query.startswith("SELECT (SELECT coalesce(array_agg"):
+            return [([42], None, 1)]  # a skipped_unchanged run after the change
+        if query.startswith("SELECT message FROM auditor_alerts"):
+            message = self.alerts.get(params[0])
+            return [(message,)] if message is not None else []
+        if query.startswith("INSERT INTO auditor_alerts"):
+            self.alerts[params[0]] = params[1]
+            return []
+        if query.startswith("DELETE FROM auditor_alerts"):
+            self.alerts.pop(params[0], None)
+            return []
+        raise AssertionError(query[:80])
+
+    def cursor(self) -> _FakeGateCursor:
+        return _FakeGateCursor(self)
+
+    def commit(self) -> None:
+        pass
+
+
+def test_gate_audit_of_a_never_run_analyst_is_a_noop(monkeypatch):
+    sent = _stub_send_alert(monkeypatch)
+    conn = _FakeGateConn(success=None)
+
+    alerted = audit_gate_inputs(conn, [USAGE_GATE, EFF_GATE], 2026, 4, _NOW)  # type: ignore[arg-type]
+
+    assert alerted is False
+    assert sent == [] and conn.alerts == {}
+    # It stopped at the success lookup: no input timestamps read, nothing to compare.
+    assert not any("max(updated_at)" in s for s in conn.statements)
+
+
+def test_gate_audit_alerts_once_per_analyst_and_week(monkeypatch):
+    sent = _stub_send_alert(monkeypatch)
+    conn = _FakeGateConn(success=(5, _GATE_SUCCESS_AT))
+
+    assert audit_gate_inputs(conn, [USAGE_GATE], 2026, 4, _NOW) is True  # type: ignore[arg-type]
+    assert audit_gate_inputs(conn, [USAGE_GATE], 2026, 4, _NOW) is False  # type: ignore[arg-type]
+
+    assert len(sent) == 1 and "skipped_unchanged after the change: run(s) [42]" in sent[0]
+    assert list(conn.alerts) == ["input_gate:usage:2026:4"]
+
+
+def _quiet_other_checks(monkeypatch, conn: _FakeGateConn) -> None:
+    """audit_and_alert with every check but the gate's returning nothing."""
+    import contextlib
+
+    import pipeline.orchestration.auditor as auditor_mod
+
+    @contextlib.contextmanager
+    def connect():
+        yield conn
+
+    monkeypatch.setattr(auditor_mod, "get_connection", connect)
+    monkeypatch.setattr(auditor_mod, "check_freshness", lambda *a, **k: [])
+    monkeypatch.setattr(auditor_mod, "check_projection_locks", lambda *a: [])
+    monkeypatch.setattr(auditor_mod, "check_grades", lambda *a: [])
+    monkeypatch.setattr(auditor_mod, "check_availability_outage", lambda *a: {})
+
+
+def test_audit_and_alert_runs_the_gate_check_when_given_a_week(monkeypatch):
+    sent = _stub_send_alert(monkeypatch)
+    conn = _FakeGateConn(success=(5, _GATE_SUCCESS_AT))
+    _quiet_other_checks(monkeypatch, conn)
+
+    assert audit_and_alert([], gates=[EFF_GATE]) is False  # no week given: not checked
+    assert sent == []
+    assert audit_and_alert([], gates=[EFF_GATE], gate_season=2026, gate_week=4) is True
+    assert len(sent) == 1 and sent[0].startswith("input gate: player_efficiency 2026 week 4")
+
+
+def test_audit_and_alert_quiet_for_never_run_gated_analysts(monkeypatch):
+    sent = _stub_send_alert(monkeypatch)
+    conn = _FakeGateConn(success=None)
+    _quiet_other_checks(monkeypatch, conn)
+
+    alerted = audit_and_alert([], gates=[USAGE_GATE, EFF_GATE], gate_season=2026, gate_week=4)
+
+    assert alerted is False and sent == [] and conn.alerts == {}

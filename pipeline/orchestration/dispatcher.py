@@ -29,6 +29,15 @@ Phase: 1 (skeleton) -- full calendar-aware triggering (docs/architecture.md's Di
        agent_runs row at all for any analyst (by design -- nothing was attempted, so
        there's nothing to log), which the collectors' own skipped_fresh/0-row rows
        already explain if that's ever in question.
+       Amended (P7 step 9, the input gate): the gated analysts (_GATED_ANALYSTS, Usage
+       and Player efficiency) are outside that collector-write rule. They're attempted
+       on every tick, and each one's own input gate (pipeline/core/input_gate.py)
+       decides from the database whether its inputs or code changed since its own last
+       success for this season/week, logging skipped_unchanged when they didn't. A
+       tick-level rule would reopen the hole the gate closes: a run that failed on the
+       tick its inputs changed, or a manual nflverse_bulk run between ticks, would wait
+       for the next collector write. A gate check costs ~300 bytes, so attempting them
+       every tick saves nothing to skip. docs/phases/P7.md, step 9, the gate spec.
 """
 
 from __future__ import annotations
@@ -44,6 +53,8 @@ from pipeline.analysts.availability_impact import AvailabilityImpactAnalyst
 from pipeline.analysts.efficiency import EfficiencyAnalyst
 from pipeline.analysts.environment import EnvironmentAnalyst
 from pipeline.analysts.market import MarketAnalyst
+from pipeline.analysts.player_efficiency import PlayerEfficiencyAnalyst
+from pipeline.analysts.usage import UsageAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
@@ -51,6 +62,7 @@ from pipeline.collectors.odds import OddsCollector
 from pipeline.collectors.stadiums import StadiumsCollector
 from pipeline.collectors.weather import WeatherCollector
 from pipeline.core.base import Analyst, Collector, Grader, RunResult, Synthesizer
+from pipeline.core.input_gate import InputGate
 from pipeline.orchestration.auditor import FreshnessCheck, audit_and_alert
 from pipeline.orchestration.grader import ProjectionGrader
 from pipeline.synthesis.synthesizer import MatchupSynthesizer
@@ -78,6 +90,23 @@ _ANALYSTS: list[Analyst] = [
     AvailabilityImpactAnalyst(),
     EnvironmentAnalyst(),
     MarketAnalyst(),
+]
+# Outside the collector-write rule: attempted on every tick, and each one's input gate
+# decides whether it runs (module docstring, "Amended"). Every one carries an InputGate;
+# tests/test_dispatcher.py holds them to that, since an ungated analyst here would
+# recompute on every tick.
+# They're independent of each other and of the analysts above, so their order and their
+# place after _ANALYSTS carry no dependency, and one failing can't affect another:
+# - each reads only staged tables (snaps, player_game_pbp, players; Player efficiency
+#   also pfr_advstats, ngs, player_week, participation_player_season), plus
+#   source_freshness and agent_runs for its gate. Never `signals`, and never the other's
+#   player table;
+# - each writes only its own player table (player_usage_week, player_eff_week), which
+#   nothing else in the tick reads: L3 synthesis doesn't read the player tables
+#   (CLAUDE.md layer rules).
+_GATED_ANALYSTS: list[Analyst] = [
+    UsageAnalyst(),
+    PlayerEfficiencyAnalyst(),
 ]
 # After the analysts, on every tick -- see _run_tick.
 _SYNTHESIZERS: list[Synthesizer] = [
@@ -122,6 +151,13 @@ _FRESHNESS_CHECKS = [
     # grader has none: it skips on every tick without a newly finished game, so days
     # between successes are normal. auditor.check_grades alerts on a locked game that has
     # had a final score for a day with no grade instead.
+    #
+    # usage and player_efficiency (_GATED_ANALYSTS) have none: a correct gate skips
+    # (skipped_unchanged, not success) for as long as their inputs don't move, so time
+    # since the last success says nothing. They get check_gate_inputs instead
+    # (audit_and_alert's gates), which alerts on a wrong skip or a tick that didn't run
+    # them, and is quiet for an analyst with no gated success yet this season/week. A run
+    # that fails is a failed job, so it fails the tick's exit code (main) instead.
 ]
 
 
@@ -131,12 +167,15 @@ def _run_tick(
     *,
     season: int,
     week: int,
+    gated_analysts: Sequence[_RunnableJob] = (),
     synthesizers: Sequence[_RunnableJob] = (),
     graders: Sequence[_RunnableJob] = (),
 ) -> list[RunResult]:
     """Run every collector, then every analyst -- but only if at least one collector
-    wrote new/changed rows this tick (see module docstring for why) -- then every
-    synthesizer, then every grader, both on every tick. Synthesizers aren't gated on
+    wrote new/changed rows this tick (see module docstring for why) -- then every gated
+    analyst on every tick (its own input gate decides; module docstring, "Amended"),
+    then every synthesizer, then every grader, both on every tick. Synthesizers aren't
+    gated on
     collector writes: a projection lock is time-triggered (kickoff - 6h), and gating it
     on "a collector wrote rows" would miss locks on quiet ticks. It's cheap, since cards
     are hash-diffed. Graders run last so a lock taken this tick is never graded as a
@@ -145,9 +184,15 @@ def _run_tick(
     results = [c.run(season=season, week=week) for c in collectors]
     if any(result.rows_written > 0 for result in results):
         results += [a.run(season=season, week=week) for a in analysts]
+    results += [a.run(season=season, week=week) for a in gated_analysts]
     results += [s.run(season=season, week=week) for s in synthesizers]
     results += [g.run(season=season, week=week) for g in graders]
     return results
+
+
+def _gates(analysts: Sequence[Analyst]) -> list[InputGate]:
+    """Each gated analyst's InputGate, for the auditor's check_gate_inputs."""
+    return [a.input_gate for a in analysts if isinstance(a.input_gate, InputGate)]
 
 
 def _set_github_output(name: str, value: str) -> None:
@@ -171,6 +216,7 @@ def main() -> int:
         _ANALYSTS,
         season=season,
         week=week,
+        gated_analysts=_GATED_ANALYSTS,
         synthesizers=_SYNTHESIZERS,
         graders=_GRADERS,
     )
@@ -182,6 +228,9 @@ def main() -> int:
         odds_week=week,
         weather_season=season,
         weather_week=week,
+        gates=_gates(_GATED_ANALYSTS),
+        gate_season=season,
+        gate_week=week,
     )
     _set_github_output("alerted", "true" if alerted else "false")
 

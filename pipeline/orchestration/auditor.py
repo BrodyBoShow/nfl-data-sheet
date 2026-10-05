@@ -11,6 +11,7 @@ Phase: 1 (skeleton) -- schema-drift detection and the UI-facing staleness feed a
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -508,6 +509,30 @@ def _send_if_new(conn: psycopg.Connection, alert_key: str, message: str, now: da
     return True
 
 
+def audit_gate_inputs(
+    conn: psycopg.Connection,
+    gates: Sequence[InputGate],
+    season: int,
+    week: int,
+    now: datetime,
+) -> bool:
+    """check_gate_inputs for each gated analyst, one deduped alert key per analyst and
+    week. An analyst with no gated success for this season/week (never run, or not yet
+    this week) has nothing to compare against, so check_gate_inputs returns nothing and
+    this sends nothing: no alert for an agent that has never run. Returns True if a new
+    alert was sent."""
+    alerted = False
+    for gate in gates:
+        alert_key = f"input_gate:{gate.agent}:{season}:{week}"
+        messages = check_gate_inputs(conn, gate, season, week)
+        if not messages:
+            _clear_alert(conn, alert_key)
+        else:
+            # summarize_gate_audit returns at most one message.
+            alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
+    return alerted
+
+
 def audit_and_alert(
     checks: list[FreshnessCheck],
     *,
@@ -515,6 +540,9 @@ def audit_and_alert(
     odds_week: int | None = None,
     weather_season: int | None = None,
     weather_week: int | None = None,
+    gates: Sequence[InputGate] = (),
+    gate_season: int | None = None,
+    gate_week: int | None = None,
 ) -> bool:
     """Run freshness checks and alert on anything stale or never run, plus the
     odds-specific schedule check (see check_odds_targets) when `odds_season`/
@@ -525,6 +553,10 @@ def audit_and_alert(
     venue check (check_venue_problems, every remaining game this season) and the
     schedule-aware target check (check_weather_targets) -- neither fits a generic
     elapsed-time FreshnessCheck.
+
+    The gated analysts get audit_gate_inputs when `gates`, `gate_season` and
+    `gate_week` are given: a wrong gate skip, or a tick that didn't run the analyst
+    after its inputs changed. Quiet for an analyst with no gated success yet.
 
     Every run also checks projection locks (check_projection_locks): any game that
     kicked off in the last 24h without a projection_log row. And grades (check_grades):
@@ -575,6 +607,9 @@ def audit_and_alert(
             else:
                 # summarize_weather_targets returns at most one message.
                 alerted = _send_if_new(conn, alert_key, messages[0], now) or alerted
+
+        if gate_season is not None and gate_week is not None:
+            alerted = audit_gate_inputs(conn, gates, gate_season, gate_week, now) or alerted
 
         # Rolling 24h window, so one key: the message changes as games enter/leave it.
         messages = check_projection_locks(conn, now)

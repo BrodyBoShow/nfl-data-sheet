@@ -41,7 +41,7 @@ _JOBS: dict[str, Collector | Analyst | Synthesizer | Grader | Retention] = {
     "weather": WeatherCollector(),
     "environment": EnvironmentAnalyst(),
     "market": MarketAnalyst(),
-    # P7 step 6: manual only, not in the dispatcher until a live run has been reviewed.
+    # In the dispatcher's _GATED_ANALYSTS (P7 step 9): every tick, behind the input gate.
     "usage": UsageAnalyst(),
     "player_efficiency": PlayerEfficiencyAnalyst(),
     "synthesizer": MatchupSynthesizer(),

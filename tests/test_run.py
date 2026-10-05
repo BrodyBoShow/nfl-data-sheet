@@ -1,4 +1,4 @@
-from pipeline.orchestration.dispatcher import _ANALYSTS, _COLLECTORS
+from pipeline.orchestration.dispatcher import _ANALYSTS, _COLLECTORS, _GATED_ANALYSTS
 from pipeline.run import _JOBS, _parse_args, main
 
 
@@ -39,7 +39,7 @@ def test_all_dispatcher_jobs_are_registered_in_run_py():
     on its tick must also be reachable by name through `uv run python -m pipeline.run`
     for local debugging/backfills, or the CLI's own usage message silently stops
     mentioning it."""
-    for job in (*_COLLECTORS, *_ANALYSTS):
+    for job in (*_COLLECTORS, *_ANALYSTS, *_GATED_ANALYSTS):
         assert job.name in _JOBS, (
             f"{job.name!r} runs in the dispatcher but isn't registered in pipeline.run._JOBS"
         )
