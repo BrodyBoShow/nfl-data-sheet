@@ -1257,8 +1257,10 @@ No rushing `_hist`: participation has no rusher-level coverage field that fits.
       1–9 defensive snaps, and 0–7% at 40+.
   - The values themselves are still written in both cases.
   - **The family headline, `tackles_per_snap`, is PFR-derived.** So `def_stability`
-    (headline-based) still rests on a gated metric. A pbp defender role is filed as a
-    decision (`docs/phases/P7.md`, open item 9).
+    (headline-based) still rests on a gated metric. Re-sourcing it was closed without a
+    switch (user, 2026-10-05; `docs/phases/P7.md`, open item 9).
+  - **PFR's tackles include special-teams coverage tackles**, over defensive snaps. That
+    scope mismatch is filed, not fixed (`docs/phases/P7.md`, open item 15).
 - The PFR allowed stats are **PFR's nearest-defender charting on targeted plays, not
   coverage assignments** (`docs/phases/P7.md`, "Coverage: who covered whom"). They have
   no untargeted snaps and no receiver identity.
