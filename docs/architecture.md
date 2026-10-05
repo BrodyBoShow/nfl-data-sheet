@@ -107,9 +107,10 @@ flowchart TB
     kicked off in the last 24h without a `projection_log` lock (`check_projection_locks`),
     naming the card's last `projection_status` as the likely reason.
   - **Dispatcher tick order**: collectors, then analysts (only if a collector wrote
-    rows), then synthesizers on **every** tick (locks are time-triggered, so they can't
-    wait on a collector write), then the grader (skips unless a game needs grading),
-    then the auditor.
+    rows), then the gated analysts (Usage, Player efficiency) on **every** tick, each
+    behind its own input gate (P7 step 9), then synthesizers on **every** tick (locks are
+    time-triggered, so they can't wait on a collector write), then the grader (skips
+    unless a game needs grading), then the auditor.
   - **Grader** (`pipeline/orchestration/grader.py`, P5):
     - Grades every locked projection after the game into `projection_grades`: error vs.
       result, band coverage, and win/loss against both the lock line and the nflverse
