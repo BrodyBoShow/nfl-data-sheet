@@ -302,6 +302,56 @@ def test_hist_sums_the_completed_seasons_and_names_them():
     assert a["pass_hist_n"] is None
 
 
+def test_format_seasons_prints_runs_and_never_closes_a_gap():
+    assert eff.format_seasons([2025]) == "2025"
+    assert eff.format_seasons([2024, 2025]) == "2024-2025"
+    assert eff.format_seasons([2025, 2023, 2024, 2024]) == "2023-2025"
+    assert eff.format_seasons([2023, 2025]) == "2023, 2025"
+    assert eff.format_seasons([2019, 2020, 2022, 2024, 2025]) == "2019-2020, 2022, 2024-2025"
+
+
+def test_hist_span_is_each_players_own_seasons():
+    """CLAUDE.md, "A row's label comes from the row": the span is the player's seasons
+    with a labeled dropback, never the window the table holds (P7 open item 11)."""
+    players = "ABCDEF"
+    inp = _inputs(
+        pgp=[_rec(p, S, 1, 10, 1.0) for p in players],
+        snaps=[_snap(p, S, 1) for p in players],
+        positions=[{"player_id": p, "position_group": "WR"} for p in players],
+    )
+
+    def rec(pid, season, n=100):
+        return {"player_id": pid, "season": season, "off_dropbacks_man": n, "targets_man": 10}
+
+    part = [
+        *(rec("A", s) for s in (S - 3, S - 2, S - 1)),  # all three
+        rec("A", S - 4),  # before the window: never
+        rec("A", S),  # the current season: never
+        rec("B", S - 1),  # one
+        *(rec("C", s) for s in (S - 2, S - 1)),  # two
+        *(rec("D", s) for s in (S - 3, S - 1)),  # a gap
+        rec("E", S - 1, n=0),  # a participation row with no labeled dropback
+        rec("F", S - 1),
+        {"player_id": "F", "season": S - 3, "pass_dropbacks_zone": 1},  # passing, another season
+    ]
+    df = eff.build_eff_rows(
+        inp._replace(participation=_frame(["player_id", "season", *eff._PART_COLS], part)), S
+    )
+    span = {p: _row(df, p, 1)["hist_span"] for p in players}
+    assert span == {
+        "A": f"{S - 3}-{S - 1}",
+        "B": f"{S - 1}",
+        "C": f"{S - 2}-{S - 1}",
+        "D": f"{S - 3}, {S - 1}",
+        "E": None,
+        "F": f"{S - 3}, {S - 1}",
+    }
+    # The span covers exactly the seasons summed into the values.
+    assert _row(df, "A", 1)["rec_hist_n"] == 300
+    assert _row(df, "B", 1)["rec_hist_n"] == 100
+    assert _row(df, "E", 1)["rec_hist_n"] is None
+
+
 # --- guards ----------------------------------------------------------------------------
 
 

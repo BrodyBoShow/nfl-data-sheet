@@ -10,6 +10,7 @@ import {
   TACKLE_L4_MIN_DEF_SNAPS,
   defSnapShare,
   familyRows,
+  formatSeasons,
   headlineL4,
   formatPlayerValue,
   histRows,
@@ -300,7 +301,8 @@ function CoverageHistory({ eff, team }: { eff: PlayerEff[]; team: string }) {
   const shown = tables.flatMap((t) => t.shown);
   const withheld = tables.reduce((n, t) => n + t.withheld, 0);
   if (shown.length === 0 && withheld === 0) return null;
-  const spans = [...new Set(shown.map((r) => r.hist_span))].sort().join(", ");
+  // The seasons the shown rows cover between them. Each row's own span is in its row.
+  const spans = formatSeasons(shown.flatMap((r) => parseSpan(r.hist_span) ?? []));
   return (
     <details className="players-history" data-coverage-history>
       <summary className="t-cap ink-2">

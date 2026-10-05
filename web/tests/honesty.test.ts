@@ -29,7 +29,9 @@ import {
   TACKLE_L4_MIN_DEF_SNAPS,
   TAGS,
   formatPlayerValue,
+  formatSeasons,
   headlineL4,
+  parseSpan,
   type Tag,
 } from "../lib/players";
 import { SOURCES } from "../lib/sources";
@@ -613,6 +615,33 @@ describe("players section", () => {
     // No other family has a floor, and the block says why the cell is blank.
     for (const f of FAMILIES) expect(f.headline.l4MinSample, f.id).toBe(f.id === "defense" ? 80 : undefined);
     expect(text(html)).toContain("tackle rates need a minimum of defensive snaps to mean anything, so last 4 is blank under 80");
+  });
+
+  it("12. each coverage-history row shows its own span, gaps included, and the summary is their union", () => {
+    // P7 open item 11: hist_span is each player's own seasons (format_seasons), not the table's.
+    const withHist = EFF.filter((r) => r.rec_hist_n !== null && r.team === "GB");
+    expect(withHist.length).toBeGreaterThanOrEqual(4);
+    const spans = ["2023-2025", "2025", "2024-2025", "2023, 2025"];
+    const ids = withHist.slice(0, 4).map((r) => r.player_id);
+    const eff = EFF.map((r) => (ids.includes(r.player_id) ? { ...r, hist_span: spans[ids.indexOf(r.player_id)]! } : r));
+    const html = renderSection(USAGE, eff);
+    const block = /<details[^>]*data-coverage-history[\s\S]*?<\/details>/.exec(
+      html.slice(html.indexOf('data-offense="GB"')),
+    )![0];
+    ids.forEach((id, i) => {
+      const tr = new RegExp(`<tr data-row="${id}">[\\s\\S]*?</tr>`).exec(block)![0];
+      expect(text(/<td[^>]*data-span[^>]*>([\s\S]*?)<\/td>/.exec(tr)![1]!), id).toBe(normalize(spans[i]!));
+    });
+    expect(text(block)).not.toContain("carry a different attribution");
+    expect(text(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(block)![1]!)).toMatch(/· 2023-2025 · not this season$/);
+    // The parser and formatter agree with the analyst's format, both ways.
+    expect(parseSpan("2023, 2025")).toEqual([2023, 2025]);
+    expect(parseSpan("2023-2025")).toEqual([2023, 2024, 2025]);
+    expect(parseSpan("2025, 2023")).toBeNull();
+    for (const s of spans) expect(formatSeasons(parseSpan(s)!)).toBe(s);
+    // A gapped span with a season before FTN's first is still withheld, not shown as FTN.
+    const old = EFF.map((r) => (r.player_id === ids[0] ? { ...r, hist_span: "2021, 2023" } : r));
+    expect(text(renderSection(USAGE, old))).toContain("1 row not shown: seasons before 2023 carry a different attribution");
   });
 
   it("10. week 1 sends no player query and says why", async () => {

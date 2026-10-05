@@ -302,14 +302,32 @@ export const HIST_TABLES: HistTable[] = [
  *  Gen Stats data with a different attribution (docs/sources.md), so they're not shown. */
 export const FTN_FIRST_SEASON = 2023;
 
-/** "2025" or "2023-2025" → [2025] / [2023, 2024, 2025]; null if unparseable. */
+/** A row's own hist_span (the analyst's format_seasons): "2025", "2023-2025", or runs
+ *  joined by ", " ("2023, 2025") → its seasons, ascending; null if unparseable. */
 export function parseSpan(span: string | null): number[] | null {
-  const m = span?.match(/^(\d{4})(?:-(\d{4}))?$/);
-  if (!m) return null;
-  const first = Number(m[1]);
-  const last = Number(m[2] ?? m[1]);
-  if (last < first) return null;
-  return Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  if (!span) return null;
+  const seasons: number[] = [];
+  for (const part of span.split(", ")) {
+    const m = part.match(/^(\d{4})(?:-(\d{4}))?$/);
+    if (!m) return null;
+    const first = Number(m[1]);
+    const last = Number(m[2] ?? m[1]);
+    if (last < first) return null;
+    for (let s = first; s <= last; s++) seasons.push(s);
+  }
+  const sorted = [...new Set(seasons)].sort((a, b) => a - b);
+  return sorted.length === seasons.length && sorted.every((s, i) => s === seasons[i]) ? sorted : null;
+}
+
+/** Seasons as the analyst labels them: consecutive runs as "2023-2025", gaps as ", ". */
+export function formatSeasons(seasons: number[]): string {
+  const runs: number[][] = [];
+  for (const s of [...new Set(seasons)].sort((a, b) => a - b)) {
+    const run = runs[runs.length - 1];
+    if (run && s === run[run.length - 1]! + 1) run.push(s);
+    else runs.push([s]);
+  }
+  return runs.map((r) => (r.length === 1 ? `${r[0]}` : `${r[0]}-${r[r.length - 1]}`)).join(", ");
 }
 
 // ---- Selection and order ----------------------------------------------------------------

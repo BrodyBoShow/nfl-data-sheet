@@ -1121,7 +1121,8 @@ def _aggregate_participation_player_season(
     participation: pl.DataFrame, pbp: pl.DataFrame
 ) -> tuple[pl.DataFrame, dict[str, Any]]:
     """Per-player, per-season counts from participation joined to that season's pbp
-    (0029). Historical only: every value derived from it is a `_hist` prior.
+    (0029). Historical only: every value derived from it is a display-only `_hist`
+    historical tendency, never a prior.
 
     Plays are participation rows that join an in-scope pbp play (_player_play_scope, the
     same scope as player_game_pbp). Man/zone splits count only labeled plays, so an

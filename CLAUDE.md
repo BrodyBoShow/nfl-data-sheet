@@ -164,6 +164,17 @@ web/                      # Phase 6+
     `player_usage_week`, so the view names the wrong primary.
   - `docs/phases/P7.md`, "Gate mechanism", approved change 3: a NULL `position_group`
     digested the same as a player absent from `players`.
+- **A row's label comes from the row.** A label describing a row's scope, span or
+  provenance is derived from that row's own data, never asserted for the table and
+  printed per row. Where a row can't support the label, the label changes or the value
+  is withheld. The label never widens to fit the table. Four instances, 2026-10-01 to
+  2026-10-05:
+  - `hist_span` was one table-wide span printed per row. 173 of 410 players would have
+    read "2023-2025" holding fewer seasons (`docs/phases/P7.md`, open item 11).
+  - "Starter" where the data says most snaps (`docs/phases/P9.md`, D2).
+  - "Primary" where OL top-two are within 5% in 99.8% of games (`docs/phases/P9.md`, D4).
+  - "Tackles per defensive snap" counting special-teams tackles (`docs/phases/P7.md`,
+    open item 15).
 
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector — never combine two sources or

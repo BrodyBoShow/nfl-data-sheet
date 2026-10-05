@@ -56,7 +56,8 @@ NOT_DELETED: dict[str, str] = {
     "team_week": "tiny, and the backtest reads it from 2018",
     "depth": "latest snapshot only",
     "participation_player_season": (
-        "it is the prior; the _hist window needs the three seasons before the current one"
+        "it feeds the display-only _hist values (never a prior), whose window needs the three "
+        "seasons before the current one"
     ),
     "player_usage_week": (
         "L4 deferred to P7 step 7: it would destroy point-in-time weekly player history"

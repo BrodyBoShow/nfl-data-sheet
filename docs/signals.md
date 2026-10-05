@@ -78,8 +78,21 @@ registry under "Player tables (Phase 7)" below):
   2016–2025, post-season release only. `inputs_version` names the season span, and the
   UI shows the span next to the value. Never presented as current-season behavior.
   - A `_hist` column is one value, with no `_std`/`_game`/`_l4`/`_pct`. It's constant
-    within a season and not blended. `hist_span` holds its seasons (e.g. `2023-2025`),
-    and a per-family `<family>_hist_n` holds the labeled plays behind it.
+    within a season and not blended. A per-family `<family>_hist_n` holds the labeled
+    plays behind it.
+  - **It's display only, never a prior.** Every metric's prior is last season's own ratio
+    (`player_efficiency.py`, `_prior_value`). Until 2026-10-05 several docs called `_hist`
+    a "prior". That overclaimed, and it was renamed.
+  - **`hist_span` is the player's own seasons, not the table's** (CLAUDE.md, "A row's
+    label comes from the row"; P7 open item 11). It lists the seasons in which he has a
+    labeled dropback behind a `_hist` value.
+    - Consecutive seasons print as a range (`2023-2025`), a single season as `2025`, and
+      a gap as written (`2023, 2025`), never closed into a range.
+    - A player with no such season has a null span and null values.
+    - Receiving and passing share one span, the union of the two. Where they differ
+      (56 players over 2023–2025, 55 of them non-QBs with a median of 1 passing
+      dropback), the span is wider than one family's seasons. That blocks the
+      2023–2024 backfill (P7 open item 11).
 - **Honesty:** `_game`/`_l4` values for rotational players rest on a handful of plays
   (`docs/phases/P7.md` sample-size table). Anything that displays them shows `stability`
   beside them.
@@ -98,7 +111,8 @@ Registry entries for player-table metrics use this template, grouped by table an
 - **Filters:** <garbage time, min sample for _pct, situation splits>
 - **Source columns:** <staged table + columns>
 - **Sample:** <which family count it rests on>
-- **Prior blend:** <k_metric, prior source (last season / participation _hist), r>
+- **Prior blend:** <k_metric, prior source (last season), r>. Participation `_hist` is
+  never a prior source.
 - **League pct population:** <position group + minimum sample>
 - **Added:** <phase, date>
 ```

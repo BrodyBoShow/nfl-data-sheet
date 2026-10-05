@@ -366,8 +366,11 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     > completed. This data is released under the [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
     > Creative Commons license and attribution must be made to **FTN Data via nflverse** (from 2023 onwards)
     > or **NFL NextGenStats via nflverse** (for 2022 and earlier)
-    - Decision (user, 2026-09-25): include participation as a prior, with this
-      attribution, the same as FTN.
+    - Decision (user, 2026-09-25): include participation, with this attribution, the
+      same as FTN.
+      - *(2026-10-05: this decision originally read "include participation as a prior".
+        It was never a prior: `_hist` is a display-only historical tendency, and every
+        metric's prior is last season's own ratio. Renamed, user.)*
     - Anything derived from it is labeled a multi-season historical tendency
       (`docs/signals.md`, `_hist`).
   - **FTN charting license**, quoted verbatim from
@@ -505,7 +508,8 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     in-season. Approximate personnel from snap shares + FTN charting and label it as
     approximate.
     - The participation release itself (2016–2025) is used only as a multi-season
-      historical prior, never as current-season behavior. See "P7 research" above.
+      historical tendency (display only, never a prior; renamed 2026-10-05), never as
+      current-season behavior. See "P7 research" above.
   - The player crosswalk is split across two sources (`load_players` has PFR/PFF/ESPN;
     `load_ff_playerids` adds Sleeper) — the ID spine collector must join both, not just one.
     `load_ff_playerids()`'s Sleeper coverage specifically lags current-season

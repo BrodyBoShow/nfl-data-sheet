@@ -1,7 +1,8 @@
 """
 Job: Compute each player's receiving, rushing, passing and defense rate stats per game,
      over his last 4 games and season to date (prior-blended), with league percentiles
-     and participation-derived multi-season priors (_hist).
+     and participation-derived multi-season historical tendencies (_hist; display only,
+     never a prior).
 Reads: player_game_pbp, snaps, pfr_advstats, ngs, player_week (def_* only),
        participation_player_season, players (position_group); its input gate also reads
        source_freshness or digests of those tables, and agent_runs
@@ -767,10 +768,30 @@ def _attach_percentiles(rows: pl.DataFrame) -> pl.DataFrame:
     return rows.with_columns(pl.lit(None, dtype=pl.Int16).alias(p) for p in missing)
 
 
+def format_seasons(seasons: list[int]) -> str:
+    """A player's own seasons as a label: a consecutive run as "2023-2025", a single season
+    as "2025", and a gap printed as written ("2023, 2025"), never closed into a range."""
+    runs: list[list[int]] = []
+    for s in sorted(set(seasons)):
+        if runs and s == runs[-1][-1] + 1:
+            runs[-1].append(s)
+        else:
+            runs.append([s])
+    return ", ".join(str(r[0]) if len(r) == 1 else f"{r[0]}-{r[-1]}" for r in runs)
+
+
 def _attach_hist(rows: pl.DataFrame, participation: pl.DataFrame, season: int) -> pl.DataFrame:
     """Participation `_hist` columns: sums over the up-to-three completed seasons before
-    `season` that participation_player_season holds. hist_span names them. Constant
-    within a season, never blended, never current-season behavior."""
+    `season` that participation_player_season holds. Constant within a season, never
+    blended, never current-season behavior: display-only historical tendencies, not a
+    prior (every metric's prior is last season's own ratio, _prior_value).
+
+    hist_span is each player's own seasons with a labeled dropback behind a `_hist` value,
+    not the window the table holds (CLAUDE.md, "A row's label comes from the row"). A
+    season where he held only defensive participation rows doesn't count, and a player
+    with no such season gets a null span along with null values. It's one span for both
+    families: a player whose receiving and passing seasons differ is labeled with their
+    union (docs/phases/P7.md, open item 11)."""
     part = participation.filter(c("season").is_between(season - _HIST_SEASONS, season - 1))
     hist_cols = [
         "hist_span",
@@ -785,17 +806,35 @@ def _attach_hist(rows: pl.DataFrame, participation: pl.DataFrame, season: int) -
     ]
     if part.height == 0:
         return rows.with_columns(pl.lit(None).alias(h) for h in hist_cols)
-    seasons = sorted(part["season"].unique().to_list())
-    first, last = seasons[0], seasons[-1]
-    span = str(first) if first == last else f"{first}-{last}"
+    rec_n = c("off_dropbacks_man") + c("off_dropbacks_zone")
+    pass_n = c("pass_dropbacks_man") + c("pass_dropbacks_zone")
+    # The table's counts are NOT NULL (0029); fill_null only keeps a partial frame from
+    # turning a season with dropbacks into "no dropbacks".
+    dropbacks = (
+        "off_dropbacks_man",
+        "off_dropbacks_zone",
+        "pass_dropbacks_man",
+        "pass_dropbacks_zone",
+    )
+    labeled = part.with_columns(c(col).fill_null(0) for col in dropbacks).filter(
+        (rec_n + pass_n) > 0
+    )
+    spans = (
+        labeled.group_by("player_id")
+        .agg(c("season").unique().alias("_seasons"))
+        .with_columns(
+            c("_seasons")
+            .map_elements(lambda s: format_seasons(s.to_list()), return_dtype=pl.Utf8)
+            .alias("hist_span")
+        )
+        .drop("_seasons")
+    )
     s = part.group_by("player_id").agg(
         c(col).sum() for col in part.columns if col not in ("player_id", "season")
     )
-    rec_n = c("off_dropbacks_man") + c("off_dropbacks_zone")
-    pass_n = c("pass_dropbacks_man") + c("pass_dropbacks_zone")
-    h = s.select(
+    h = s.join(spans, on="player_id", how="left").select(
         "player_id",
-        pl.lit(span).alias("hist_span"),
+        "hist_span",
         pl.when(rec_n > 0).then(rec_n).otherwise(None).cast(pl.Int32).alias("rec_hist_n"),
         ratio(c("rec_epa_sum_man"), c("targets_man")).alias("epa_per_target_vs_man_hist"),
         ratio(c("rec_epa_sum_zone"), c("targets_zone")).alias("epa_per_target_vs_zone_hist"),
@@ -1056,7 +1095,10 @@ class PlayerEfficiencyAnalyst(Analyst):
             "rows": len(self._rows),
             "skipped_not_in_players": unknown,
             "defense_pct_gated_sources": sorted(DEFENSE_PCT_GATED_SOURCES),
-            "hist_span": df["hist_span"].drop_nulls().first() if df.height else None,
+            # Rows per span: the span is each player's own, so no one value describes a run.
+            "hist_spans": dict(
+                sorted(df.group_by("hist_span").len().drop_nulls("hist_span").rows())
+            ),
         }
         return df
 
