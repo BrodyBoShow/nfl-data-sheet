@@ -146,6 +146,13 @@ def _first(gate: ig.InputGate, **conn_kw: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------
 
 
+def test_the_shipped_branch_is_content():
+    """The branch picked on 2026-10-07 (docs/phases/P7.md, step 9, "Branch picked"). The
+    unselected-branch tests below set the constant themselves, so they still hold."""
+    assert ig.GATE_KEY_SOURCE == ig.CONTENT
+    assert ig.selected_branch() == ig.CONTENT
+
+
 @pytest.mark.parametrize("value", [None, "markers", "both", ""])
 def test_unselected_branch_is_a_hard_error_at_call_time(monkeypatch, value):
     monkeypatch.setattr(ig, "GATE_KEY_SOURCE", value)

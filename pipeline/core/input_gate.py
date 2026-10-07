@@ -29,11 +29,12 @@ GATE_VERSION = 1
 MARKER = "marker"
 CONTENT = "content"
 
-# Which key the gate builds: MARKER (spec item 2, branch A) or CONTENT (branch B). The
-# logger's week picks it on 2026-10-07 ("Picking on 10-07"). Until then it's None, and
-# None is a hard error when a gated analyst calls the gate (GateNotSelected), so a deploy
-# before the pick fails loudly instead of running on a default branch.
-GATE_KEY_SOURCE: str | None = None
+# Which key the gate builds: MARKER (spec item 2, branch A) or CONTENT (branch B).
+# CONTENT, picked 2026-10-07 from the logger's week (docs/phases/P7.md, step 9, "Branch
+# picked"): markers moved without content on 11 of 29 Player efficiency runs and 3 of 29
+# Usage runs. None (or any other value) is still a hard error when a gated analyst calls
+# the gate (GateNotSelected), never a quiet default.
+GATE_KEY_SOURCE: str | None = CONTENT
 
 # A part the gate couldn't read. Never equal to anything, not even another UNKNOWN: a
 # key with an UNKNOWN part always runs, and is never compared.
