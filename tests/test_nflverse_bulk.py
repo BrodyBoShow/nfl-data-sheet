@@ -989,6 +989,92 @@ def test_freshness_season_rollover_refetches_participation_without_a_tag_change(
     )
 
 
+@pytest.mark.parametrize(
+    ("dataset", "override", "loader", "backfill_key", "live_key", "live_seasons"),
+    [
+        (
+            "participation_player_season",
+            [2023, 2024],
+            "load_participation",
+            "pbp_participation@t1;seasons=2023,2024",
+            "pbp_participation@t1;seasons=2025",
+            [2025],
+        ),
+        (
+            "player_game_pbp",
+            [2018],
+            "load_pbp",
+            "pbp@t1;ftn_charting@t1;seasons=2018",
+            "pbp@t1;ftn_charting@t1;seasons=2025,2026",
+            [2025, 2026],
+        ),
+    ],
+)
+def test_freshness_seasons_run_without_force_cannot_stop_a_built_from_tables_refresh(
+    fake, dataset, override, loader, backfill_key, live_key, live_seasons
+):
+    """The two _BUILT_FROM_GATED tables are exempt from P7 open item 6's trap. Item 6: a
+    `--seasons` run without `--force` on a table gated on a season-blind tag-only key
+    (`nflverse:{tag}`) is skipped_fresh when the tag hasn't moved. When it has moved, the run
+    advances the key, and the scheduled run then skips the live seasons silently.
+
+    These two tables' keys name the seasons they were built from. So a scoped `--seasons` run
+    without `--force` still runs, moves only its own key, and the next scheduled run sees the
+    seasons differ and rebuilds the live seasons. P7 item 11's backfill
+    (`--datasets participation_player_season --seasons 2023-2024`) relies on this.
+
+    Pinned because making these keys season-blind looks like a harmless simplification, and
+    it would silently reintroduce item 6's hazard here.
+
+    Break demonstration (2026-10-07): with `_built_from` returning only the tag part (no
+    `;seasons=`), both cases fail at the first assert. The backfill is skipped_fresh
+    (`cycle` returns None), which is item 6's trap.
+    """
+    before = dict(fake.freshness)
+
+    # Tag unchanged: a tag-only-keyed table would be skipped_fresh here. This one runs.
+    assert fake.cycle(NflverseBulkCollector(seasons_override=override, datasets={dataset})) == {
+        dataset
+    }
+    assert fake.fetched(loader) == [override]
+    assert fake.freshness[f"nflverse:{dataset}"] == backfill_key
+    # Only its own built-from key moved. pbp is loaded, but team_week owns nflverse:pbp.
+    assert {k for k in before if fake.freshness[k] != before[k]} == {f"nflverse:{dataset}"}
+
+    # The next scheduled run isn't stopped: the seasons differ, so the live seasons rebuild.
+    stored = fake.cycle(NflverseBulkCollector())
+    assert stored is not None and dataset in stored
+    assert fake.fetched(loader) == [live_seasons]
+    assert fake.freshness[f"nflverse:{dataset}"] == live_key
+    assert fake.cycle(NflverseBulkCollector()) is None  # and then it settles
+
+
+def test_freshness_participation_seasons_run_is_gated_on_its_built_from_key_not_its_tag(fake):
+    """Item 6's mechanism does reach participation's tag key. When the tag has moved, a
+    `--seasons 2023-2024` run advances `nflverse:pbp_participation` to live. The gate reads
+    the built-from key, which still names 2023,2024, so the scheduled run refetches 2025
+    anyway.
+
+    Break demonstration (2026-10-07): with the same season-blind `_built_from`, the backfill
+    still runs, because the tag moved. But the scheduled run after it is skipped (`stored` is
+    None), and 2025 is never refetched. That's item 6's trap in its moved-tag form.
+    """
+    fake.live["pbp_participation"] = "t2"
+    backfill = NflverseBulkCollector(
+        seasons_override=[2023, 2024], datasets={"participation_player_season"}
+    )
+    assert fake.cycle(backfill) == {"participation_player_season"}
+    assert fake.freshness["nflverse:pbp_participation"] == "t2"
+
+    stored = fake.cycle(NflverseBulkCollector())
+    assert stored is not None and "participation_player_season" in stored
+    assert fake.fetched("load_participation") == [[2025]]
+    assert (
+        fake.freshness["nflverse:participation_player_season"]
+        == "pbp_participation@t2;seasons=2025"
+    )
+
+
 def test_run_meta_logs_live_tags_and_which_datasets_own_key_moved(fake):
     """Only pbp moved, so every core table is rebuilt (all-or-nothing), but only the two
     built from pbp report their own key moving. That split is what the analysts'
