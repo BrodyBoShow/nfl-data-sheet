@@ -857,9 +857,18 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
 
 - **Status:** UNVERIFIED
 - **License:** Unofficial (ESPN); RSS terms per team site; Sleeper API terms.
+  - *(2026-10-07: none of the three has been read. Whether items can be displayed on a
+    public site is `docs/phases/P8.md` Q10, and whether ESPN text can be sent to an LLM
+    is Q9. Both are UNRESOLVED.*
+    - *The nflverse provenance argument that covers the PFR display doesn't apply here:
+      Intel reads each provider's own feed.*
+    - *Each source's terms get quoted verbatim, with URL and date, at P8 step 2.)*
 - **Reliability:** Can break.
 - **Freshness:** T1.
 - **Known traps:** Live news only — no static or manually maintained research files feed
-  this system. Tagging is rule-based (keyword + crosswalk name matching) in Phase 7; LLM
-  parsing is an optional Phase 8 add-on, never required.
+  this system. Tagging is rule-based (keyword + crosswalk name matching) in Phase 8
+  (moved from Phase 7, 2026-10-07); LLM parsing is an optional Phase 8 add-on, never
+  required.
+  - *(2026-10-07: "crosswalk name matching" conflicts with the rejected name+team
+    fallback recorded under Availability, above. `docs/phases/P8.md` Q2.)*
 - **Params/shape/limits:** TBD on first verification call.
