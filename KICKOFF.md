@@ -123,7 +123,7 @@ Freshness tiers: **T0** every few minutes, **T1** hourly or several a day, **T2*
 | Odds | The Odds API free tier + ESPN embedded lines as free fill-in | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Weather | Open-Meteo (no key) + stadium coords, roof, surface | Open data | T1 | 4 | weather_snapshots (append-only), outdoor games only |
 | Availability | ESPN injuries, Sleeper players (max once/day), NFL.com injury report pages | Can break | T1 | 3 | injuries, practice_status, transactions |
-| Intel (live news) | ESPN NFL news feed (unofficial), official team site RSS where available, Sleeper trending players as a news-spike indicator | Can break | T1 | 7 | news_items (deduped by URL + text hash), news_tags (team, player_id, rule-based category: injury, depth chart, suspension, coaching, signing/release/trade) |
+| Intel (live news) | ESPN NFL news feed (unofficial), official team site RSS where available, Sleeper trending players as a news-spike indicator | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped by URL + text hash), news_tags (team, player_id, rule-based category: injury, depth chart, suspension, coaching, signing/release/trade) |
 
 ### L2 Analysts (all write to `signals`)
 
@@ -131,7 +131,7 @@ Freshness tiers: **T0** every few minutes, **T1** hourly or several a day, **T2*
 |---|---|---|
 | Efficiency | 2 | Opponent-adjusted EPA/play, success rate, explosive rate, points/drive, three-and-out rate, red-zone TD rate; pass/rush and down splits; garbage time filtered. **Prior-blended** (Section 6). |
 | Usage and role | 7 | Snap share, target share, air-yards share, red-zone and goal-line share, carry share, week-over-week deltas. |
-| Scheme | 7 | Pass rate over expected, neutral pace, play-action and motion rate, box counts, blitz and pressure rate, personnel approximation (labeled as approximate). |
+| Scheme | 10 (from 7, 2026-10-07) | Pass rate over expected, neutral pace, play-action and motion rate, box counts, blitz and pressure rate, personnel approximation (labeled as approximate). |
 | Availability impact | 3 | Target and carry redistribution, replacement quality gap, OL and secondary cluster flags, practice-trend risk. Uses raw snap shares until the usage analyst exists. |
 | Environment | 4 | Wind and precip flags for passing and kicking, dome/outdoor, surface, altitude, rest differential, travel distance, time-zone crossings. |
 | Market | 4 | Open vs current line, movement velocity, implied team totals, key-number crossings. No "sharp money" claims (no free handle or splits data exists). |
@@ -224,7 +224,7 @@ tests/
 - **ESPN endpoints are unofficial:** verify, fixture, and let the auditor watch for drift.
 - **Open-Meteo free tier is non-commercial.** Skip dome and closed-roof games.
 - **Early-season noise:** Weeks 1–5 efficiency is mostly noise. Efficiency analyst blends last season's opponent-adjusted values as a prior (discounted for starting-QB changes and offensive line continuity, both derived from nflverse depth charts, snap counts, and pbp; coordinator changes are out of scope unless a verified live source exists) with current data, shifting weight to current season as weeks accumulate. Stability column reflects this.
-- **Intel is live news only.** No static or manually maintained research files feed this system. In P7, tagging is rule-based (keywords + crosswalk name matching). LLM parsing of news is an optional P8 add-on.
+- **Intel is live news only.** No static or manually maintained research files feed this system. Tagging is rule-based (keywords + crosswalk name matching). LLM parsing of news is an optional add-on on top of it. Both are P8 (Intel moved from P7, 2026-10-07).
 - **Licensing:** nflverse CC-BY 4.0; FTN data via nflverse CC-BY-SA 4.0. Attribution goes in the UI footer.
 - **Source verification rule:** before writing any collector, make one live call per endpoint, save the response to `tests/fixtures/`, and document URL, params, shape, and limits in `docs/sources.md`. **Never guess URLs or field names.** If a source doesn't work as described here, stop and tell me.
 
@@ -256,8 +256,8 @@ Live polling runs as **one looping job per game window**, not a new job every fe
 | **P4 Market and environment** | Odds and weather collectors; market and environment analysts | Credit usage logged and under budget; weather only for outdoor games; signals written |
 | **P5 Synthesis and grading** | Synthesizer, projection log, grader, backtest 2019–2025 vs closing lines | Backtest report committed; projections lock pre-kickoff; grader writes results after games |
 | **P6 Data sheet UI** | Next.js app on Vercel reading Supabase's `web` schema (anon key, read-only grants + RLS): week view, game view | Week and game views render every card state; anon access verified by `scripts/verify_anon_access.py`; honesty test suite passes; deployed on Vercel Hobby *(revised 2026-09-24, see `docs/phases/P6.md`)* |
-| **P7 Role, scheme, intel** | Usage and scheme analysts; live news intel collector with rule-based tagging | Signals written; news items deduped and linked to teams and players via the crosswalk; no LLM calls |
-| **P8 Live and narrator** | Live collector, dispatcher tuning, optional LLM news parsing (Haiku batch, changed items only), optional narrator | Live scores during a game window; Actions minutes and credits reviewed |
+| **P7 Usage and player efficiency** | Usage and player efficiency analysts (wide player tables), retention job. *(Scope reduced 2026-10-07: Scheme moved to P10 and Intel to P8, not completed. See `docs/phases/P7.md`.)* | `docs/phases/P7.md`, "Done when" (player shares sane, values spot-checked, retention dry run reviewed then run); no LLM calls |
+| **P8 Live and narrator** | Live collector, Intel collector with rule-based tagging (from P7, 2026-10-07), dispatcher tuning, optional LLM news parsing (Haiku batch, changed items only), optional narrator | Live scores during a game window; news items deduped and linked to teams and players via the crosswalk, no LLM calls in tagging; Actions minutes and credits reviewed |
 
 ---
 

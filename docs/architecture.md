@@ -160,7 +160,8 @@ flowchart TB
   - Why: one wide row per player-week is ~28× smaller than one `signals` row per metric,
     and the naive shape would exceed the free tier on its first season's backfill.
   - No other analyst writes a player table, and nothing in L2 reads one yet.
-  - Cut by sector. **Usage/role** is built in Phase 7 (with Scheme/Intel),
+  - Cut by sector. **Usage/role** is built in Phase 7 (Scheme moved to Phase 10 and Intel
+  to Phase 8 on 2026-10-07),
   after Availability impact (Phase 3) — so Availability impact's redistribution logic
   reads raw snap shares (from the nflverse bulk collector's `snaps` table) rather than
   Usage's target/carry shares when it's first built. Once Usage exists in Phase 7, its
@@ -224,7 +225,7 @@ daily, **T3** weekly, **OD** on demand.
 | Stadiums reference | `reference/stadiums.csv` (hand-reviewed; coords + field bearing from OpenStreetMap, roof type cited per row) | Hand-maintained | T3 | 4 | stadiums (coords, roof_type, field_bearing, known_names, tz) |
 | Weather | Open-Meteo (no key); venue from the `stadiums` table | Open data | T1 | 4 | weather_snapshots (append-only), weather_snapshot_targets; 7 kickoff-relative snapshots per non-fixed-roof game (`weather_schedule.py`) |
 | Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, injury_presence |
-| Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 7 | news_items (deduped URL+hash), news_tags (rule-based) |
+| Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped URL+hash), news_tags (rule-based) |
 
 ### L2 Analysts (all write to `signals`, except the two player-table writers marked below)
 
@@ -236,7 +237,7 @@ daily, **T3** weekly, **OD** on demand.
 | Environment | 4 | Per game, for every game kicking off in a rolling window (−24h..+7d) rather than the dispatcher's week: weather_status (distinguishes forecast / indoor / awaiting / missed / venue unresolved / not tracked), headline weather from the latest pre-kickoff snapshot (wind speed as the base shape, along-field/crosswind split only ≥8 mph at venues with a field bearing; temperature, precip, snow, lead time, HRRR-domain confidence, grid elevation as altitude), roof and surface codes, and per-team rest days/differential, travel miles, and timezone shift (home venue tz vs. game venue tz, wrapped to ±12h). See `docs/signals.md`. |
 | Usage and role | 7 | **Writes `player_usage_week`, not `signals`.** Snap share (every player who takes a snap), target share, air-yards share, red-zone/goal-line/end-zone share, carry share, WoW deltas; season-to-date, per-game, last-4. |
 | Player efficiency | 7 | **Writes `player_eff_week`, not `signals`.** Per-player receiving/rushing/passing/defense rates (EPA/SR per target/carry/dropback, YAC-oe, separation, rush by gap, FTN charting splits, PFR nearest-defender allowed stats, pressures); season-to-date prior-blended, per-game, last-4. Participation `_hist` historical tendencies (display only, never a prior). |
-| Scheme | 7 | Team-level, in `signals`. Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled), run defense by gap, coverage-proxy splits, and participation-derived man/zone/shell tendencies (`_hist`, multi-season, labeled with their span). |
+| Scheme | 10 (from 7, 2026-10-07) | Team-level, in `signals`. Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled), run defense by gap, coverage-proxy splits, and participation-derived man/zone/shell tendencies (`_hist`, multi-season, labeled with their span). |
 
 ### L3 Synthesis and sheet
 
