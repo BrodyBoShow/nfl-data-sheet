@@ -164,8 +164,13 @@ export const SOURCES: readonly Source[] = [
     name: "ESPN injuries (unofficial endpoint)",
     url: "https://www.espn.com/nfl/injuries",
     feeds: "Injury designations behind the O-line and secondary availability counts.",
-    license: { name: "No published terms", url: null },
-    terms: ["Used for derived per-team counts only. No injury text or player status is republished."],
+    license: { name: "Disney Terms of Use", url: "https://disneytermsofuse.com/english/" },
+    terms: [
+      'espn.com links its Terms of Use to the Disney Terms of Use (page "Last Updated: May 24, 2024", ' +
+        "read 2026-10-08).",
+      "This site displays derived per-team counts only. No ESPN text, injury designation or player status " +
+        "is shown.",
+    ],
   },
   {
     id: "sleeper",
@@ -176,6 +181,8 @@ export const SOURCES: readonly Source[] = [
     terms: [
       'Free for non-commercial use; "For commercial use of the Sleeper API, please reach out to us ' +
         'directly to discuss licensing." (read 2026-09-25).',
+      'Sleeper\'s General Terms of Use (page "Last Updated: October 6, 2026", read 2026-10-08) cover the ' +
+        "Sleeper app and website. The pipeline reads only the public read-only API.",
       "Used for derived per-team counts only.",
     ],
   },
