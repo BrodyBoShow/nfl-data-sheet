@@ -734,6 +734,12 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   deliberately out of scope for now — ESPN + Sleeper only; see Known traps.
 - **License:** Unofficial (ESPN, no published terms); Sleeper API terms apply to the
   player dump.
+  - *(2026-10-08: "no published terms" doesn't hold. espn.com's footer links the Disney
+    Terms of Use, which name ESPN, and Sleeper's General Terms were updated 2026-10-06.
+    Both are quoted verbatim under Intel → License, below. What they mean for this
+    collector is an open user decision, filed in `docs/phases/P8.md`, "Filed: ESPN's
+    terms vs. live ESPN collectors" and "Filed: Sleeper's API docs vs. its General
+    Terms". No collector has been changed.)*
 - **Reliability:** Can break without notice — neither is an official/documented API.
 - **Freshness:** T1. ESPN is fetched every collector run (dispatcher's Wed/Fri
   cadence caps the real-world frequency); Sleeper is throttled to ≤1/day via
@@ -863,6 +869,155 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     - *The nflverse provenance argument that covers the PFR display doesn't apply here:
       Intel reads each provider's own feed.*
     - *Each source's terms get quoted verbatim, with URL and date, at P8 step 2.)*
+  - *(2026-10-08: all three read at P8 step 2A, quoted below. Step 2 stopped after A
+    (`docs/phases/P8.md`, Q10). Questions the quotes raise for live code are filed in
+    `P8.md`, "Filed: ESPN's terms vs. live ESPN collectors" and "Filed: Sleeper's API
+    docs vs. its General Terms".)*
+  - **Standing position (user):** the user isn't a lawyer, and nothing here is legal
+    advice. The quotes are recorded without interpretation. The project's standing
+    commitment, the same one recorded for PFR and NGS under nflverse bulk → License, is
+    to **honor any takedown request immediately, not argue it**.
+  - **How these were read.** All pages fetched raw (curl, tags stripped), 2026-10-08
+    01:34–01:45 UTC (2026-10-07 Pacific). The raw copies were kept in session scratch
+    only, not committed.
+  - **ESPN → Disney Terms of Use**, https://disneytermsofuse.com/english/. The page reads
+    "Last Updated: May 24, 2024"; read 2026-10-08.
+    - Applicability: espn.com/nfl's footer links "Terms of Use" to that URL. **Read
+      through WebFetch's summarizer, not raw:** a raw curl of www.espn.com returned an
+      empty HTTP 202 challenge. The page itself names ESPN, from the preamble:
+      > Disney DTC LLC and/or its affiliates and subsidiaries (collectively, “Disney” “we” or “us”) are pleased to provide to you certain websites, software, applications, content, products, and services in any media format or channel, now known or hereafter devised (“Disney Products” and “Products”), which may be branded Disney, ABC, ESPN, Marvel, Pixar, Lucasfilm, FX, Searchlight Pictures, 20th Century Studios, National Geographic, or another brand owned or licensed by Disney. References to Disney Products also include any elements of the Disney Products.
+    - From "1. These Terms of Use Are a Contract Between You and Us":
+      > C. Supplemental Terms. This Agreement governs the Disney Products in general. More specific and/or supplemental terms and conditions may apply to some Products, including but not limited to, a particular contest, sweepstakes or promotion, software, application, promotional code, service or other activity; availability of certain merchandise, content, programs, or other activities; conditions or other limitations to the Disney Products for users under certain ages; and/or specific terms or restrictions that may accompany certain territories, programs, content, products, websites, applications or other software. Any supplemental terms and conditions are in addition to this Agreement and, in the event of a conflict, the supplemental terms will prevail over this Agreement. If you do not agree to the applicable supplemental terms and conditions disclosed, you may not use the Disney Product.
+    - From "2. License Grant and Restrictions" (Q10's republishing language and Q9's AI
+      language are both in §2.A):
+      > A. Consumer License. If a Disney Product, or third party providing Disney Products subject to this Agreement, is configured to enable the use of software, content, virtual items or other materials owned or licensed by us, we grant you a limited, non-exclusive, non-sublicensable, non-transferable license to access and use in the United States such software, content, virtual item or other material for your personal, noncommercial use only, only for as long as that Disney Product is made available to you by us, or an authorized third party, and only in accordance with this Agreement and/or the specific terms that apply to that Disney Product, with no right to reproduce, distribute, communicate to the public, make available to the public, or transform any Disney Product, including in connection with any use, creation, development, modification, prompting, fine-tuning, training, testing, benchmarking or validation of any artificial intelligence or machine learning tool, model, system, algorithm, product or other technology (“AI Tool”), in any media format or channel now known or hereafter devised (except as may be expressly described within the Disney Product or used in a Disney Product in the manner for which it was intended). This is a license agreement and not an agreement for sale or assignment of any rights in the Disney Products. Except as we specifically agree in writing, no element of the Disney Products may be used or exploited in any way other than as part of the authorized Product made available to you. You may own the physical media on which elements of the Disney Products are made available to you, but we retain full and complete ownership of the Disney intellectual property. We do not transfer title to any portion of the Disney websites, software, applications, content, virtual items or other materials and/or services to you. Likewise, the purchase of a license to use any Disney Product does not create an ownership interest in the Disney websites, software, applications, content, virtual items or other materials and/or services.
+      >
+      > B. Restrictions on Your Use of Disney’s Products. You agree that you will not nor permit another person to do any of the following without our express written permission, and that these restrictions are a condition to your license:
+      >
+      > i. circumvent or disable any content protection system or digital rights management technology used in connection with the Disney Product;
+      >
+      > ii. copy the Disney Product (except as expressly permitted by us);
+      >
+      > iii. rebroadcast, transmit or perform the Disney Product;
+      >
+      > iv. create derivative works of the Disney Product or any part thereof, except as and only to the extent that any foregoing restriction is prohibited by applicable law;
+      >
+      > v. move, decompile, reverse-engineer, disassemble, or otherwise reduce to human-readable form the Disney Products and/or the video player(s), underlying technology, any digital rights management mechanism, device, or other content protection or access control measure incorporated into the video player(s);
+      >
+      > vi. modify the Disney Products, including, but not limited to, by removing identification, copyright or other proprietary notices from the Disney Products, or by framing, mirroring, or utilizing similar techniques;
+      >
+      > vii. access or use the Disney Products in a manner that suggests an association with our products, services or brands;
+      >
+      > viii. use the Disney Products for any commercial or business-related use or build a business utilizing the Disney Products, or engage in any activity to enable third parties to engage in any of the foregoing activities, in each case whether or not for profit;
+      >
+      > ix. bypass, modify, defeat, tamper with or circumvent any of the functions or protections of the Disney Products;
+      >
+      > x. access, monitor, copy or extract the Disney Products using a robot, spider, script, or other automated means, including, for the avoidance of doubt, for the purposes of creating or developing any AI Tool, data mining or web scraping or otherwise compiling, building, creating or contributing to any collection of data, data set or database (other than for a public search engine’s use of spiders for creating search indices to the extent not disallowed by Disney, including through the applicable robots.txt files or NOINDEX or NOFOLLOW meta-tags);
+      >
+      > xi. damage, disable, overburden or impair the Disney Products; or
+      >
+      > xii. use the Disney Products in any unlawful manner, for any unlawful purpose, or in any manner inconsistent with this Agreement;
+    - **Not read:** ESPN's own RSS terms page,
+      `https://www.espn.com/espn/news/story?page=rssinfo`. It returned an empty HTTP 202
+      challenge. Whether ESPN publishes supplemental terms for its feeds (§1.C) is unknown.
+    - **https://www.espn.com/robots.txt** (fetched 2026-10-08, HTTP 200) opens with
+      these groups, verbatim:
+      ```
+      User-agent: claritybot
+      Disallow: /
+
+      User-agent: GPTBot
+      Disallow: /
+
+      User-agent: Google-Extended
+      Disallow: /
+
+      User-agent: CCBot
+      Disallow: /
+
+      User-agent: ChatGPT-User
+      Disallow: /
+
+      User-agent: anthropic-ai
+      Disallow: /
+
+      User-agent: Omgilibot
+      Disallow: /
+
+      User-agent: Omgili
+      Disallow: /
+
+      User-agent: FacebookBot
+      Disallow: /
+
+      User-agent: Bytespider
+      Disallow: /
+      ```
+      The `User-agent: *` group that follows disallows specific paths only. No further
+      espn.com page was requested after it was read. `/nfl/` had already been fetched
+      once by WebFetch and once by curl.
+      `https://site.api.espn.com/robots.txt` returned HTTP 403.
+  - **Team RSS → Green Bay Packers Terms and Conditions**,
+    https://www.packers.com/fans/terms. The page reads "Effective Date: September 14,
+    2026"; read 2026-10-08.
+    - Chosen as the team because its page carries an explicit date. The Chiefs
+      (`/terms-of-use`), Eagles (`/footer/terms-conditions`) and Seahawks
+      (`/about/terms-and-conditions/`) pages carry the same "Modular Content … via an RSS
+      feed" paragraph. The Bills' page (`/about-us/terms-of-use`) has none of that
+      paragraph's wording.
+    - The 1.1 paragraph, 1.3 and 10(f) quoted below are word for word the NFL.com text
+      quoted under nflverse bulk → License (compared by string match, 2026-10-08).
+    - From "1. Intellectual Property", 1.1 (second paragraph):
+      > Except as expressly provided in this Agreement, you are prohibited from copying, reproducing, modifying, distributing, displaying, performing, or transmitting any of the Services or contents of the Services for any purposes, and nothing otherwise stated or implied in the Services confers on you any license or right to do so. To the extent you obtain any rights in our content, Services, or Modular Content, you hereby assign all such rights, title, and interest to the NFL.
+    - From 1.3:
+      > 1.3. Permitted Uses. You may use the Services solely for your own individual non-commercial and informational purposes only. Any other use, including for any commercial purposes, is strictly prohibited without our express prior written consent. Systematic retrieval of data or other content from the Services, whether to create or compile, directly or indirectly, a collection, compilation, database, or directory, is prohibited absent our express prior written consent.
+    - From "6. Modular Content" (the whole section):
+      > We may provide certain content, which includes graphics, text, audio, video, photographs, news, scores, or other material that is capable of being incorporated, including as a module or via an RSS feed or similar technology, into a website or other online, cable, wireless, or other service other than the Services ("Modular Content"). To the extent that we make Modular Content available, you agree to use it responsibly and in accordance with this Agreement and any other rules or restrictions provided to you in connection with the Modular Content.
+      >
+      > By using Modular Content or incorporating it within or associating it with a website or other online, cable, wireless, or other service other than the Services, you agree not to: (1) obscure our branding of the Modular Content, assert or imply ownership or authorship of the Modular Content, or facilitate another party's assertion or implication of ownership or authorship of the Modular Content; (2) excerpt or edit the Modular Content, except as specifically permitted by us in writing; or (3) publish, place, or utilize the Modular Content in a setting or manner in which it may be associated with content or other material that (i) is or may be considered unlawful, threatening, abusive, bigoted, hateful, libelous, defamatory, obscene, vulgar, offensive, pornographic, profane, sexually explicit or indecent, (ii) may constitute, advocate or encourage conduct that would constitute or give rise to a criminal offense, civil liability or other violation of any local, state, national or international law; (iii) violates, plagiarizes or infringes the rights of third parties including, copyright, trademark, patent, rights of privacy or publicity, or any other proprietary right; (iv) contains or may be associated with a computer virus or other harmful component; (v) constitutes or contains false or misleading indications of origin or statements of fact; (vi) contains any information, software or other material of a commercial nature; or (vii) contains advertising, promotions or commercial solicitations of any kind.
+      >
+      > Although we are under no obligation to do so and assume no responsibility or liability arising from any use of Modular Content, we may monitor the web sites or other online, cable, wireless, or other services with which Modular Content is used. You agree that you will promptly, and in any event within 24 hours, remove the Modular Content from any website or other online, cable, wireless, or other service if we or our agent request that you do so, and that you will maintain the ability to remove Modular Content from any web site or online, cable, wireless, or other service on which you cause it to be placed or with which you cause it to be affiliated. You agree that we have exclusive discretion to direct that the Modular Content be removed from websites or other online, cable, wireless, or other services at any time and for any reason, including, the prohibited uses of Modular Content described above; that we may implement and use protections to limit the web sites or other online, cable, wireless, or other services in conjunction with which Modular Content may be used or the manner in which Modular Content may be used; and that we may not specifically advise you of the existence or nature of these protections.
+    - From "10. Prohibited Uses Generally" ("You further agree not to:"):
+      > (f) use or attempt to use any engine, software, tool, agent or other device or mechanism (including, browsers, spiders, robots, avatars or intelligent agents) to navigate or search the Services to harvest or otherwise collect information from the Services to be used for any commercial purpose;
+    - **AI (Q9):** none of "artificial", "machine", "train", "generative", "large
+      language", or the standalone word "AI" appears on the page.
+  - **Sleeper → API docs**, https://docs.sleeper.com/. No date on the page; read
+    2026-10-08.
+    - From "Introduction":
+      > The Sleeper API is a read-only HTTP API that is free to use for non-commercial purposes and allows access to a user's leagues, drafts, and rosters.
+      >
+      > For commercial use of the Sleeper API, please reach out to us directly to discuss licensing.
+      >
+      > Be mindful of the frequency of calls. A general rule is to stay under 1000 API calls per minute, otherwise, you risk being IP-blocked.
+    - From "Trending Players":
+      > Please give attribution to Sleeper you are using our trending data. If you'd like to embed our trending list on your website or blog, please use the embed code on the right.
+  - **Sleeper → General Terms of Use**, https://sleeper.com/terms, which redirects to
+    https://support.sleeper.com/en/articles/5486620-general-terms-of-use. The page reads
+    "Last Updated: October 6, 2026"; read 2026-10-08.
+    - Scope, from the preamble:
+      > Blitz Studios, Inc., and as applicable, its subsidiaries and affiliates (collectively, “Sleeper,” “we,” “our,” or “us”) own and operate the Sleeper mobile applications and website (www.sleeper.com), both through which we offer free-to-play games, paid-entry contests of skill, event contracts, and other games, tools, content, products and services (collectively, the “Services”). Before accessing or using the Services, please read these General Terms of Use and any additional terms, rules, guidelines and conditions issued, from time to time, by Sleeper (collectively, the “Terms”) carefully.
+    - From "9 LICENSE AND INTELLECTUAL PROPERTY":
+      > 9.2 We grant you a limited, personal, revocable, non-transferable and non-exclusive right and license to access and use the Services, in accordance with these Terms, for your personal and non-commercial use, as the Services were intended to be used. Any software provided through or used to operate the Services is licensed, not sold, to you by us, and such license is limited to object code only. Please note that our Services contain software governed by the license of a third-party, and you agree to abide by the terms and conditions of the same by using the Services. Except as expressly permitted herein, you must not, nor enable any other person to, rent, lease, lend, sell, redistribute, sublicense, copy, reverse engineer, decompile, translate, modify, rent, use as a service bureau, distribute copies of, adapt, create derivative works based on, or otherwise inappropriately use the Services. For the avoidance of doubt, connecting your account to an Approved Integration Partner (as defined above) in accordance with these Terms is a permitted use of the Services and shall not be deemed prohibited use; provided, however, that nothing in these Terms transfers, assigns, or grants to you or to any Approved Integration Partner any ownership or other right, title, or interest in the Services or any data, content, or intellectual property therein, except for the limited license expressly granted herein.
+    - From "11 PROHIBITED CONDUCT", 11.1 ("Without limitation, you agree not to:"),
+      five of its list items, quoted individually:
+      > · Use the Services for any purpose other than their intended use;
+      >
+      > · Crawl or scrape the Services in any way, shape, or form, for any purpose whatsoever, without the express written consent of Sleeper;
+      >
+      > · Access, query, extract, or receive any data or content from the Services through any automated means, bot, script, spider, robot, and/or other technology, or through manual means performed at a scale, frequency, or systematic pattern inconsistent with ordinary individual human use, without the express written consent of Sleeper;
+      >
+      > · Monitor, use, or copy the Services and/or any content posted to the Services, including but not limited to information about or regarding other people that use our Services, or upload anything that collects information including but not limited to ‘pixel tags’ and cookies;
+      >
+      > · Use our Services for any commercial or business purpose or for the benefit of any third-party or to send unsolicited communications;
+    - The other 11.1 items cover multiple accounts, selling profiles or goods, other
+      people's accounts, false information, illegal use, collusion, cheating, IP masking,
+      credential sharing, connecting third-party apps, removing notices, security,
+      objectionable messages, impersonation, and abuse.
+    - From 11.3:
+      > 11.3 No third-party is authorized to access, use, scrape, crawl, query, or retrieve any data or content from the Services, whether directly, through automated means, or through any account, credential, or authentication mechanism belonging to a user, except pursuant to a separate written agreement executed by Sleeper, or other approval given by Sleeper, expressly authorizing that access. A user's provision of credentials, tokens, or authorization to a third-party does not constitute authorization from Sleeper, and Sleeper's authorization must be obtained independently and directly from Sleeper.
+    - The General Terms don't mention the API: "API" appears on the page only as a
+      footer link. No AI clause: none of "artificial", "machine learning", "large
+      language", or the standalone word "AI" appears.
 - **Reliability:** Can break.
 - **Freshness:** T1.
 - **Known traps:** Live news only — no static or manually maintained research files feed
