@@ -119,11 +119,11 @@ Freshness tiers: **T0** every few minutes, **T1** hourly or several a day, **T2*
 | Collector | Source(s) | Reliability | Tier | Phase | Stores |
 |---|---|---|---|---|---|
 | nflverse bulk | nflreadpy: pbp, player and team stats, snap counts, NGS, PFR advanced, FTN charting, depth charts, rosters | Open data | T2 | 2 | Aggregates only (player_week, team_week, snaps, ngs, ftn, depth). **Never raw pbp in Postgres.** |
-| Live game | ESPN scoreboard and game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
-| Odds | The Odds API free tier + ESPN embedded lines as free fill-in | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
+| Live game | ESPN scoreboard and game summary (unofficial) *(dropped 2026-10-08, no new ESPN surface; source TBD, `docs/phases/P8.md` D2/Q11)* | Can break | T0 | 8 | live_games, live_box, espn_lines *(espn_lines dropped 2026-10-08)* |
+| Odds | The Odds API free tier + ESPN embedded lines as free fill-in *(ESPN fill-in dropped 2026-10-08, never built, `docs/phases/P8.md` D2)* | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Weather | Open-Meteo (no key) + stadium coords, roof, surface | Open data | T1 | 4 | weather_snapshots (append-only), outdoor games only |
 | Availability | ESPN injuries, Sleeper players (max once/day), NFL.com injury report pages | Can break | T1 | 3 | injuries, practice_status, transactions |
-| Intel (live news) | ESPN NFL news feed (unofficial), official team site RSS where available, Sleeper trending players as a news-spike indicator | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped by URL + text hash), news_tags (team, player_id, rule-based category: injury, depth chart, suspension, coaching, signing/release/trade) |
+| Intel (live news) | ESPN NFL news feed (unofficial), official team site RSS where available, Sleeper trending players as a news-spike indicator *(2026-10-08: ESPN dropped; team RSS shown as headline + link only, unedited and attributed; trending attributed, its label open. `docs/phases/P8.md` D4)* | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped by URL + text hash), news_tags (team, player_id, rule-based category: injury, depth chart, suspension, coaching, signing/release/trade) |
 
 ### L2 Analysts (all write to `signals`)
 

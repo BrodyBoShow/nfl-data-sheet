@@ -220,12 +220,12 @@ daily, **T3** weekly, **OD** on demand.
 | Collector | Source(s) | Reliability | Tier | Phase | Stores |
 |---|---|---|---|---|---|
 | nflverse bulk | nflreadpy: pbp, player stats, snap counts, NGS, PFR advanced, FTN charting, depth charts; participation (P7) | Open data | T2 | 2, extended 7 | Aggregates only (player_week, team_week, snaps, ngs, ftn, pfr_advstats, depth; P7 adds player_game_pbp and participation_player_season, and widens ngs/pfr_advstats/ftn/player_week, migrations 0027–0030). **Never raw pbp in Postgres**, and never participation's per-play 22-ID rows either. Participation is `season - 1` only (post-season release). `load_team_stats`/`load_rosters` verified but not staged — see `docs/phases/P2.md` deviations. Staged player seasons roll off under the L0 retention job. |
-| Live game | ESPN scoreboard/game summary (unofficial) | Can break | T0 | 8 | live_games, live_box, espn_lines |
-| Odds | The Odds API free tier + ESPN embedded lines | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
+| Live game | *Source TBD (P8 Q11).* ESPN scoreboard/game summary dropped 2026-10-08 (P8 D2: no new ESPN surface) | Can break | T0 | 8 | live_games, live_box (`espn_lines` dropped with ESPN) |
+| Odds | The Odds API free tier (ESPN embedded lines fill-in dropped 2026-10-08, never built; P8 D2) | Credit-limited | T1 | 4 | odds_snapshots (append-only) |
 | Stadiums reference | `reference/stadiums.csv` (hand-reviewed; coords + field bearing from OpenStreetMap, roof type cited per row) | Hand-maintained | T3 | 4 | stadiums (coords, roof_type, field_bearing, known_names, tz) |
 | Weather | Open-Meteo (no key); venue from the `stadiums` table | Open data | T1 | 4 | weather_snapshots (append-only), weather_snapshot_targets; 7 kickoff-relative snapshots per non-fixed-roof game (`weather_schedule.py`) |
 | Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, injury_presence |
-| Intel (live news) | ESPN NFL news feed, official team RSS where available, Sleeper trending players | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped URL+hash), news_tags (rule-based) |
+| Intel (live news) | Official team RSS where available (headline + link only, unedited, attributed), Sleeper trending players (attributed). ESPN dropped 2026-10-08 (P8 D4) | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped URL+hash), news_tags (rule-based) |
 
 ### L2 Analysts (all write to `signals`, except the two player-table writers marked below)
 

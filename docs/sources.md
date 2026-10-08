@@ -519,6 +519,9 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
 
 ## Live game data (ESPN scoreboard / game summary)
 
+*(2026-10-08: **dropped from the plan** (user, `docs/phases/P8.md`, D2: no new ESPN
+surface). Live has no recorded source: P8 Q11. Kept for the record.)*
+
 - **Status:** UNVERIFIED
 - **License:** Unofficial, no published terms — use conservatively, don't republish raw.
 - **Reliability:** Can break without notice; not an official API.
@@ -627,6 +630,8 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     schedule closing lines for historical backtests instead.
   - ESPN embedded lines used as a free fill-in source, not a replacement — **not yet
     verified**, TBD on first call to that endpoint.
+    - *(2026-10-08: **dropped from the plan**, never built (user, `docs/phases/P8.md`,
+      D2: no new ESPN surface).)*
 
 ## Weather (Open-Meteo)
 
@@ -740,6 +745,11 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     collector is an open user decision, filed in `docs/phases/P8.md`, "Filed: ESPN's
     terms vs. live ESPN collectors" and "Filed: Sleeper's API docs vs. its General
     Terms". No collector has been changed.)*
+  - *(2026-10-08, decided (user, `P8.md` D2/D3): both continue. ESPN continues because
+    it's existing usage that publishes derived per-team counts only, no replacement is
+    recorded, and dropping it removes Availability impact and a card section. No new
+    ESPN extraction is added anywhere. Sleeper continues on the API docs' grant. A
+    replacement injury source is an open item, with no deadline.)*
 - **Reliability:** Can break without notice — neither is an official/documented API.
 - **Freshness:** T1. ESPN is fetched every collector run (dispatcher's Wed/Fri
   cadence caps the real-world frequency); Sleeper is throttled to ≤1/day via
@@ -860,6 +870,12 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
   `tests/fixtures/sleeper_players_sample.json`.
 
 ## Intel / live news (ESPN NFL news feed, team RSS, Sleeper trending)
+
+*(2026-10-08: **ESPN dropped from Intel** (user, `docs/phases/P8.md`, "Decisions on the
+filed items", D2/D4). Intel is now official team RSS plus Sleeper trending. Team RSS is
+shown only as headline plus link, unedited, branding intact, attributed, and removable
+within 24 hours. Trending is shown with attribution. The ESPN terms below stay as the
+record behind that decision.)*
 
 - **Status:** UNVERIFIED
 - **License:** Unofficial (ESPN); RSS terms per team site; Sleeper API terms.
