@@ -181,8 +181,8 @@ export const SOURCES: readonly Source[] = [
     terms: [
       'Free for non-commercial use; "For commercial use of the Sleeper API, please reach out to us ' +
         'directly to discuss licensing." (read 2026-09-25).',
-      'Sleeper\'s General Terms of Use (page "Last Updated: October 6, 2026", read 2026-10-08) cover the ' +
-        "Sleeper app and website. The pipeline reads only the public read-only API.",
+      'Sleeper also publishes General Terms of Use (page "Last Updated: October 6, 2026", read ' +
+        "2026-10-08). The pipeline reads only the public read-only API.",
       "Used for derived per-team counts only.",
     ],
   },
