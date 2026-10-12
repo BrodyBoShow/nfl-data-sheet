@@ -877,7 +877,8 @@ shown only as headline plus link, unedited, branding intact, attributed, and rem
 within 24 hours. Trending is shown with attribution. The ESPN terms below stay as the
 record behind that decision.)*
 
-- **Status:** UNVERIFIED
+- **Status:** Team RSS and Sleeper trending **VERIFIED (live-called 2026-10-12, P8 step 2
+  B/C)**. ESPN news was never called: dropped (D2/D4).
 - **License:** Unofficial (ESPN); RSS terms per team site; Sleeper API terms.
   - *(2026-10-07: none of the three has been read. Whether items can be displayed on a
     public site is `docs/phases/P8.md` Q10, and whether ESPN text can be sent to an LLM
@@ -1042,4 +1043,95 @@ record behind that decision.)*
   required.
   - *(2026-10-07: "crosswalk name matching" conflicts with the rejected name+team
     fallback recorded under Availability, above. `docs/phases/P8.md` Q2.)*
-- **Params/shape/limits:** TBD on first verification call.
+  - **Team RSS carries no player or team ID (2026-10-12).** Only names, in titles and
+    keywords. `guid` is the club CMS's content UUID. The team is implied by which feed
+    an item came from. Measured on the 32 feeds fetched 2026-10-12:
+    - 444 of 1,283 distinct (club, keyword) pairs exactly equal a
+      `players.display_name`. 421 of those equal the name of a player whose
+      `latest_team` is that club, none of them shared by two such players today. 24
+      equal a name shared by more than one player league-wide, e.g. "Lamar Jackson" on
+      both atlantafalcons.com and baltimoreravens.com, and "Mike Green" (3 players).
+      `players` has 820 display names shared by more than one player.
+    - Keywords are incomplete as a player list: on packers.com, 22 of 100 titles contain
+      a current GB player's full name, and 9 of those items carry it as a keyword.
+      "Packers LB Zaire Franklin is 'running the show'" is keyworded with coaches'
+      names.
+    - Keywords have no type marker. One field mixes CMS placement tags ("Homepage CP",
+      "Featured"), categories ("News: Injury Report", "Transactions"), writers' names
+      ("Ryan Mink", "Aric DiLalla", "hobson"), coaches, players, and game tags.
+    - 24 of 32 clubs use one game-tag form, e.g. "Chicago Bears at Green Bay Packers
+      (2026-REG-5)": full team names, season, season type, week. Not checked against
+      `games`.
+  - **Feed windows are capped by count, and some are short.** 5 items (patriots.com,
+    1.1 days) up to 100 (11 clubs). steelers.com's 12 items cover 2.2 days. A poll gap
+    longer than a club's window misses items. Tick gaps reach ~8 h (`P8.md` Q6).
+  - **Feeds aren't reliably chronological or current.**
+    - commanders.com's first item is from 2022-04-30. Its 20 items span 2022–2026, with 1
+      in the last 7 days, so it's not a live news feed in practice.
+    - dallascowboys.com carries one 2018-05-07 item among current ones.
+  - **Sleeper trending's `player_id` isn't always a player.** 3 of 25 rows were team
+    codes (`NE`, `SF`, `IND`): fantasy team defenses. A team code that doesn't resolve
+    through the crosswalk is not an unresolved player.
+- **Params/shape/limits:**
+  - **Team RSS** (verified 2026-10-12):
+    - `GET https://www.<club domain>/rss/news`, no auth, no params. One feed per club.
+    - **How the URL was found:**
+      - The 32 club domains come from nfl.com/teams' "View Full Site" links (fetched
+        2026-10-12).
+      - packers.com doesn't link the feed: no `<link rel="alternate">`, no "rss" string
+        on the homepage. The path came from a third-party directory (FeedSpot) and was
+        verified live.
+      - Then one GET per club, 23:44:59–23:46:03 UTC: **all 32 returned 200
+        `application/rss+xml`**.
+    - **Shape:** RSS 2.0.
+      - Channel: `title` ("News"), `description`, `atom:link` (self), `link`,
+        `language`, `image` (team logo).
+      - Item: `title` (CDATA), `description` (CDATA), `link` (article URL), `pubDate`
+        (RFC 822, GMT), `guid isPermaLink="false"` (UUID), `source url=<feed>`,
+        `media:content url` (image), `enclosure` (image, `length="0"`), and
+        `media:keywords` (comma-separated free text, padded with whitespace).
+      - Every club's items carry the same elements. `description` is missing on some
+        items: all 8 of vikings.com's, and 2–5 per feed on 7 other clubs.
+    - **Volume: ~109 items/day across the 32 clubs.** Per club, 0.1 to 5.9 a day: the 7
+      days to 2026-10-12, or the club's own window where that's shorter.
+      - Raw items are ~1 KB.
+      - Median field sizes: `title` 64 B, `link` 97 B, `guid` 36 B.
+    - **Limits:** none documented. packers.com sends `Cache-Control: public,
+      max-age=5`.
+      - packers.com/robots.txt disallows `/search/`, `/_libraries/`, `/_mobileview/`
+        and `/news/insider-inbox`, not `/rss/`. The other 31 robots files weren't read.
+    - Terms: the Packers page above (§6, Modular Content). No terms page was read at
+      B/C. At 2A, the Chiefs', Eagles' and Seahawks' pages had the same RSS paragraph
+      and the Bills' had none. The other 27 are unread.
+  - **Sleeper trending** (verified 2026-10-12):
+    - Documented at https://docs.sleeper.com/, "Trending Players":
+      `GET https://api.sleeper.app/v1/players/<sport>/trending/<type>?lookback_hours=<hours>&limit=<int>`.
+      - `type` is `add` or `drop`.
+      - `lookback_hours` defaults to 24, and `limit` defaults to 25. Both are optional.
+    - **Called once:** `.../nfl/trending/add?lookback_hours=24&limit=25`, 2026-10-12
+      23:47:37 UTC. HTTP 200 JSON, 889 bytes, 25 rows.
+    - **Shape:** a JSON array of `{"player_id": string, "count": int}`, sorted by
+      `count` descending.
+      - No timestamp, window, name, team or position in the response. The window is
+        what the request asked for.
+      - `count`, per the docs, is "number or adds" (sic). This call's values ran from
+        33,846 to 330,822.
+    - **IDs:** Sleeper's own player IDs, or a team code for a team defense (see Known
+      traps).
+      - All 22 numeric IDs resolved through `player_id_crosswalk.sleeper_id`
+        (Availability's own `_fetch_crosswalk_by_sleeper_id`) to a `players` row.
+      - Their positions were QB, RB, WR, TE and K only.
+    - **Limits:** `Cache-Control: public, s-maxage=600, stale-while-revalidate=300,
+      stale-if-error=600`. This call was served from the CDN cache (`Age: 310`).
+      - The docs' rate guidance is "stay under 1000 API calls per minute" (quoted
+        above).
+      - Untested: `drop`, other `lookback_hours`, and the largest `limit`.
+    - **Volume:** set by the caller. One call returns `limit` rows, 25 by default.
+- **Fixtures (trimmed):**
+  - `tests/fixtures/team_rss_packers_news_sample.xml`: the channel plus 6 of 100 items,
+    raw bytes kept.
+    - Items 0, 1, 4, 15, 18 and 35 of the response: a press release, a player keyword,
+      a player plus a game tag, an IR transaction, an item with no `description`, and a
+      player in the title with coaches in the keywords.
+  - `tests/fixtures/sleeper_trending_add_sample.json`: the top 4 rows plus the first
+    team-code row (`NE`), re-indented.
