@@ -3,7 +3,7 @@
 # other exit builds.
 #
 # Skips only when nothing that feeds the web app changed since the last successful
-# deploy: web/ itself, plus the three repo files the prebuild step reads
+# deploy: web/ itself, plus the four repo files the prebuild step reads
 # (scripts/sync-content.mjs). Diffing against VERCEL_GIT_PREVIOUS_SHA, not HEAD^, so a
 # push of several commits is checked in full, not just its last commit.
 #
@@ -17,4 +17,5 @@ git diff --quiet "$VERCEL_GIT_PREVIOUS_SHA" HEAD -- \
   web \
   docs/backtest_report.md \
   pipeline/synthesis/model_coefficients.json \
-  pipeline/core/team_aliases.py
+  pipeline/core/team_aliases.py \
+  pipeline/analysts/player_efficiency.py

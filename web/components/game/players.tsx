@@ -5,9 +5,12 @@ import {
   FAMILIES,
   FTN_FIRST_SEASON,
   HIST_TABLES,
+  BLEND_MARK,
+  BLEND_TITLE,
   ROLE_GROUPS,
   TAGS,
   TACKLE_L4_MIN_DEF_SNAPS,
+  colLabel,
   defSnapShare,
   familyRows,
   formatSeasons,
@@ -15,6 +18,7 @@ import {
   formatPlayerValue,
   histRows,
   parseSpan,
+  pctPopulation,
   roleRows,
   type Col,
   type Family,
@@ -53,6 +57,8 @@ function Head({
   num = true,
   colSpan,
   rowSpan,
+  col,
+  blended = false,
 }: {
   label: string;
   tags: Tag[];
@@ -61,10 +67,23 @@ function Head({
   num?: boolean;
   colSpan?: number;
   rowSpan?: number;
+  /** The data-col of the cells under this header, where one header heads one column. */
+  col?: string;
+  /** The column's values are blended estimates; the label carries BLEND_MARK. */
+  blended?: boolean;
 }) {
   const cls = [num ? "num" : "", sticky ? "sticky" : ""].filter(Boolean).join(" ") || undefined;
   return (
-    <th scope="col" className={cls} title={title} colSpan={colSpan} rowSpan={rowSpan} data-tags={tags.join(",")}>
+    <th
+      scope="col"
+      className={cls}
+      title={title}
+      colSpan={colSpan}
+      rowSpan={rowSpan}
+      data-tags={tags.join(",")}
+      data-col={col}
+      data-blended={blended ? "" : undefined}
+    >
       {label}
       <Tags tags={tags} />
     </th>
@@ -183,7 +202,14 @@ function FamilyTable({
   const isDefense = family.id === "defense";
   const approx = family.cols.filter((c) => c.approx);
   const head = (c: Col<PlayerEff>) => (
-    <Head key={c.key} label={c.approx ? `${c.label} †` : c.label} tags={c.tags} title={c.title} />
+    <Head
+      key={c.key}
+      label={colLabel(c)}
+      tags={c.tags}
+      title={c.title ? `${BLEND_TITLE} ${c.title}` : BLEND_TITLE}
+      col={c.key}
+      blended
+    />
   );
   return (
     <div className="players-family" data-family-wrap={family.id}>
@@ -195,34 +221,86 @@ function FamilyTable({
           <thead>
             <tr>
               {IDENTITY_HEADS}
-              {isDefense ? <Head label="Def snap %" tags={["PFR"]} title="Share of the team's defensive snaps, season." /> : null}
-              <Head label={family.sample.label} tags={family.sample.tags} title="Season to date." />
-              <Head label={isDefense ? "Stab ‡" : "Stab"} tags={family.stability.tags} title={family.stability.title} />
-              <Head label={h.label} tags={h.tags} title="Season to date, blended with last season and the league (Stab)." />
-              {showPct ? <Head label="Pct" tags={h.tags} title="League percentile within the position group, 0–100." /> : null}
-              <Head label="Last 4" tags={h.tags} title="Last 4 games played, raw (not blended). Read with its n." />
-              <Head label="L4 n" tags={family.sample.tags} title="The last-4 sample." />
+              {isDefense ? (
+                <Head
+                  label="Def snap %"
+                  tags={["PFR"]}
+                  title="Share of the team's defensive snaps, season. Observed, not blended."
+                  col="def_snap_share_std"
+                />
+              ) : null}
+              <Head label={family.sample.label} tags={family.sample.tags} title="Season to date." col={family.sample.std} />
+              <Head
+                label={isDefense ? "Stab ‡" : "Stab"}
+                tags={family.stability.tags}
+                title={family.stability.title}
+                col={family.stability.key}
+              />
+              <Head
+                label={`${h.label} ${BLEND_MARK}`}
+                tags={h.tags}
+                title={`${BLEND_TITLE} Stab is the share of this value that is the player's own.`}
+                col={h.std}
+                blended
+              />
+              {showPct ? (
+                <>
+                  <Head
+                    label={`Pct ${BLEND_MARK}`}
+                    tags={h.tags}
+                    title={`Percentile, 0–100, of the ${h.label} estimate, within the population named in Ranked among.`}
+                    col={h.pct}
+                    blended
+                  />
+                  <Head
+                    label="Ranked among"
+                    tags={[]}
+                    num={false}
+                    title="Each row's own population: its position group, only players meeting the per-game minimum, each on their latest game through that row's week."
+                  />
+                </>
+              ) : null}
+              <Head
+                label="Last 4"
+                tags={h.tags}
+                title="Last 4 games played, raw (not blended). Read with its n."
+                col={h.l4}
+              />
+              <Head label="L4 n" tags={family.sample.tags} title="The last-4 sample." col={family.sample.l4} />
               {family.cols.map(head)}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.player_id} data-row={r.player_id}>
-                <Identity row={r} asOfWeek={asOfWeek} />
-                {isDefense ? <Value col="def_snap_share_std" fmt="pct" v={defSnapShare(r, usage)} /> : null}
-                <Value col={family.sample.std} fmt="count" v={r[family.sample.std] as number | null} />
-                <td className="num" data-col={family.stability.key} data-stab>
-                  {formatPlayerValue("stab", r[family.stability.key] as number | null) ?? DASH}
-                </td>
-                <Value col={h.std} fmt={h.fmt} v={r[h.std] as number | null} />
-                {showPct ? <Value col={h.pct} fmt="rank" v={r[h.pct] as number | null} /> : null}
-                <Value col={h.l4} fmt={h.fmt} v={headlineL4(family, r)} />
-                <Value col={family.sample.l4} fmt="count" v={r[family.sample.l4] as number | null} />
-                {family.cols.map((c) => (
-                  <Value key={c.key} col={c.key} fmt={c.fmt} v={r[c.key] as number | null} />
-                ))}
-              </tr>
-            ))}
+            {rows.map((r) => {
+              // A percentile is shown only with its own population; a row that can't name
+              // one (no position group) has its percentile withheld.
+              const population = pctPopulation(family, r);
+              const pct = population === null ? null : (r[h.pct] as number | null);
+              return (
+                <tr key={r.player_id} data-row={r.player_id}>
+                  <Identity row={r} asOfWeek={asOfWeek} />
+                  {isDefense ? <Value col="def_snap_share_std" fmt="pct" v={defSnapShare(r, usage)} /> : null}
+                  <Value col={family.sample.std} fmt="count" v={r[family.sample.std] as number | null} />
+                  <td className="num" data-col={family.stability.key} data-stab>
+                    {formatPlayerValue("stab", r[family.stability.key] as number | null) ?? DASH}
+                  </td>
+                  <Value col={h.std} fmt={h.fmt} v={r[h.std] as number | null} />
+                  {showPct ? (
+                    <>
+                      <Value col={h.pct} fmt="rank" v={pct} />
+                      <td className="ink-2" data-col="pct_population" data-pct-population>
+                        {pct === null ? DASH : population}
+                      </td>
+                    </>
+                  ) : null}
+                  <Value col={h.l4} fmt={h.fmt} v={headlineL4(family, r)} />
+                  <Value col={family.sample.l4} fmt="count" v={r[family.sample.l4] as number | null} />
+                  {family.cols.map((c) => (
+                    <Value key={c.key} col={c.key} fmt={c.fmt} v={r[c.key] as number | null} />
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -401,9 +479,22 @@ export function PlayersSection({
         cover different plays and aren&apos;t directly comparable.
       </p>
       <p className="legend t-small ink-2">
-        Each player&apos;s latest game through week {asOfWeek}. Stab is the share of a season value that isn&apos;t
-        league average (0–1); it applies to every season value in its row. Nothing is dimmed. Last-4 values are raw:
-        read them with their n.
+        Each player&apos;s latest game through week {asOfWeek}. Nothing is dimmed. Last-4 values, game and play
+        counts, and role shares are observed, not blended: read last-4 values with their n.
+      </p>
+      <p className="legend t-small ink-2" data-blend-legend>
+        {BLEND_MARK} Starred season values are estimates, not observed rates: each blends the player&apos;s own rate so far
+        with the player&apos;s last season and the position group&apos;s current average, more so the fewer plays
+        behind it, so a stat correction to anyone in the group can move it. The group is the player&apos;s position
+        group (e.g. WR, DL), season to date, not the whole league. Stab is the share that is the player&apos;s own,
+        this season and last, for the headline column only (EPA/dropback, EPA/carry, EPA/target, tackles per 100
+        snaps); every other starred column blends at its own rate, which isn&apos;t shown. Pct ranks the headline
+        estimate.
+      </p>
+      <p className="legend t-small ink-2" data-pct-legend>
+        There is no single population behind Pct. Each percentile ranks a player within the population named in its
+        own row: one position group, only players meeting a per-game minimum, as of that row&apos;s week. Rows from
+        different weeks or position groups are ranked against different players.
       </p>
       <p className="legend t-small ink-2" data-snap-statement>
         Games and last-4 windows count games with a snap, from Pro Football Reference snap counts (Sports Reference

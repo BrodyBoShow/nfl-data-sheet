@@ -23,18 +23,23 @@ import report from "../content/backtest-report.json";
 import { PlayersSection } from "../components/game/players";
 import type { PlayerEff, PlayerUsage } from "../lib/db";
 import {
+  BLEND_MARK,
   FAMILIES,
   HIST_TABLES,
   ROLE_GROUPS,
   TACKLE_L4_MIN_DEF_SNAPS,
   TAGS,
+  colLabel,
   formatPlayerValue,
   formatSeasons,
   headlineL4,
   parseSpan,
+  pctMinimum,
+  pctPopulation,
   type Tag,
 } from "../lib/players";
 import { SOURCES } from "../lib/sources";
+import { parsePctMinimums } from "../scripts/pct-minimums.mjs";
 import effFixture from "./fixtures/player_eff_2026_03_ATL_GB.json";
 import usageFixture from "./fixtures/player_usage_2026_03_ATL_GB.json";
 
@@ -435,15 +440,15 @@ describe("players section", () => {
     for (const g of ROLE_GROUPS) expectHead(g.label, g.tags);
     for (const f of FAMILIES) {
       expectHead(f.sample.label, f.sample.tags);
-      expectHead(f.headline.label, f.headline.tags);
-      for (const c of f.cols) expectHead(c.approx ? `${c.label} †` : c.label, c.tags);
+      expectHead(`${f.headline.label} ${BLEND_MARK}`, f.headline.tags);
+      for (const c of f.cols) expectHead(colLabel(c), c.tags);
     }
     for (const t of HIST_TABLES) for (const c of t.cols) expectHead(c.label, c.tags);
     // The providers the spec credits, checked by name, so a spec edit can't drop them.
-    expect(heads.find((h) => h.label === "pressure % †")?.tags).toBe("PFR");
-    expect(heads.find((h) => h.label === "time to throw (s)")?.tags).toBe("NGS");
-    expect(heads.find((h) => h.label === "separation (yd)")?.tags).toBe("NGS");
-    expect(heads.find((h) => h.label === "yds before contact")?.tags).toBe("PFR");
+    expect(heads.find((h) => h.label === "pressure % *†")?.tags).toBe("PFR");
+    expect(heads.find((h) => h.label === "time to throw (s) *")?.tags).toBe("NGS");
+    expect(heads.find((h) => h.label === "separation (yd) *")?.tags).toBe("NGS");
+    expect(heads.find((h) => h.label === "yds before contact *")?.tags).toBe("PFR");
     expect(heads.find((h) => h.label === "snap %")?.tags).toBe("PFR");
     for (const c of FAMILIES.find((f) => f.id === "defense")!.cols) expect(c.tags, c.key).toContain("PFR");
     for (const t of HIST_TABLES) for (const c of t.cols) expect(c.tags, c.key).toContain("FTN");
@@ -532,11 +537,15 @@ describe("players section", () => {
     const html = renderSection();
     const def = tables(html).filter((t) => t[1] === "defense");
     expect(def.length).toBe(2);
-    for (const t of def) expect(headers(t[0]).map((h) => h.label)).not.toContain("pct");
+    const pctLabel = `pct ${BLEND_MARK}`;
+    for (const t of def) {
+      expect(headers(t[0]).map((h) => h.label)).not.toContain(pctLabel);
+      expect(t[0]).not.toMatch(/data-col="[a-z_]+_pct"/);
+    }
     expect(html.split("data-not-ranked").length - 1).toBe(2);
     expect(text(html)).toContain("not ranked: pro football reference has no defensive row");
     // Offense families with a percentile do show it, so the absence above is the gate's.
-    expect(headers(html).some((h) => h.label === "pct")).toBe(true);
+    expect(headers(html).some((h) => h.label === pctLabel)).toBe(true);
   });
 
   it("8. row order is unchanged when percentiles are shuffled", () => {
@@ -642,6 +651,163 @@ describe("players section", () => {
     // A gapped span with a season before FTN's first is still withheld, not shown as FTN.
     const old = EFF.map((r) => (r.player_id === ids[0] ? { ...r, hist_span: "2021, 2023" } : r));
     expect(text(renderSection(USAGE, old))).toContain("1 row not shown: seasons before 2023 carry a different attribution");
+  });
+
+  it("13. every Pct names its own population in its row: group, minimum, week", () => {
+    // P7 open item 18 ("a row's label comes from the row"): one table holds rows ranked
+    // against different populations, so the population is per row, never the table's.
+    const cellOf = (tr: string, col: string) =>
+      text(new RegExp(`<td[^>]*data-col="${col}"[^>]*>([\\s\\S]*?)</td>`).exec(tr)![1]!);
+    const ranked = (eff: PlayerEff[]) => {
+      const html = renderSection(USAGE, eff);
+      const out: { f: (typeof FAMILIES)[number]; row: PlayerEff; tr: string }[] = [];
+      for (const f of FAMILIES) {
+        for (const t of tables(html).filter((x) => x[1] === f.id)) {
+          for (const m of t[0].matchAll(/<tr data-row="([^"]+)">[\s\S]*?<\/tr>/g)) {
+            out.push({ f, row: eff.find((e) => e.player_id === m[1])!, tr: m[0] });
+          }
+        }
+      }
+      return { html, out };
+    };
+
+    const { html, out } = ranked(EFF);
+    let shown = 0;
+    for (const { f, row, tr } of out) {
+      const pct = row[f.headline.pct] as number | null;
+      if (!tr.includes("data-pct-population")) {
+        expect(pct, `${f.id} ${row.player_id}`).toBeNull(); // no Pct column: defense
+        continue;
+      }
+      if (pct === null) {
+        expect(cellOf(tr, "pct_population"), row.player_id).toBe("—");
+        continue;
+      }
+      shown++;
+      expect(cellOf(tr, f.headline.pct)).toBe(formatPlayerValue("rank", pct));
+      const population = cellOf(tr, "pct_population");
+      expect(population).toBe(normalize(pctPopulation(f, row)!));
+      // The row's own group, its family's minimum for that group, and the row's own week.
+      expect(population).toContain(`${pctMinimum(f.id, row.position_group!)}+`);
+      expect(population).toMatch(new RegExp(`through week ${row.week}$`));
+    }
+    expect(shown).toBeGreaterThanOrEqual(5);
+
+    // Two rows of one table from different weeks name different populations.
+    const target = out.find(
+      (o) =>
+        o.f.id === "receiving" &&
+        o.tr.includes("data-pct-population") &&
+        o.row.epa_per_target_pct !== null &&
+        o.row.week === 2,
+    )!;
+    expect(target).toBeDefined();
+    const moved = EFF.map((r) => (r.player_id === target.row.player_id ? { ...r, week: 1 } : r));
+    const after = ranked(moved).out.find((o) => o.f.id === "receiving" && o.row.player_id === target.row.player_id)!;
+    expect(cellOf(after.tr, "pct_population")).toMatch(/through week 1$/);
+    expect(cellOf(target.tr, "pct_population")).not.toMatch(/through week 1$/);
+
+    // A row that can't name its population has its percentile withheld, not shown bare.
+    const noGroup = EFF.map((r) => (r.player_id === target.row.player_id ? { ...r, position_group: null } : r));
+    const bare = ranked(noGroup).out.find((o) => o.f.id === "receiving" && o.row.player_id === target.row.player_id)!;
+    expect(cellOf(bare.tr, "epa_per_target_pct")).toBe("—");
+    expect(cellOf(bare.tr, "pct_population")).toBe("—");
+
+    // Known wording, and the minimums are the analyst's (pinned by the parser test below).
+    expect(pctPopulation(FAMILIES.find((f) => f.id === "receiving")!, { ...target.row, position_group: "WR", week: 2 })).toBe(
+      "WRs averaging 3+ targets per game played, through week 2",
+    );
+    expect(pctMinimum("rushing", "QB")).toBe(2);
+    expect(pctMinimum("rushing", "RB")).toBe(6);
+    expect(pctMinimum("passing", "QB")).toBe(15);
+
+    // The legend no longer implies one population, and the old table-wide label is gone.
+    expect(text(/<p[^>]*data-pct-legend[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? "")).toContain(
+      "there is no single population behind pct",
+    );
+    expect(html).not.toContain("League percentile within the position group");
+  });
+
+  it("14. the percentile minimums are parsed from the analyst's own constants", () => {
+    const py = readFileSync(new URL("../../pipeline/analysts/player_efficiency.py", import.meta.url), "utf8");
+    expect(parsePctMinimums(py)).toEqual({
+      default: { receiving: 3, rushing: 6, passing: 15, defense: 20 },
+      byGroup: { rushing: { QB: 2 } },
+    });
+    expect(() => parsePctMinimums(py.replace("MIN_PER_GAME_DEFAULT", "RENAMED"))).toThrow(/not found/);
+    expect(() => parsePctMinimums(py.replace('"defense": 20.0', '"defence": 20.0'))).toThrow(/no defense/);
+    expect(() => parsePctMinimums(py.replace('("rushing", "QB"): 2.0', '("rushing", "QB"): two'))).toThrow(
+      /unrecognized/,
+    );
+  });
+
+  it("15. no header names an observed rate over blended values without the blend mark", () => {
+    // P7 open item 19 (defect b): a `_std` metric is the analyst's three-way blend, not the
+    // player's observed rate. The mark sits at the header, so it travels with the number.
+    // Which columns are blended comes from the analyst, not from lib/players.ts: every
+    // player_eff_week `_std` except the family sample counts (_FAMILY_SAMPLE).
+    const py = readFileSync(new URL("../../pipeline/analysts/player_efficiency.py", import.meta.url), "utf8");
+    const sampleBody = /^_FAMILY_SAMPLE\s*=\s*\{([\s\S]*?)\n\}/m.exec(py)?.[1];
+    expect(sampleBody).toBeDefined();
+    const samples = [...sampleBody!.matchAll(/"[a-z]+":\s*\("([a-z_]+)",/g)].map((m) => `${m[1]}_std`);
+    expect(samples.sort()).toEqual(["def_snaps_std", "pass_dropbacks_std", "rec_targets_std", "rush_carries_std"]);
+    const blended = new Set(Object.keys(EFF[0]!).filter((k) => k.endsWith("_std") && !samples.includes(k)));
+    // Every blended metric the analyst writes is one the page shows (none slips past unlisted).
+    const shown = FAMILIES.flatMap((f) => [f.headline.std, ...f.cols.map((c) => c.key)]);
+    expect([...blended].sort()).toEqual([...shown].sort());
+    const derived = (col: string) => blended.has(col) || col.endsWith("_pct");
+
+    /** Problems in one rendered section: a blended column whose header lacks the mark, or
+     *  a mark on a header whose values aren't blended. */
+    const problems = (html: string): string[] => {
+      const out: string[] = [];
+      for (const t of tables(html)) {
+        const heads = new Map<string, { label: string; flagged: boolean }>();
+        for (const m of t[0].matchAll(/<th scope="col"[^>]*>[\s\S]*?<\/th>/g)) {
+          const label = text(m[0].replace(/<span>[\s\S]*?<\/span>/g, ""));
+          const col = /data-col="([^"]+)"/.exec(m[0])?.[1];
+          const flagged = m[0].includes("data-blended");
+          const marked = label.includes(BLEND_MARK);
+          if (col) heads.set(col, { label, flagged });
+          if ((marked || flagged) && !(col && derived(col))) out.push(`${t[1]}: mark on unblended "${label}"`);
+        }
+        const cols = new Set([...t[0].matchAll(/<td[^>]*data-col="([^"]+)"/g)].map((m) => m[1]!));
+        for (const col of [...cols].filter(derived)) {
+          const h = heads.get(col);
+          if (!h) out.push(`${t[1]}: ${col} has no header of its own`);
+          else if (!h.flagged || (!h.label.endsWith(BLEND_MARK) && !h.label.endsWith(`${BLEND_MARK}†`))) {
+            out.push(`${t[1]}: ${col} header "${h.label}" lacks the mark`);
+          }
+        }
+      }
+      return out;
+    };
+
+    const html = renderSection();
+    expect(problems(html)).toEqual([]);
+    // Every family table was checked, and every blended metric appeared in one.
+    const seen = new Set([...html.matchAll(/<td[^>]*data-col="([^"]+)"/g)].map((m) => m[1]!));
+    expect([...blended].filter((k) => !seen.has(k))).toEqual([]);
+    // Role shares and coverage history are observed: no mark anywhere in those tables.
+    for (const t of tables(html).filter((x) => !FAMILY_IDS.includes(x[1]!))) {
+      expect(text(t[0].replace(/<tbody[\s\S]*<\/tbody>/, "")), t[1]).not.toContain(BLEND_MARK);
+    }
+
+    // The check bites: strip the mark from one blended header and it fails.
+    const stripped = html.replace(`EPA/target ${BLEND_MARK}`, "EPA/target");
+    expect(stripped).not.toBe(html);
+    expect(problems(stripped).some((p) => p.includes("epa_per_target_std"))).toBe(true);
+
+    // The legend says what the mark means, what "the group" is, and what Stab covers; the
+    // old overclaims are gone.
+    const legend = text(/<p[^>]*data-blend-legend[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? "");
+    expect(legend).toContain("estimates, not observed rates");
+    expect(legend).toContain("position group");
+    expect(legend).toContain("season to date, not the whole league");
+    expect(legend).toContain("a stat correction to anyone in the group can move it");
+    expect(legend).toContain("for the headline column only");
+    expect(html).not.toContain("applies to every season value");
+    expect(html).not.toContain("blended with last season and the league");
   });
 
   it("10. week 1 sends no player query and says why", async () => {

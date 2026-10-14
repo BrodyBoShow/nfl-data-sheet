@@ -10,6 +10,8 @@
 //   header (`tags`); /sources carries the full statements.
 // - Red-zone shares are season only: a single-game red-zone share rests on one or two
 //   touches and carries no stability.
+import minimums from "@/content/pct-minimums.json";
+
 import type { PlayerEff, PlayerUsage } from "./db";
 import { formatFixed } from "./format";
 import type { SourceId } from "./sources";
@@ -129,8 +131,24 @@ export function headlineL4(family: Family, row: PlayerEff): number | null {
 }
 
 const STAB_TITLE =
-  "Stability: the share of the season value that isn't league average (0–1). It applies to " +
-  "every season value in this row.";
+  "Stability (0–1): the share of this row's headline season value that is the player's own " +
+  "plays, this season and last, rather than the position group's average. It covers the " +
+  "headline column only: every other season column blends at its own rate.";
+
+/** Marks, at the column head, a value that is a blended estimate rather than an observed
+ *  rate (docs/signals.md, "Prior blend"): every player_eff_week `_std` metric, and the Pct
+ *  that ranks the headline one. Family sample counts, usage shares and last-4 values are
+ *  observed and carry no mark. The legend under BLEND_MARK explains it once per section. */
+export const BLEND_MARK = "*";
+
+export const BLEND_TITLE =
+  "Estimate, not an observed rate: season to date, blended with last season and the " +
+  "position group's season-to-date average.";
+
+/** A family column's header label: the blend mark, then † for a mixed-source rate. */
+export function colLabel(c: Col<PlayerEff>): string {
+  return `${c.label} ${BLEND_MARK}${c.approx ? "†" : ""}`;
+}
 
 export const FAMILIES: Family[] = [
   {
@@ -253,6 +271,50 @@ export const FAMILIES: Family[] = [
     ],
   },
 ];
+
+// ---- Percentile population -------------------------------------------------------------
+
+/** What a family's per-game minimum counts (the analyst's _FAMILY_SAMPLE). */
+const PCT_UNIT: Record<Family["id"], string> = {
+  passing: "dropbacks",
+  rushing: "carries",
+  receiving: "targets",
+  defense: "defensive snaps",
+};
+
+const GROUP_PLURAL: Record<string, string> = {
+  QB: "QBs",
+  RB: "RBs",
+  WR: "WRs",
+  TE: "TEs",
+  OL: "OL",
+  DL: "DL",
+  LB: "LBs",
+  DB: "DBs",
+};
+
+const MIN_BY_GROUP: Record<string, Record<string, number>> = minimums.byGroup;
+const MIN_DEFAULT: Record<string, number> = minimums.default;
+
+/** The analyst's percentile minimum per game played for a family and position group
+ *  (player_efficiency.py MIN_PER_GAME, else MIN_PER_GAME_DEFAULT; synced at build). */
+export function pctMinimum(family: Family["id"], group: string): number {
+  return MIN_BY_GROUP[family]?.[group] ?? MIN_DEFAULT[family]!;
+}
+
+/** The population a row's percentile ranks within, from the row's own data. The analyst
+ *  (as_of_percentiles) ranks a row at week W among the latest rows through W of every
+ *  player in its position_group whose latest row meets the family minimum. So rows from
+ *  different weeks, or different groups, sit in different populations. null when the row
+ *  has no position_group: its percentile can't be labeled, so it's withheld. */
+export function pctPopulation(family: Family, row: PlayerEff): string | null {
+  const group = row.position_group;
+  if (group === null) return null;
+  const min = pctMinimum(family.id, group);
+  const who = GROUP_PLURAL[group] ?? `${group} players`;
+  const n = formatFixed(min, Number.isInteger(min) ? 0 : 1);
+  return `${who} averaging ${n}+ ${PCT_UNIT[family.id]} per game played, through week ${row.week}`;
+}
 
 // ---- Coverage history (participation _hist) --------------------------------------------
 
