@@ -175,6 +175,18 @@ web/                      # Phase 6+
   - "Primary" where OL top-two are within 5% in 99.8% of games (`docs/phases/P9.md`, D4).
   - "Tackles per defensive snap" counting special-teams tackles (`docs/phases/P7.md`,
     open item 15).
+- **A byte estimate is not a measurement.** Any claim about egress, storage or transfer
+  size states whether it was measured or derived. A derived figure never becomes the
+  basis for a decision without being measured first. Three instances, 2026-10-01 to
+  2026-10-14:
+  - The 1.522 GB meter reading matched the byte model's 2.0 + 1.0 = 3.0 GB by
+    coincidence. It held no player-analyst traffic (`docs/phases/P6.md`, Open 1).
+  - "Player efficiency reads 8.8 MB of season−1 per run" came from a text-protocol
+    formula and was never measured on the wire. A ~160 MB prediction built on it met a
+    meter delta of ~10 MB (`docs/phases/P7.md`, step 9, "OUTCOME: FAILED").
+  - The season−1 prior cache was closed (10-05) and then reopened (10-12), both times on
+    unmeasured numbers: a measurement that held none of the relevant traffic, then a
+    derived figure the meter refuted (same section).
 
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector — never combine two sources or
