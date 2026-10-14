@@ -10,7 +10,6 @@
       "Read(./data/**)",
       "Read(./.cache/**)",
       "Read(**/.cache/**)",
-      "Bash(git push:*)",
       "Bash(git reset --hard:*)"
     ]
   },
