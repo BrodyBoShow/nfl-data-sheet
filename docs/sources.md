@@ -998,6 +998,109 @@ record behind that decision.)*
       > (f) use or attempt to use any engine, software, tool, agent or other device or mechanism (including, browsers, spiders, robots, avatars or intelligent agents) to navigate or search the Services to harvest or otherwise collect information from the Services to be used for any commercial purpose;
     - **AI (Q9):** none of "artificial", "machine", "train", "generative", "large
       language", or the standalone word "AI" appears on the page.
+  - **Team RSS → every club's terms page, read 2026-10-14 (P8 D10).** Which clubs carry
+    the Packers' Modular Content paragraph above. Facts only. Which variants count is the
+    user's call (`docs/phases/P8.md`, D10).
+    - **How it was read.**
+      - The 32 club domains came from nfl.com/teams' "View Full Site" links (one GET,
+        2026-10-14).
+      - Each club's terms URL was taken from its own homepage footer, never guessed: one
+        GET per homepage.
+      - Then one GET per terms page, 21:08:09–21:10:33 UTC, plus 5 more GETs: the three
+        clubs found at 2A were re-read with the same check, and two privacy pages.
+      - Every request was 5 s apart, sequential, with a user agent naming this project.
+        All returned HTTP 200.
+      - The 27 homepages were read first, the same afternoon. 59 GETs in all, including
+        the nfl.com/teams page.
+      - Raw copies were kept in session scratch only, not committed (as at 2A).
+    - **The check.** Each page's text was tag-stripped and whitespace- and
+      quote-normalized, then compared with the Packers §6 quoted above:
+      - the whole three-paragraph section, verbatim;
+      - each paragraph;
+      - four phrases: "Modular Content", "via an RSS feed or similar technology",
+        "excerpt or edit the Modular Content", "within 24 hours, remove the Modular
+        Content".
+      - Where the section was present but not verbatim, a word diff against the Packers
+        text gave every change.
+    - **The section's number varies** (5, 6, 7, 8 or 11, or unnumbered). "§6" means the
+      Packers section, identified by its text.
+    - **Verbatim, the whole section (7):** Packers (2A), Cowboys, Broncos, Saints,
+      Steelers, Eagles, Seahawks.
+    - **The section present, reworded, with no added sentence (11):** 49ers, Ravens,
+      Chargers, Bears, Giants, Texans, Panthers, Raiders, Rams, Vikings, Chiefs. The
+      word diff's changes, all of them:
+      - "except as specifically permitted by us in writing" → "… by us" (no "in
+        writing"): 49ers, Chargers, Bears, Texans, Panthers, Rams, Vikings, Chiefs.
+      - "in accordance with" → "consistent with": the same clubs.
+      - Added "without limitation," and "but not limited to,": the same clubs.
+      - "our branding" → "the operator's branding": Texans, Panthers, Vikings.
+      - "the Services" → "the Site"/"the Service": 49ers, Chargers, Rams, Vikings.
+      - "this Agreement" → "these Terms"/"these Terms of Use": Ravens, Panthers,
+        Vikings.
+      - The 49ers' text drops "cable," from each list of services.
+      - The Panthers' clause (1) drops "the Modular Content;" mid-sentence, so it reads
+        "… authorship of (2) excerpt or edit …".
+      - Spelling and punctuation only: "website"/"web site" (Giants, Texans, Vikings,
+        Panthers), "indecent," → "indecent;" (Raiders), "(" Modular Content ")"
+        (Chiefs).
+      - Ravens: one change only, "this Agreement" → "these Terms".
+    - **The section present, with a sentence added (2):** Cardinals, Lions. Both add,
+      after the first paragraph's first sentence, verbatim:
+      > You may only use Modular Content to the extent expressly authorized by us in each case.
+      - Both also add "or third-party properties used to host or integrate the Modular
+        Content" to the monitoring sentence. The Cardinals' text also has the
+        "us;" / "consistent with" / "web site" changes above, and the Lions' has "us;".
+    - **No Modular Content text at all (10):** Bengals, Buccaneers, Browns, Colts,
+      Commanders, Dolphins, Jets, Patriots, Titans, and the Bills (2A). None of the four
+      phrases appears.
+    - **No website terms page found (2):**
+      - **Falcons:** the homepage footer links only "Event Ticket Terms & Conditions",
+        "SMS Terms & Conditions" and the privacy policy. The privacy policy links the same
+        two, and mentions "our terms of use" without linking one.
+      - **Jaguars:** the footer's "Terms & Conditions" is a PDF on static.clubs.nfl.com,
+        "JACKSONVILLE JAGUARS & BOLD EVENTS TERMS AND CONDITIONS": a marketing-contact
+        consent, not website terms. The privacy policy links the same PDF and "Ticketing
+        Terms".
+      - No terms URL was guessed for either.
+    - **Terms URLs and date lines** (the first date phrase on the page; "-" where none
+      was found):
+
+      | Club | Terms URL | Date line | Result |
+      |---|---|---|---|
+      | 49ers | https://www.49ers.com/about-us/terms-and-conditions | Updated: June 8, 2026 | reworded |
+      | Bears | https://www.chicagobears.com/about/terms-conditions | Last Updated: February 13, 2018 | reworded |
+      | Bengals | https://www.bengals.com/team/terms-of-use | Last Updated: September 6, 2026 | none |
+      | Bills | https://www.buffalobills.com/about-us/terms-of-use | (2A) | none (2A) |
+      | Broncos | https://www.denverbroncos.com/terms-of-use/ | Last Revised: August 1, 2026 | verbatim |
+      | Browns | https://www.clevelandbrowns.com/about/terms-of-use | Effective Date: November 1, 2022 | none |
+      | Buccaneers | https://www.buccaneers.com/terms-of-use | Last Revised: August 16, 2024 | none |
+      | Cardinals | https://www.azcardinals.com/about-us/terms-conditions | - | added sentence |
+      | Chargers | https://www.chargers.com/terms-and-conditions | Updated: February 10, 2025 | reworded |
+      | Chiefs | https://www.chiefs.com/terms-of-use | - | reworded |
+      | Colts | https://www.colts.com/footer/terms-of-use | - | none |
+      | Commanders | https://www.commanders.com/about-us/terms-and-conditions | Last Updated: August 26, 2026 | none |
+      | Cowboys | https://www.dallascowboys.com/terms | Effective Date: September 2, 2026 | verbatim |
+      | Dolphins | https://www.miamidolphins.com/legal/terms-conditions | Last Updated: September 25, 2026 | none |
+      | Eagles | https://www.philadelphiaeagles.com/footer/terms-conditions | Updated: June 1, 2026 | verbatim |
+      | Falcons | none linked | - | no terms page |
+      | Giants | https://www.giants.com/news/giants-website-terms-and-conditions | Updated: Aug 01, 2026 | reworded |
+      | Jaguars | none (footer link is a consent PDF) | - | no terms page |
+      | Jets | https://www.newyorkjets.com/faqs/terms-of-use | Last Updated: August 16, 2016 | none |
+      | Lions | https://www.detroitlions.com/about-us/terms-and-conditions | Updated: September 1, 2026 | added sentence |
+      | Packers | https://www.packers.com/fans/terms | Effective Date: September 14, 2026 (2A) | verbatim (the reference) |
+      | Panthers | https://www.panthers.com/about-us/terms-conditions | Effective June 15, 2011 | reworded |
+      | Patriots | https://www.patriots.com/termsofservice/ | - | none |
+      | Raiders | https://www.raiders.com/about/website-mobile-application-terms-of-service | Updated: August 25, 2026 | reworded |
+      | Rams | https://www.therams.com/terms-and-conditions | Updated: August 5, 2019 | reworded |
+      | Ravens | https://www.baltimoreravens.com/terms-and-conditions | Updated: September 15, 2026 | reworded |
+      | Saints | https://www.neworleanssaints.com/terms | - | verbatim |
+      | Seahawks | https://www.seahawks.com/about/terms-and-conditions/ | Updated: September 24, 2026 | verbatim |
+      | Steelers | https://www.steelers.com/legal/terms-of-use/ | Effective Date: October 6, 2026 | verbatim |
+      | Texans | https://www.houstontexans.com/news/houston-texans-website-terms-conditions | Effective July 19, 2022 | reworded |
+      | Titans | https://www.tennesseetitans.com/about-us/terms-of-use | Effective Date: October 22, 2018 | none |
+      | Vikings | https://www.vikings.com/footer/terms-and-conditions | - | reworded |
+    - The 1.1, 1.3 and 10(f) clauses quoted from the Packers page weren't re-checked on
+      the other pages. This read was about the Modular Content paragraph only.
   - **Sleeper → API docs**, https://docs.sleeper.com/. No date on the page; read
     2026-10-08.
     - From "Introduction":
@@ -1103,6 +1206,10 @@ record behind that decision.)*
     - Terms: the Packers page above (§6, Modular Content). No terms page was read at
       B/C. At 2A, the Chiefs', Eagles' and Seahawks' pages had the same RSS paragraph
       and the Bills' had none. The other 27 are unread.
+      - *(2026-10-14: all 32 read. See License, "Team RSS → every club's terms page". 7
+        verbatim, 11 reworded, 2 with an added "expressly authorized … in each case"
+        sentence, 10 without the paragraph, 2 with no website terms page. The Chiefs'
+        is reworded, not verbatim.)*
   - **Sleeper trending** (verified 2026-10-12):
     - Documented at https://docs.sleeper.com/, "Trending Players":
       `GET https://api.sleeper.app/v1/players/<sport>/trending/<type>?lookback_hours=<hours>&limit=<int>`.
