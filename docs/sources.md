@@ -1001,6 +1001,9 @@ record behind that decision.)*
   - **Team RSS → every club's terms page, read 2026-10-14 (P8 D10).** Which clubs carry
     the Packers' Modular Content paragraph above. Facts only. Which variants count is the
     user's call (`docs/phases/P8.md`, D10).
+    - *(2026-10-15: decided (user), `P8.md` D16. Verbatim plus reworded, 18 clubs.
+      Cardinals and Lions are excluded for the added "expressly authorized … in each
+      case" condition. The test for re-reading a club's terms is recorded there.)*
     - **How it was read.**
       - The 32 club domains came from nfl.com/teams' "View Full Site" links (one GET,
         2026-10-14).
