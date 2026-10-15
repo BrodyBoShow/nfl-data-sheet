@@ -21,7 +21,8 @@ flowchart TB
     C_STAD[Stadiums reference collector]
     C_WX[Weather collector]
     C_AVAIL[Availability collector]
-    C_INTEL[Intel collector]
+    C_RSS[Club RSS collector]
+    C_SLP[Sleeper adds collector]
   end
 
   STAGED[(Staged tables)]
@@ -47,12 +48,13 @@ flowchart TB
 
   PROJ[(Projection log)]
 
-  C_NFLV & C_LIVE & C_ODDS & C_STAD & C_WX & C_AVAIL & C_INTEL --> STAGED
+  C_NFLV & C_LIVE & C_ODDS & C_STAD & C_WX & C_AVAIL & C_RSS & C_SLP --> STAGED
   STAGED --> A_EFF & A_USE & A_PEF & A_SCH & A_AVI & A_ENV & A_MKT
 
   C_NFLV --> A_EFF & A_USE & A_PEF & A_SCH & A_AVI & A_ENV
   C_AVAIL --> A_AVI
-  C_INTEL --> A_AVI
+  %% Intel -> Availability impact: planned, not built (P8 Requirement 3). No analyst
+  %% reads club_rss_items or sleeper_adds; /web shows them as stored (P8 D14).
   C_STAD --> A_ENV
   C_WX --> A_ENV
   C_ODDS --> A_MKT
@@ -225,7 +227,8 @@ daily, **T3** weekly, **OD** on demand.
 | Stadiums reference | `reference/stadiums.csv` (hand-reviewed; coords + field bearing from OpenStreetMap, roof type cited per row) | Hand-maintained | T3 | 4 | stadiums (coords, roof_type, field_bearing, known_names, tz) |
 | Weather | Open-Meteo (no key); venue from the `stadiums` table | Open data | T1 | 4 | weather_snapshots (append-only), weather_snapshot_targets; 7 kickoff-relative snapshots per non-fixed-roof game (`weather_schedule.py`) |
 | Availability | ESPN injuries, Sleeper players (≤1/day) | Can break | T1 | 3 | injuries, injury_presence |
-| Intel (live news) | Official team RSS where available (headline + link only, unedited, attributed), Sleeper trending players (attributed). ESPN dropped 2026-10-08 (P8 D4) | Can break | T1 | 8 (from 7, 2026-10-07) | news_items (deduped URL+hash), news_tags (rule-based) |
+| Club RSS | Official club RSS feeds (`/rss/news`), only the 18 clubs whose terms carry the Modular Content section (P8 D16). Headline + link only, unedited, attributed. Was half of "Intel"; split 2026-10-15 (P8 D7) | Can break | T1 | 8 | club_rss_items (mirror of each feed, PK team+link, hash-diffed; P8 D8, D15) |
+| Sleeper adds | Sleeper trending adds (`/players/nfl/trending/add`, once a day, attributed; P8 D9). Players resolved through the ID crosswalk; team defenses through `team_aliases` (P8 D19). Was half of "Intel"; split 2026-10-15 (P8 D7). ESPN dropped 2026-10-08 (P8 D4) | Can break | T2 | 8 | sleeper_adds (latest fetch only, four resolution states), sleeper_adds_fetch (one row: the fetch's counts, P8 D18) |
 
 ### L2 Analysts (all write to `signals`, except the two player-table writers marked below)
 
