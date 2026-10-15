@@ -20,6 +20,7 @@ from pipeline.analysts.market import MarketAnalyst
 from pipeline.analysts.player_efficiency import PlayerEfficiencyAnalyst
 from pipeline.analysts.usage import UsageAnalyst
 from pipeline.collectors.availability import AvailabilityCollector
+from pipeline.collectors.club_rss import ClubRssCollector
 from pipeline.collectors.id_spine import IdSpineCollector
 from pipeline.collectors.nflverse_bulk import NflverseBulkCollector
 from pipeline.collectors.odds import OddsCollector
@@ -48,6 +49,8 @@ _JOBS: dict[str, Collector | Analyst | Synthesizer | Grader | Retention] = {
     "grader": ProjectionGrader(),
     # Dry run: the registered instance never deletes. Only `--delete` builds one that does.
     "retention": StagedRetention(),
+    # P8: manual only. Not in the dispatcher until the user has seen a real run (D20).
+    "club_rss": ClubRssCollector(),
 }
 
 _USAGE = (
