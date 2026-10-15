@@ -1231,6 +1231,25 @@ record behind that decision.)*
       - All 22 numeric IDs resolved through `player_id_crosswalk.sleeper_id`
         (Availability's own `_fetch_crosswalk_by_sleeper_id`) to a `players` row.
       - Their positions were QB, RB, WR, TE and K only.
+    - **Team-defense IDs, verified live 2026-10-15 (P8 step 3a).**
+      - One GET of `https://api.sleeper.app/v1/players/nfl` at 23:05 UTC, the endpoint
+        Availability and `id_spine` already read daily. HTTP 200, 14,661,678 bytes
+        (measured), 12,229 entries, served from the CDN cache (`Age: 416`). The raw copy
+        was kept in session scratch only.
+      - **32 entries have `position` `DEF`.** For each, the key, `player_id` and `team`
+        are the same code, and every one is `active: true`.
+      - **31 of the 32 codes equal an active nflverse `teams.team_abbr`.**
+      - **The Rams are `LAR`.** In `teams`, `LAR` is a retired alias (`is_active`
+        false, migration `0010`). The active Rams code is `LA`, and no Sleeper DEF uses
+        it.
+        - Unmapped, a Rams defense row passes the `teams` foreign key and lands on the
+          dead code. The placement rule (an active team, or unplaced) makes it unplaced.
+      - Sleeper's player `team` field uses `LAR` too (83 players), and one player
+        carries `OAK`. `sleeper_adds` doesn't read that field: a player's team comes
+        from `players.latest_team`.
+      - No other non-numeric key exists. Every non-DEF key is numeric.
+      - `WAS` matches, as `team_aliases.py` already records ("nflverse and Sleeper both
+        use 'WAS'").
     - **Limits:** `Cache-Control: public, s-maxage=600, stale-while-revalidate=300,
       stale-if-error=600`. This call was served from the CDN cache (`Age: 310`).
       - The docs' rate guidance is "stay under 1000 API calls per minute" (quoted
