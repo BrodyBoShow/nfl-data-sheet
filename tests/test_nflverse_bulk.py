@@ -397,13 +397,15 @@ def test_snaps_normalizes_retired_team_codes(old_code, current_code):
 
 def test_team_abbr_aliases_covers_expected_codes():
     """Guards against drift on the shared alias table (pipeline/core/team_aliases.py) --
-    three retired-franchise PFR codes plus ESPN's WSH quirk, not a second copy per
-    collector (see pipeline/collectors/availability.py, which also imports this)."""
+    three retired-franchise PFR codes, ESPN's WSH quirk, and the Rams' LAR (ESPN, Sleeper,
+    NGS; P8 D19), not a second copy per collector (see pipeline/collectors/availability.py,
+    which also imports this)."""
     assert TEAM_ABBR_ALIASES == {
         "OAK": "LV",
         "SD": "LAC",
         "STL": "LA",
         "WSH": "WAS",
+        "LAR": "LA",
     }
 
 

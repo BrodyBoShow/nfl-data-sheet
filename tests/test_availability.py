@@ -40,6 +40,19 @@ def test_validate_normalizes_wsh_to_was():
     assert not any(r["team"] == "WSH" for r in espn_rows)
 
 
+def test_validate_normalizes_the_rams_lar_to_la_from_both_sources():
+    # P8 D19: ESPN and Sleeper send LAR; players.latest_team says LA. Before, every Rams
+    # injury row said LAR and Availability impact couldn't place any Rams player.
+    raw = _load_raw()
+    raw["sleeper"] = {
+        "9999": {"injury_status": "Out", "team": "LAR", "injury_body_part": "Knee"},
+    }
+    validated = AvailabilityCollector().validate(raw)
+    assert not any(r["team"] == "LAR" for r in validated["rows"])
+    sleeper = [r for r in validated["rows"] if r["source"] == "sleeper"]
+    assert [r["team"] for r in sleeper] == ["LA"]
+
+
 def test_validate_raw_subtree_is_compact_no_logos_or_links():
     validated = AvailabilityCollector().validate(_load_raw())
     espn_rows = [r for r in validated["rows"] if r["source"] == "espn"]

@@ -25,7 +25,10 @@ from pipeline.core.team_aliases import TEAM_ABBR_ALIASES
 # (label, sha256[:16] of the covered source). Update both together, never the hash alone
 # without reading the diff that moved it.
 PINNED = {
-    "TEAM_INPUTS_DEFINITION": ("2026-09-30.try-plays-excluded", "b33899d6bd454bf1"),
+    # Re-pinned 2026-10-15 for TEAM_ABBR_ALIASES' "LAR": "LA" (P8 D19), label kept: snaps,
+    # team_week and player_week hold 0 LAR rows across 2018-2026 (measured), and nothing
+    # mapped LAR before, so the alias changes nothing the fit reads.
+    "TEAM_INPUTS_DEFINITION": ("2026-09-30.try-plays-excluded", "0db77bce93ef8297"),
     "EFFICIENCY_DEFINITION": ("2026-09-30", "9d679830b22b7780"),
 }
 

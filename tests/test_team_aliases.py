@@ -6,6 +6,11 @@ def test_normalize_team_abbr_covers_all_aliases():
         assert normalize_team_abbr(old_code) == current_code
 
 
+def test_rams_feed_code_maps_to_nflverses_la():
+    # P8 D19: ESPN and Sleeper send LAR; players.latest_team, games and depth say LA.
+    assert normalize_team_abbr("LAR") == "LA"
+
+
 def test_normalize_team_abbr_passes_through_unknown_codes():
     assert normalize_team_abbr("KC") == "KC"
 

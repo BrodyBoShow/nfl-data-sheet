@@ -155,7 +155,9 @@ def _parse_sleeper_rows(sleeper_json: dict[str, Any]) -> list[dict[str, Any]]:
     for source_player_id, p in sleeper_json.items():
         if not p.get("injury_status") or not p.get("team"):
             continue
-        team = p.get("team")  # already matches nflverse -- no remap needed
+        # Not always nflverse's code: Sleeper's Rams are LAR (P8 D19, verified live
+        # 2026-10-15). The shared map, like ESPN's rows above.
+        team = normalize_team_abbr(p.get("team"))
         designation = p.get("injury_status")
         body_part = p.get("injury_body_part")
         notes = p.get("injury_notes")
