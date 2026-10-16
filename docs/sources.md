@@ -846,6 +846,11 @@ surface). Live has no recorded source: P8 Q11. Kept for the record.)*
     live by diffing ESPN's 32 team abbreviations against
     `nflreadpy_teams_sample.parquet` — Sleeper's own team values already match nflverse.
     Normalized via the shared `pipeline/core/team_aliases.py` (not a second copy).
+    - *(2026-10-15: **wrong for the Rams.** ESPN and Sleeper both send `LAR`, where
+      nflverse's code is `LA` (`LAR` is a retired alias in `teams`). Every Rams injury
+      row was stored `LAR` (ESPN 257, Sleeper 106), and the Sleeper parser didn't
+      normalize at all. Fixed by `P8.md` D19: `"LAR": "LA"` in the shared map, applied
+      to both sources, plus a backfill of the 363 rows. `raw` keeps the source's `LAR`.)*
   - **Neither source carries its own "week."** Both are rolling snapshots — the
     collector derives `(season, week, season_type)` from the `games` table
     (`pipeline/core/schedule.py::resolve_season_week`) using ESPN's own `timestamp`
