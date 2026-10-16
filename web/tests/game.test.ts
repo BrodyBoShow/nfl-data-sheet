@@ -278,7 +278,8 @@ describe("signal labels", () => {
 describe("team aliases come from the pipeline's own map", () => {
   const py = readFileSync(new URL("../../pipeline/core/team_aliases.py", import.meta.url), "utf8");
   it("parses the committed team_aliases.py", () => {
-    expect(parseTeamAliases(py)).toEqual({ OAK: "LV", SD: "LAC", STL: "LA", WSH: "WAS" });
+    // LAR: the Rams' code in ESPN, Sleeper and NGS (docs/phases/P8.md D19).
+    expect(parseTeamAliases(py)).toEqual({ OAK: "LV", SD: "LAC", STL: "LA", WSH: "WAS", LAR: "LA" });
   });
   it("fails loudly if the dict is missing or has a line it can't read", () => {
     expect(() => parseTeamAliases(py.replace("TEAM_ABBR_ALIASES", "RENAMED"))).toThrow(/not found/);
