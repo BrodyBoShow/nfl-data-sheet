@@ -36,6 +36,47 @@ export default function MethodPage() {
         </p>
       </div>
 
+      {/* docs/phases/P7.md open item 22, row 3 (user, 2026-10-18): on the page before any
+          measurement or fix. honesty.test.ts 16 pins it; it comes off only by a deliberate
+          edit, when the corrected figures replace these and say what changed. */}
+      <section
+        className="section prose t-prose input-notice"
+        id="input-notice"
+        aria-labelledby="input-notice-h"
+        data-input-notice="true"
+      >
+        <h2 id="input-notice-h" className="section-label t-cap warn">
+          An input to these backtest numbers was wrong
+        </h2>
+        <p>
+          Every backtest figure on this page and in the line at the top of every page was computed with an
+          offensive-line continuity input that was wrong for some teams in 2020 and 2021. That includes the
+          margin error ({line.marginModel} for the model, {line.marginClose} for the closing line), the edge
+          correlation, the typical miss of about{" "}
+          {formatFixed(Math.min(...buckets.map((b) => b.margin_sd)), 0)} points, and the stability buckets.
+        </p>
+        <p>
+          The input measures how much of a team&apos;s offensive line returned from the year before. It sets how
+          much weight last season gets in every offensive rating, including the EPA per play the projection
+          uses. The 2020 snap counts label some linemen with combined codes such as G/T and C/G, and the
+          ratings didn&apos;t recognize them, so those linemen were left out. The input was wrong in 119 of 672
+          team-weeks in 2020 and 172 of 704 in 2021.
+        </p>
+        <p>
+          It reaches every out-of-sample season, not only those two: 2020 and 2021 were tested on the affected
+          ratings, and later seasons were tested with coefficients fit on them.
+        </p>
+        <p>
+          It reaches today&apos;s projections too. The coefficients below were fit on{" "}
+          {formatSeasonRange(s.fit_seasons)}, and the stability buckets and typical-miss figures every game view
+          uses come from the same backtest.
+        </p>
+        <p>
+          The size of the effect is being measured, and these numbers may change. When they do, this page will
+          show the earlier figures beside the new ones and say they were computed on the wrong input.
+        </p>
+      </section>
+
       <section className="section prose t-prose" id="model" aria-labelledby="model-h">
         <h2 id="model-h" className="section-label t-cap">
           The projection

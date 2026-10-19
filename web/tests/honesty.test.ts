@@ -8,6 +8,7 @@
 // 2. Every edge value sits in the same cell as its validation tag.
 // 3. Every projection has its stability bucket in the same row (week) or table (game).
 // 4. The report renders only inside its frame, under its provenance heading and preface.
+// 5. /method and the status line say the backtest's OL-continuity input was wrong (test 16).
 //
 // Pages render from the committed fixtures with lib/db.ts mocked, at a fixed clock.
 import { readdirSync, readFileSync } from "node:fs";
@@ -384,6 +385,49 @@ describe("the backtest report's frame", () => {
       expect(text(html), name).not.toContain("p5 backtest report");
       expect(html, name).not.toContain("data-report-body");
     }
+  });
+});
+
+// ---- Backtest input notice (P7 open item 22, row 3) ------------------------------------
+// The backtest ran on an OL-continuity input that was wrong for 2020–2021 (user,
+// 2026-10-18: on the page before any measurement or fix). Pinned verbatim here, so it
+// comes off only by a deliberate edit of this test as well as the page.
+
+describe("backtest input notice", () => {
+  it("16. /method says the input was wrong, before any backtest figure, and the status line links to it", () => {
+    const html = pages.method!;
+    const notice = /<section[^>]*data-input-notice="true"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
+    expect(notice, "notice section").toBeDefined();
+    const t = text(notice!);
+    for (const s of [
+      "an input to these backtest numbers was wrong",
+      "every backtest figure on this page and in the line at the top of every page was computed with an " +
+        "offensive-line continuity input that was wrong for some teams in 2020 and 2021",
+      "margin error (10.33 for the model, 9.76 for the closing line)",
+      "the input was wrong in 119 of 672 team-weeks in 2020 and 172 of 704 in 2021",
+      "it reaches every out-of-sample season, not only those two",
+      "it reaches today's projections too. the coefficients below were fit on 2019–25",
+      "the stability buckets and typical-miss figures every game view uses come from the same backtest",
+      "the size of the effect is being measured, and these numbers may change",
+      "show the earlier figures beside the new ones and say they were computed on the wrong input",
+    ]) {
+      expect(t).toContain(s);
+    }
+    // Ahead of every backtest figure: the coefficients, the buckets, the edge and the report.
+    const at = html.indexOf('id="input-notice"');
+    for (const id of ['id="model"', 'id="stability"', 'id="edge"', "data-report-frame"]) {
+      expect(at, id).toBeGreaterThan(-1);
+      expect(at, id).toBeLessThan(html.indexOf(id));
+    }
+    // The header line on every page carries the marker, linked to the notice.
+    const link = /<a[^>]*href="\/method#input-notice"[^>]*>([\s\S]*?)<\/a>/.exec(pages.status!);
+    expect(link, "status line link").not.toBeNull();
+    expect(link![0]).toContain('class="tag erratum"');
+    expect(text(link![1]!)).toBe("erratum");
+    expect(normalize(/title="([^"]*)"/.exec(link![0])?.[1] ?? "")).toBe(
+      "computed with an offensive-line input that was wrong for some teams in 2020–2021. the effect is " +
+        "being measured, and these numbers may change.",
+    );
   });
 });
 

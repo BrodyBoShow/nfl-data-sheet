@@ -487,6 +487,9 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     `HB`, `K`, `LB`, `LS`, `NT`, `OL`, `P`, `QB`, `RB`, `S`, `SS`, `T`, `TE`, `WR`. The
     Efficiency analyst's `_OL_SNAP_POSITIONS` must include `OL` alongside `C`/`G`/`T` or
     it silently empties the O-line group for the generic-only teams.
+    *(2026-10-18: that set is 2025–2026 only. 2020 also has combo and alternate codes
+    (`C/G`, `G/T`, `G/C`, `OT`, `T/G`, `G/OT`, `OG` on the O-line, and others), in no
+    other stored season. `docs/phases/P7.md`, open item 22, row 3.)*
     `load_depth_charts()`'s `pos_abb` instead uses
     side-specific O-line slots — `C`, `LG`, `LT`, `RG`, `RT` — among a larger set
     including `FB`, `FS`, `H`, `KR`, `LCB`, `LDE`, `LDT`, `LILB`, `LS`, `MLB`, `NB`,

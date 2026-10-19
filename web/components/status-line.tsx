@@ -20,6 +20,18 @@ export function StatusLine() {
       </span>{" "}
       <span className="nowrap">
         · <Link href="/method#edge">{s.validation}</Link>
+        {/* docs/phases/P7.md open item 22, row 3: the marker travels with the numbers (as in
+            item 19), and links to the /method notice. honesty.test.ts 16. No separator or
+            space before it, only .erratum's margin. §5 keeps the line on one line at 1280px:
+            it had 65px to spare before the tag and has 1.9px after (measured 2026-10-18,
+            1086.1 of 1088px). A longer figure wraps it; rerun scripts/check-layout.mjs. */}
+        <Link
+          href="/method#input-notice"
+          className="tag erratum"
+          title="Computed with an offensive-line input that was wrong for some teams in 2020–2021. The effect is being measured, and these numbers may change."
+        >
+          ERRATUM
+        </Link>
       </span>
     </p>
   );

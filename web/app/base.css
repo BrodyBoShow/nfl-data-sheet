@@ -337,6 +337,19 @@ table.players-table thead tr:first-child th[colspan] {
   margin-top: var(--space-4);
 }
 
+/* /method's notice that a backtest input was wrong (P7 open item 22): pipeline state, so
+   --warn, as a left rule like the report frame's. */
+.input-notice {
+  border-left: 2px solid var(--warn);
+  padding-left: var(--space-4);
+}
+
+/* The status line's ERRATUM tag: a margin, not a space, so the line stays one line at
+   1280px (status-line.tsx). */
+.erratum {
+  margin-left: 0.25em;
+}
+
 /* Validation / state tag: hairline border in --warn, 2px radius max. */
 .tag {
   display: inline-block;

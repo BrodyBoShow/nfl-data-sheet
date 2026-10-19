@@ -188,6 +188,25 @@ web/                      # Phase 6+
     unmeasured numbers: a measurement that held none of the relevant traffic, then a
     derived figure the meter refuted (same section).
 
+- **A hardcoded vocabulary is checked against the data it filters.** Any literal set
+  of codes used to match, filter or classify is verified against the distinct values
+  in the column it filters, both ways. A test pins it, so a new code fails loudly
+  instead of silently dropping rows. The common failure is that the code produces
+  nothing rather than erroring, so tests stay green while the output is wrong. Four
+  instances, 2026-10-12 to 2026-10-16 (the full sweep: `docs/phases/P7.md`, open
+  item 22):
+  - `LAR` vs `LA` in `injuries.team`. Every Rams injury row missed `players.latest_team`,
+    so Availability wrote no Rams counts for five weeks (`docs/phases/P8.md`, D19).
+  - `T` vs `OT`, and the missing `SAF`, in `players.position`. No offensive tackle and
+    no `SAF` safety ever counted in the cluster counts (`docs/phases/P7.md`, open
+    item 21).
+  - The 2020 combo codes (`C/G`, `G/T`, `OT`, …) in `snaps.position`. Efficiency's
+    O-line set missed them, so the OL-continuity factor was wrong in 291 team-weeks of
+    2020–2021, under every backtest number on /method (`docs/phases/P7.md`, open
+    item 22, row 3).
+  - The input gate digesting columns Usage never reads. The set of columns, not codes,
+    was wider than what the analyst uses (`docs/phases/P7.md`, open item 17).
+
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector — never combine two sources or
   two sectors in one file, and never let one reach into another's tables directly (they
