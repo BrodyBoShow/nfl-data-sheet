@@ -31,9 +31,21 @@ _log = logging.getLogger(__name__)
 # players.position values (nflreadpy convention) -- not depth.pos_abb's side-specific
 # slots (LT/RT/...), since not every injured player has a depth-chart entry but every
 # player has a position on the players table.
-_OL_POSITIONS = {"C", "G", "T", "OL"}
-_SECONDARY_POSITIONS = {"CB", "S", "DB", "FS", "SS"}
-_REDISTRIBUTION_POSITIONS = {"WR", "RB", "TE"}
+# Measured against players.position 2026-10-19 (docs/phases/P7.md, open item 22, rows 1,
+# 2 and 5): offensive tackles are "OT" (there is no "T"), safeties include "SAF" (there is
+# no "SS"), and fullbacks take offensive snaps. A FB's share redistributes to his team's
+# other FBs only, as each position group does.
+_OL_POSITIONS = {"C", "G", "OT", "OL"}
+_SECONDARY_POSITIONS = {"CB", "S", "DB", "FS", "SAF"}
+_REDISTRIBUTION_POSITIONS = {"WR", "RB", "TE", "FB"}
+# Every other players.position code, so the four sets together are the whole vocabulary.
+# scripts/verify_position_vocab.py fails on any code in the data that no set knows, or any
+# code here the data doesn't have (CLAUDE.md, "A hardcoded vocabulary is checked against
+# the data it filters").
+_OTHER_POSITIONS = {"QB", "DE", "DT", "NT", "DL", "LB", "OLB", "ILB", "MLB", "K", "P", "LS"}
+# Names the vocabulary above in inputs_version, so a stored row says which code sets
+# counted it. Rows without it were written before 2026-10-20 and counted no OT, SAF or FB.
+_POSITION_VOCABULARY = "2026-10-20"
 
 # injuries.designation mixes real injury statuses with non-injury unavailability
 # shorthand in the same free-text field -- verified live (docs/sources.md): Sleeper's
@@ -811,10 +823,11 @@ def _fetch_depth(conn: psycopg.Connection) -> list[dict[str, Any]]:
 
 
 def _build_inputs_version(conn: psycopg.Connection) -> str:
-    return ",".join(
+    inputs = [
         f"{tag}@{get_last_value(conn, f'nflverse:{tag}') or 'unknown'}"
         for tag in _INPUTS_VERSION_TAGS
-    )
+    ]
+    return ",".join([*inputs, f"positions@{_POSITION_VOCABULARY}"])
 
 
 class AvailabilityImpactAnalyst(Analyst):

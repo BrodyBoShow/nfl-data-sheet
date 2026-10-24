@@ -26,6 +26,10 @@ const SOURCES = {
   coefficients: "pipeline/synthesis/model_coefficients.json",
   teamAliases: "pipeline/core/team_aliases.py",
   pctMinimums: "pipeline/analysts/player_efficiency.py",
+  // The superseded p5-v2 artifacts, for /method's earlier-beside-new figures
+  // (docs/backtest_archive/p5-v2/README.md; docs/phases/P7.md, open item 22).
+  previousReport: "docs/backtest_archive/p5-v2/backtest_report.md",
+  previousCoefficients: "docs/backtest_archive/p5-v2/model_coefficients.json",
 };
 
 function read(rel) {
@@ -40,12 +44,17 @@ function read(rel) {
 const reportMd = read(SOURCES.report);
 const coefficientsText = read(SOURCES.coefficients);
 
+const previousReportMd = read(SOURCES.previousReport);
+const previousCoefficientsText = read(SOURCES.previousCoefficients);
+
 let summary;
+let previous;
 let aliases;
 let minimums;
 let reportHtml;
 try {
   summary = buildSummary(reportMd, JSON.parse(coefficientsText));
+  previous = buildSummary(previousReportMd, JSON.parse(previousCoefficientsText));
   aliases = parseTeamAliases(read(SOURCES.teamAliases));
   minimums = parsePctMinimums(read(SOURCES.pctMinimums));
   reportHtml = renderReport(reportMd, Marked);
@@ -59,12 +68,17 @@ summary.sources = {
   report: { path: SOURCES.report, sha256_12: sha(reportMd) },
   coefficients: { path: SOURCES.coefficients, sha256_12: sha(coefficientsText) },
 };
+previous.sources = {
+  report: { path: SOURCES.previousReport, sha256_12: sha(previousReportMd) },
+  coefficients: { path: SOURCES.previousCoefficients, sha256_12: sha(previousCoefficientsText) },
+};
 
 const out = join(web, "content");
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, "backtest_report.md"), reportMd);
 writeFileSync(join(out, "model_coefficients.json"), coefficientsText);
 writeFileSync(join(out, "backtest-summary.json"), JSON.stringify(summary, null, 2) + "\n");
+writeFileSync(join(out, "backtest-summary-previous.json"), JSON.stringify(previous, null, 2) + "\n");
 writeFileSync(join(out, "team-aliases.json"), JSON.stringify(aliases, null, 2) + "\n");
 writeFileSync(join(out, "pct-minimums.json"), JSON.stringify(minimums, null, 2) + "\n");
 // The rendered report, read only by components/method/report-frame.tsx (step 8's

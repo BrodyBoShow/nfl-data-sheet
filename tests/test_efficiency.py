@@ -472,7 +472,14 @@ def test_ol_snap_positions_includes_generic_ol_tag():
     generic "OL" position in snap_counts, with zero C/G/T rows at all (verified live,
     docs/sources.md). Dropping "OL" from this set silently empties _ol_group for those
     teams every time they're the *prior*-season side."""
-    assert _OL_SNAP_POSITIONS == {"C", "G", "T", "OL"}
+    assert {"C", "G", "T", "OL"} <= _OL_SNAP_POSITIONS
+
+
+def test_ol_snap_positions_include_2020_combo_codes():
+    """P7 open item 22, row 3: 2020's snap counts tag linemen with combined/alternate
+    codes, and every player under them is a C, G or OT in `players` (measured
+    2026-10-19). Without them the OL-continuity factor was wrong in 291 team-weeks."""
+    assert {"C/G", "G/C", "G/T", "T/G", "G/OT", "OT", "OG"} <= _OL_SNAP_POSITIONS
 
 
 def test_ol_group_builds_from_generic_ol_position_only():

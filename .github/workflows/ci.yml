@@ -1,0 +1,43 @@
+name: ci
+
+# The pipeline's checks on every push and pull request. Until 2026-10-20 nothing ran them
+# outside a local session; the web has its own build on Vercel. Added for the position
+# vocabulary check (docs/phases/P7.md, open item 22), which has to fail a build, not
+# just log: a set that matches nothing produces no error, only missing rows.
+"on":
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # pipeline/ only: it's clean. scripts/ and tests/ carry ~40 older errors (measured
+      # 2026-10-19), not gated until they're fixed.
+      - name: Type check
+        run: uv run mypy pipeline
+
+      - name: Tests (fixtures only, no live calls)
+        run: uv run pytest -q
+
+      # Live: one aggregate query per column. Read-only.
+      - name: Check position vocabularies against the data
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: uv run python scripts/verify_position_vocab.py

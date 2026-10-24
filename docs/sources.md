@@ -490,6 +490,12 @@ documented) → **BROKEN** (verified once, later found dead — note date and wh
     *(2026-10-18: that set is 2025–2026 only. 2020 also has combo and alternate codes
     (`C/G`, `G/T`, `G/C`, `OT`, `T/G`, `G/OT`, `OG` on the O-line, and others), in no
     other stored season. `docs/phases/P7.md`, open item 22, row 3.)*
+    *(2026-10-20: the whole stored vocabulary, 48 codes across 2018–2026, is now pinned:
+    `_OL_SNAP_POSITIONS` plus `_NON_OL_SNAP_POSITIONS` in `efficiency.py`, and
+    `players.position`'s 25 codes in `availability_impact.py`'s four sets. The live check
+    is `scripts/verify_position_vocab.py`, run by CI on every push and after every
+    dispatcher tick, and it fails on a mismatch either way. The measured counts are in
+    `tests/fixtures/position_vocab.json`.)*
     `load_depth_charts()`'s `pos_abb` instead uses
     side-specific O-line slots — `C`, `LG`, `LT`, `RG`, `RT` — among a larger set
     including `FB`, `FS`, `H`, `KR`, `LCB`, `LDE`, `LDT`, `LILB`, `LS`, `MLB`, `NB`,

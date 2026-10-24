@@ -7,9 +7,15 @@ import { readFileSync } from "node:fs";
 import { Marked } from "marked";
 import { describe, expect, it } from "vitest";
 
-import { buildSummary, renderReport, reportProvenance, winRateBuckets } from "../scripts/backtest-content.mjs";
+import {
+  buildSummary,
+  edgeIntervals,
+  renderReport,
+  reportProvenance,
+  winRateBuckets,
+} from "../scripts/backtest-content.mjs";
 import { statusLine, type BacktestSummary } from "../lib/backtest";
-import { formatFixed, formatSeasonRange } from "../lib/format";
+import { formatBound, formatFixed, formatInterval, formatSeasonRange } from "../lib/format";
 
 const report = readFileSync(new URL("../../docs/backtest_report.md", import.meta.url), "utf8");
 const coefficients = JSON.parse(
@@ -99,6 +105,24 @@ describe("buildSummary fails loudly instead of misreading", () => {
   });
 });
 
+describe("edgeIntervals", () => {
+  it("reads all 20 intervals, buckets at the coefficients file's precision", () => {
+    const iv = edgeIntervals(report, coefficients.calibration);
+    expect(iv).toHaveLength(20);
+    expect(iv.filter((e) => e.market === "spread").map((e) => e.slice)).toEqual([
+      "All", "bucket low", "bucket mid", "bucket high", "2020", "2021", "2022", "2023", "2024", "2025",
+    ]);
+    const high = iv.find((e) => e.market === "spread" && e.slice === "bucket high")!;
+    expect(high.ci_high).toBe(coefficients.calibration.buckets.high.edge_validation.spread.ci_high);
+  });
+
+  it("refuses a non-bucket bound the report prints as zero", () => {
+    const md = report.replace("| 2025 | -0.121 | [-0.226, -0.018] |", "| 2025 | -0.121 | [-0.226, 0.000] |");
+    expect(md).not.toBe(report);
+    expect(() => edgeIntervals(md, coefficients.calibration)).toThrow(/prints as zero/);
+  });
+});
+
 describe("the status line's validation wording follows the data", () => {
   it("names validated buckets rather than saying 'not validated'", () => {
     const s = { ...summarize(), validated_buckets: ["low spread"] };
@@ -111,6 +135,16 @@ describe("format helpers", () => {
     expect(formatFixed(-0.032, 2)).toBe("−0.03");
     expect(formatFixed(-0.004, 2)).toBe("0.00");
     expect(formatFixed(0.016, 2)).toBe("0.02");
+  });
+  it("keeps an interval bound's sign and a digit when it rounds to zero (P7 open item 22)", () => {
+    expect(formatBound(-0.0004940895518897146, 3)).toBe("−0.0005"); // p5-v3 high-bucket spread
+    expect(formatBound(0.00044696701709777246, 3)).toBe("0.0004"); // p5-v2's, once "0.000"
+    expect(formatBound(0, 3)).toBe("0.000");
+    expect(formatBound(-0.08, 3)).toBe("−0.080");
+    expect(formatBound(1e-9, 3)).toBe("1.0e-9");
+    expect(formatInterval([-0.16419621813533644, -0.0004940895518897146], 3)).toBe("[−0.164, −0.0005]");
+    // A plain value still never shows a signed zero.
+    expect(formatFixed(-0.0004, 3)).toBe("0.000");
   });
   it("collapses only contiguous season ranges", () => {
     expect(formatSeasonRange([2020, 2021, 2022])).toBe("2020–22");

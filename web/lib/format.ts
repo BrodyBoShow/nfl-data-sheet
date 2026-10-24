@@ -30,9 +30,24 @@ export function formatFixed(x: number, decimals: number): string {
   return s.startsWith("-") ? MINUS + s.slice(1) : s;
 }
 
-/** "[−0.08, 0.02]" */
+/** An interval bound. Unlike formatFixed, a bound that rounds to zero but isn't zero keeps
+ *  its sign and gets more decimals, up to four more, until a digit shows: "−0.0005", never
+ *  a "0.000" that hides which side of zero it's on. Whether an interval excludes zero is
+ *  what it's printed for (docs/phases/P7.md, open item 22). Matches scripts/backtest.py's
+ *  _fmt_bound, so the page and the report it embeds agree. */
+export function formatBound(x: number, decimals: number): string {
+  let d = decimals;
+  while (x !== 0 && Number(x.toFixed(d)) === 0 && d < decimals + 4) d++;
+  if (x !== 0 && Number(x.toFixed(d)) === 0) {
+    const s = x.toExponential(1);
+    return s.startsWith("-") ? MINUS + s.slice(1) : s;
+  }
+  return formatFixed(x, d);
+}
+
+/** "[−0.08, 0.02]"; "[−0.164, −0.0005]" (formatBound) */
 export function formatInterval([lo, hi]: readonly [number, number], decimals: number): string {
-  return `[${formatFixed(lo, decimals)}, ${formatFixed(hi, decimals)}]`;
+  return `[${formatBound(lo, decimals)}, ${formatBound(hi, decimals)}]`;
 }
 
 const count = new Intl.NumberFormat("en-US");

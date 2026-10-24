@@ -46,7 +46,9 @@ from pipeline.core.team_aliases import normalize_team_abbr
 
 # p5-v2 (2026-09-30): the re-fit on signals rebuilt with try plays excluded and the QB/OL
 # discounts firing, and the first version whose model file carries `fit_inputs_hash`.
-MODEL_VERSION = "p5-v2"
+# p5-v3 (2026-10-20): the re-fit on 2020-2021 signals rebuilt with 2020's combined O-line
+# snap codes counted (docs/phases/P7.md, open item 22, row 3).
+MODEL_VERSION = "p5-v3"
 
 # fit_inputs_hash rounding. A re-backfill that reproduces the same signals differs by
 # ~5e-16 in `value` (the backtest's parity check), so that mustn't move the hash. Measured

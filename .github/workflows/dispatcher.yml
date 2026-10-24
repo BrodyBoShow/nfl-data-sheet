@@ -39,6 +39,26 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: uv run python -m pipeline.orchestration.dispatcher
 
+      # The analysts' position code sets against the live data, both ways
+      # (scripts/verify_position_vocab.py; docs/phases/P7.md, open item 22). After the
+      # dispatcher, so a new code fails the run within a tick of arriving, without
+      # blocking that tick's collection. always(): it runs even when the dispatcher failed.
+      - name: Check position vocabularies
+        id: vocab
+        if: always()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: uv run python scripts/verify_position_vocab.py
+
+      - name: File an issue on a vocabulary mismatch
+        if: always() && steps.vocab.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Position vocabulary mismatch ($(date -u +%Y-%m-%dT%H:%MZ))" \
+            --body "scripts/verify_position_vocab.py found a position code no analyst set knows, or a set code the data doesn't have. Rows with that code are being dropped or miscounted. See the workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
       # Runs on either signal, which the dispatcher step keeps distinct on purpose (see
       # pipeline/orchestration/dispatcher.py/auditor.py): a hard failure (a collector or
       # analyst actually raised) fails the step outright, while an auditor alert (a

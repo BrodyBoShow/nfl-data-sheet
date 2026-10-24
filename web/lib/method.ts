@@ -1,8 +1,8 @@
 // /method view model (docs/phases/P6.md §3, §5, step 7). Every figure comes from the
 // build-time backtest summary. The report itself renders only inside ReportFrame
 // (components/method/report-frame.tsx), under a provenance heading and this preface.
-import { backtest, type BacktestSummary, type WinRateBucket } from "./backtest";
-import { formatCount, formatSeasonRange } from "./format";
+import { backtest, type BacktestSummary, type EdgeInterval, type WinRateBucket } from "./backtest";
+import { formatCount, formatFixed, formatInterval, formatSeasonRange } from "./format";
 
 /** Break-even share of decided games at the standard −110 price: risk 110 to win 100,
  *  so a side has to win 110 of every 210. */
@@ -71,6 +71,131 @@ function atOrAboveVerdict(atOrAbove: WinRateBucket[], all: WinRateBucket[], brea
       `chance, and at least one would do so about ${Math.round(atLeastOne * 100)}% of the time.`,
     "Every bucket is shown, and the correlations above are the test.",
   ].join(" ");
+}
+
+/** Exact P(Binomial(n, p) ≥ k). */
+export function binomialTail(n: number, k: number, p: number): number {
+  let pmf = (1 - p) ** n; // P(0)
+  let tail = 0;
+  for (let j = 0; j <= n; j++) {
+    if (j >= k) tail += pmf;
+    if (j < n) pmf *= ((n - j) / (j + 1)) * (p / (1 - p));
+  }
+  return tail;
+}
+
+const excludesZero = (e: EdgeInterval) => e.ci_low > 0 || e.ci_high < 0;
+const describeInterval = (e: EdgeInterval) =>
+  `${e.market} ${e.slice === "All" ? "all games" : e.slice}, r ${formatFixed(e.r, 3)} ` +
+  formatInterval([e.ci_low, e.ci_high], 3);
+
+/** What the backtest's edge intervals say together (docs/phases/P7.md, open item 22). Every
+ *  clause follows the data: how many exclude zero, how many chance alone would give at
+ *  95%, which side of zero they're on, and whether that's evidence of anything. */
+export function edgeIntervalsSentences(s: BacktestSummary = backtest): string[] {
+  const all = s.edge_intervals;
+  if (all.length === 0) throw new Error("backtest summary has no edge intervals");
+  const n = all.length;
+  const out = all.filter(excludesZero);
+  const k = out.length;
+  const expected = n * 0.05;
+  const tail = binomialTail(n, k, 0.05);
+  const aboutChance = k === 0 || tail >= 0.05;
+  const below = out.filter((e) => e.ci_high < 0).length;
+  const sentences = [
+    `The backtest report tests ${n} of these intervals: all games, each stability bucket and each ` +
+      "test season, for the spread and the total.",
+    k === 0
+      ? "None excludes zero."
+      : `${k} ${k === 1 ? "excludes" : "exclude"} zero: ${out.map(describeInterval).join("; ")}.`,
+    `At 95%, about ${formatFixed(expected, 0)} of ${n} would exclude zero by chance alone` +
+      (aboutChance
+        ? ", so this is what chance produces."
+        : `, and ${k} or more would happen by chance only ${Math.round(tail * 100)}% of the time.`),
+  ];
+  if (k > 0) {
+    sentences.push(
+      below === k
+        ? `${k === 1 ? "It's" : "Each is"} below zero: there, the model's side did worse against the closing line.`
+        : `${below} ${below === 1 ? "is" : "are"} below zero, where the model's side did worse, and ` +
+            `${k - below} above.`,
+    );
+  }
+  sentences.push(
+    aboutChance
+      ? "It is not evidence of an edge in either direction."
+      : "It still isn't validation, which needs an interval entirely above zero.",
+  );
+  return sentences;
+}
+
+/** The correction's headline counts, for /method and the status-line tooltip. */
+export function correctionCounts(rows: CorrectionRow[]): { total: number; changed: number; unchanged: number } {
+  const changed = rows.filter((r) => !r.unchanged).length;
+  return { total: rows.length, changed, unchanged: rows.length - changed };
+}
+
+/** The status-line marker's tooltip. It travels with the numbers (P7 open item 19). */
+export function correctionTooltip(earlier: BacktestSummary, now: BacktestSummary): string {
+  const { total, changed } = correctionCounts(correctionRows(earlier, now));
+  return (
+    `Corrected: until ${now.report.generated_utc.slice(0, 10)}, computed with an offensive-line input that ` +
+    `was wrong for some teams in 2020–2021. ${changed} of ${total} figures on /method changed at the ` +
+    "precision shown, and the rest are unchanged."
+  );
+}
+
+export interface CorrectionRow {
+  figure: string;
+  earlier: string;
+  now: string;
+  unchanged: boolean; // equal at the precision shown
+}
+
+/** The figures /method shows, earlier (computed on the wrong input) beside now, each at
+ *  the precision the page prints it. `unchanged` compares those printed strings, so a
+ *  change too small to show reads as unchanged, and says so. */
+export function correctionRows(earlier: BacktestSummary, now: BacktestSummary): CorrectionRow[] {
+  const rows: [string, (s: BacktestSummary) => string][] = [
+    ["Margin MAE, model", (s) => s.margin_mae.model.toFixed(2)],
+    ["Margin MAE, closing line", (s) => s.margin_mae.close.toFixed(2)],
+    [
+      "Spread r, all games [95% CI]",
+      (s) => `${formatFixed(s.spread_edge_corr.r, 3)} ${formatInterval(s.spread_edge_corr.ci as [number, number], 3)}`,
+    ],
+    ["Typical miss, about … points", (s) => formatFixed(Math.min(...Object.values(s.buckets).map((b) => b.margin_sd)), 0)],
+    ["α (SE)", (s) => `${formatFixed(s.model.alpha.value, 2)} (${formatFixed(s.model.alpha.se, 2)})`],
+    ["β off (SE)", (s) => `${formatFixed(s.model.beta_off.value, 2)} (${formatFixed(s.model.beta_off.se, 2)})`],
+    ["β def (SE)", (s) => `${formatFixed(s.model.beta_def.value, 2)} (${formatFixed(s.model.beta_def.se, 2)})`],
+    ["γ (SE)", (s) => `${formatFixed(s.model.gamma.value, 2)} (${formatFixed(s.model.gamma.se, 2)})`],
+    ["Games fit", (s) => formatCount(s.model.n_games)],
+    ["Stability: low below", (s) => formatFixed(s.buckets.mid!.stability_range[0]!, 2)],
+    ["Stability: mid below", (s) => formatFixed(s.buckets.high!.stability_range[0]!, 2)],
+    ["Lowest input stability", (s) => formatFixed(s.stability_floor, 2)],
+    ...(["low", "mid", "high"] as const).flatMap((b): [string, (s: BacktestSummary) => string][] => {
+      const B = b.toUpperCase();
+      return [
+        [`${B}: games`, (s) => formatCount(s.buckets[b]!.n_games)],
+        [`${B}: typical miss, margin (pts)`, (s) => formatFixed(s.buckets[b]!.margin_sd, 1)],
+        [
+          `${B}: spread r [95% CI]`,
+          (s) => `${formatFixed(s.buckets[b]!.spread.corr, 3)} ${formatInterval([s.buckets[b]!.spread.ci_low, s.buckets[b]!.spread.ci_high], 3)}`,
+        ],
+        [
+          `${B}: total r [95% CI]`,
+          (s) => `${formatFixed(s.buckets[b]!.total.corr, 3)} ${formatInterval([s.buckets[b]!.total.ci_low, s.buckets[b]!.total.ci_high], 3)}`,
+        ],
+      ];
+    }),
+    [
+      "Edge intervals excluding zero",
+      (s) => `${s.edge_intervals.filter(excludesZero).length} of ${s.edge_intervals.length}`,
+    ],
+  ];
+  return rows.map(([figure, f]) => {
+    const [e, n] = [f(earlier), f(now)];
+    return { figure, earlier: e, now: n, unchanged: e === n };
+  });
 }
 
 export interface ReportFrameView {

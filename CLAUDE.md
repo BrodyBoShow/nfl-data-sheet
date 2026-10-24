@@ -192,8 +192,8 @@ web/                      # Phase 6+
   of codes used to match, filter or classify is verified against the distinct values
   in the column it filters, both ways. A test pins it, so a new code fails loudly
   instead of silently dropping rows. The common failure is that the code produces
-  nothing rather than erroring, so tests stay green while the output is wrong. Four
-  instances, 2026-10-12 to 2026-10-16 (the full sweep: `docs/phases/P7.md`, open
+  nothing rather than erroring, so tests stay green while the output is wrong. Five
+  instances, 2026-10-12 to 2026-10-19 (the full sweep: `docs/phases/P7.md`, open
   item 22):
   - `LAR` vs `LA` in `injuries.team`. Every Rams injury row missed `players.latest_team`,
     so Availability wrote no Rams counts for five weeks (`docs/phases/P8.md`, D19).
@@ -206,6 +206,11 @@ web/                      # Phase 6+
     item 22, row 3).
   - The input gate digesting columns Usage never reads. The set of columns, not codes,
     was wider than what the analyst uses (`docs/phases/P7.md`, open item 17).
+  - The cluster-count tests used `T` too, so the tests asserted the bug and passed. A
+    unit test is only as right as its author's assumption about the data, which is why
+    the check has to run against the live column: `scripts/verify_position_vocab.py`, in
+    CI and after every dispatcher tick (`docs/phases/P7.md`, open item 22). The sharpest
+    instance.
 
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector — never combine two sources or

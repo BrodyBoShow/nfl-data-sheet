@@ -139,6 +139,24 @@ def _fmt(v: Any, nd: int = 2) -> str:
     return f"{v:.{nd}f}"
 
 
+def _fmt_bound(v: float | None, nd: int = 3) -> str:
+    """An interval bound. One that rounds to zero at `nd` decimals but isn't zero gets
+    more decimals, up to `nd` + 4, until a digit shows: "-0.0005", never "-0.000" or a
+    "0.000" that hides which side of zero it's on. Excluding zero is the whole question
+    an edge interval answers (docs/phases/P7.md, open item 22)."""
+    if v is None:
+        return "—"
+    d = nd
+    while v != 0 and float(f"{v:.{d}f}") == 0 and d < nd + 4:
+        d += 1
+    s = f"{v:.{d}f}"
+    return f"{v:.1e}" if v != 0 and float(s) == 0 else s
+
+
+def _fmt_ci(lo: float | None, hi: float | None) -> str:
+    return f"[{_fmt_bound(lo)}, {_fmt_bound(hi)}]"
+
+
 def _table(headers: Sequence[str], rows: Sequence[Sequence[Any]], nd: int = 2) -> list[str]:
     out = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
     out += ["| " + " | ".join(_fmt(c, nd) if not isinstance(c, str) else c for c in r) + " |"
@@ -177,7 +195,7 @@ def _model_errors(frame: pl.DataFrame) -> dict[str, Any]:
 def _edge_cells(ev: dict[str, Any]) -> list[Any]:
     return [
         ev["corr"],
-        f"[{_fmt(ev['ci_low'], 3)}, {_fmt(ev['ci_high'], 3)}]",
+        _fmt_ci(ev["ci_low"], ev["ci_high"]),
         ev["n"],
         ev["validated"],
     ]
@@ -658,9 +676,9 @@ def _render(ctx: dict[str, Any]) -> str:
         ev = edge_validation(vo)
         rows.append([spec_name, m["margin_n"], m["margin_mae"], m["margin_rmse"], m["total_mae"],
                      m["total_rmse"], ev["spread"]["corr"],
-                     f"[{_fmt(ev['spread']['ci_low'], 3)}, {_fmt(ev['spread']['ci_high'], 3)}]",
+                     _fmt_ci(ev["spread"]["ci_low"], ev["spread"]["ci_high"]),
                      ev["total"]["corr"],
-                     f"[{_fmt(ev['total']['ci_low'], 3)}, {_fmt(ev['total']['ci_high'], 3)}]"])
+                     _fmt_ci(ev["total"]["ci_low"], ev["total"]["ci_high"])])
     L += _table(["Spec", "n", "Margin MAE", "Margin RMSE", "Total MAE", "Total RMSE",
                  "Spread edge r", "CI", "Total edge r", "CI"], rows, nd=3)
 

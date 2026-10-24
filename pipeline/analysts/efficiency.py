@@ -44,7 +44,25 @@ _SOLVER_MAX_ITERATIONS = 200
 # players current, prior=set()"). depth.pos_abb uses side-specific slots instead --
 # verified live (docs/sources.md). depth.pos_grp is NOT offense/defense (it's a
 # formation label, e.g. "Base 4-3 D") and must never be used to filter for O-line.
-_OL_SNAP_POSITIONS = {"C", "G", "T", "OL"}
+# 2020's snap counts also use combined and alternate codes, in that season only
+# (docs/phases/P7.md, open item 22, row 3). Every player under the seven O-line ones is a
+# C, G or OT in `players` (measured 2026-10-19); leaving them out made the OL-continuity
+# factor wrong in 2020 and 2021.
+_OL_SNAP_POSITIONS = {
+    "C", "G", "T", "OL",
+    "C/G", "G/C", "G/T", "T/G", "G/OT", "OT", "OG",
+}
+# Every other snaps.position code in the stored data, so the two sets together are the
+# whole vocabulary. scripts/verify_position_vocab.py fails on any code in the data that
+# neither set knows, or any code here the data no longer has (CLAUDE.md, "A hardcoded
+# vocabulary is checked against the data it filters").
+_NON_OL_SNAP_POSITIONS = {
+    "QB", "RB", "HB", "FB", "WR", "TE",
+    "DE", "DT", "NT", "DL", "LB", "OLB", "ILB", "MLB", "CB", "S", "SS", "FS", "DB",
+    "K", "P", "LS",
+    "CB/R", "DB/L", "DE/D", "DE/L", "DT/D", "FB/D", "FB/R", "FB/T", "K/P", "LB/F", "LB/S",
+    "RB/F", "RB/W", "TE/D", "WR/R",
+}
 _OL_DEPTH_SLOTS = {"C", "LG", "LT", "RG", "RT"}
 
 _INPUTS_VERSION_TAGS = ("pbp", "stats_player", "snap_counts", "depth_charts")

@@ -29,7 +29,9 @@ PINNED = {
     # team_week and player_week hold 0 LAR rows across 2018-2026 (measured), and nothing
     # mapped LAR before, so the alias changes nothing the fit reads.
     "TEAM_INPUTS_DEFINITION": ("2026-09-30.try-plays-excluded", "0db77bce93ef8297"),
-    "EFFICIENCY_DEFINITION": ("2026-09-30", "9d679830b22b7780"),
+    # Bumped 2026-10-20 for 2020's combined O-line snap codes in _OL_SNAP_POSITIONS (P7 open
+    # item 22, row 3): the 2020-2021 signals change, so the model is re-fit (p5-v3).
+    "EFFICIENCY_DEFINITION": ("2026-10-20.ol-combo-codes", "213d581d31f35855"),
 }
 
 _TEAM_INPUTS_FUNCTIONS: tuple[Callable[..., Any], ...] = (

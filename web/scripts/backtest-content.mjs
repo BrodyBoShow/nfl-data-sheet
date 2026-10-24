@@ -82,6 +82,7 @@ function interval(row, column, heading) {
 
 const MARGIN = "### Margin (home − away)";
 const SPREAD_CORR = "### Spread: correlation";
+const TOTAL_CORR = "### Total: correlation";
 const SPREAD_PICKS = "### Spread picks by |edge| (ATS vs. close)";
 const TOTAL_PICKS = "### Total picks by |edge| (O/U vs. close)";
 
@@ -140,6 +141,45 @@ export function winRateBuckets(md) {
         throw new ContentError(`"Win rate" ${rate} under "${heading}" isn't Wins/Decided (${wins}/${decided})`);
       }
       out.push({ market, bucket, decided, wins, rate });
+    }
+  }
+  return out;
+}
+
+/**
+ * Every edge-correlation interval the backtest tests: each row of the spread and total
+ * correlation tables (all games, each stability bucket, each test season). A bucket row
+ * takes its figures from the coefficients file's calibration, at full precision, after
+ * checking the report agrees. Any other row's bound that the report prints as zero
+ * throws: which side of zero it's on can't be read from it (docs/phases/P7.md, open
+ * item 22).
+ * @param {string} md
+ * @param {any} cal model_coefficients.json's calibration block
+ */
+export function edgeIntervals(md, cal) {
+  /** @type {{market: string, slice: string, r: number, ci_low: number, ci_high: number, n: number}[]} */
+  const out = [];
+  /** @type {[string, string][]} */
+  const tables = [["spread", SPREAD_CORR], ["total", TOTAL_CORR]];
+  for (const [market, heading] of tables) {
+    for (const row of tableUnder(md, heading)) {
+      const slice = row.Slice;
+      if (slice === undefined) throw new ContentError(`no "Slice" column under "${heading}"`);
+      let r = number(row, "r", heading);
+      let [lo, hi] = interval(row, "95% CI", heading);
+      const n = number(row, "n", heading);
+      const bucket = /^bucket (\w+)$/.exec(slice)?.[1];
+      if (bucket !== undefined) {
+        const ev = cal?.buckets?.[bucket]?.edge_validation?.[market];
+        if (!ev) throw new ContentError(`no calibration for ${slice} ${market}`);
+        if (ev.n !== n || Math.abs(ev.corr - r) > 0.0005) {
+          throw new ContentError(`report and coefficients disagree on ${slice} ${market}`);
+        }
+        [r, lo, hi] = [ev.corr, ev.ci_low, ev.ci_high];
+      } else if (lo === 0 || hi === 0) {
+        throw new ContentError(`a "95% CI" bound for ${slice} under "${heading}" prints as zero`);
+      }
+      out.push({ market, slice, r, ci_low: lo, ci_high: hi, n });
     }
   }
   return out;
@@ -279,5 +319,6 @@ export function buildSummary(reportMd, coefficients) {
     },
     report: reportProvenance(reportMd),
     win_rates: winRateBuckets(reportMd),
+    edge_intervals: edgeIntervals(reportMd, cal),
   };
 }

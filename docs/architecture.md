@@ -31,7 +31,7 @@ flowchart TB
     A_EFF[Efficiency]
     A_USE[Usage and role]
     A_PEF[Player efficiency]
-    A_SCH[Scheme]
+    A_SCH[Scheme: closed, not built]
     A_AVI[Availability impact]
     A_ENV[Environment]
     A_MKT[Market]
@@ -240,7 +240,7 @@ daily, **T3** weekly, **OD** on demand.
 | Environment | 4 | Per game, for every game kicking off in a rolling window (−24h..+7d) rather than the dispatcher's week: weather_status (distinguishes forecast / indoor / awaiting / missed / venue unresolved / not tracked), headline weather from the latest pre-kickoff snapshot (wind speed as the base shape, along-field/crosswind split only ≥8 mph at venues with a field bearing; temperature, precip, snow, lead time, HRRR-domain confidence, grid elevation as altitude), roof and surface codes, and per-team rest days/differential, travel miles, and timezone shift (home venue tz vs. game venue tz, wrapped to ±12h). See `docs/signals.md`. |
 | Usage and role | 7 | **Writes `player_usage_week`, not `signals`.** Snap share (every player who takes a snap), target share, air-yards share, red-zone/goal-line/end-zone share, carry share, WoW deltas; season-to-date, per-game, last-4. |
 | Player efficiency | 7 | **Writes `player_eff_week`, not `signals`.** Per-player receiving/rushing/passing/defense rates (EPA/SR per target/carry/dropback, YAC-oe, separation, rush by gap, FTN charting splits, PFR nearest-defender allowed stats, pressures); season-to-date prior-blended, per-game, last-4. Participation `_hist` historical tendencies (display only, never a prior). |
-| Scheme | 10 (from 7, 2026-10-07) | Team-level, in `signals`. Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled), run defense by gap, coverage-proxy splits, and participation-derived man/zone/shell tendencies (`_hist`, multi-season, labeled with their span). |
+| Scheme | **Closed 2026-10-20, not buildable** (`docs/phases/P10.md`). Never written. | Was: team-level, in `signals`. Pass rate over expected, neutral pace, play-action/motion rate, box counts, blitz/pressure rate, approximate personnel (labeled), run defense by gap, coverage-proxy splits, and participation-derived man/zone/shell tendencies (`_hist`, multi-season, labeled with their span). |
 
 ### L3 Synthesis and sheet
 

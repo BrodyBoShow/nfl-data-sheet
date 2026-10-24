@@ -277,24 +277,41 @@ def test_compute_depth_rank_delta_ignores_higher_ranked_backup():
 
 def test_build_flagged_positions_drops_unknown_position():
     flagged = [{"player_id": "p1", "team": "KC"}, {"player_id": "p2", "team": "KC"}]
-    positions = {"p1": ("KC", "T"), "p2": ("KC", None)}
+    positions = {"p1": ("KC", "OT"), "p2": ("KC", None)}
     out = _build_flagged_positions(flagged, positions)
-    assert out == [{"team": "KC", "position": "T"}]
+    assert out == [{"team": "KC", "position": "OT"}]
 
 
 def test_compute_cluster_counts_buckets_ol_and_secondary_separately():
+    # "OT" and "SAF" are what players.position actually says (P7 open item 22, rows 1-2).
+    # This test used "T" until 2026-10-20, a code no player has, so it passed while no
+    # offensive tackle was ever counted.
     flagged_positions = [
-        {"team": "KC", "position": "T"},
+        {"team": "KC", "position": "OT"},
         {"team": "KC", "position": "G"},
         {"team": "KC", "position": "CB"},
         {"team": "SF", "position": "S"},
+        {"team": "SF", "position": "SAF"},
     ]
     rows = _compute_cluster_counts(flagged_positions)
     by_key = {(r["team"], r["signal"]): r["value"] for r in rows}
     assert by_key[("KC", "ol_cluster_count")] == 2.0
     assert by_key[("KC", "secondary_cluster_count")] == 1.0
-    assert by_key[("SF", "secondary_cluster_count")] == 1.0
+    assert by_key[("SF", "secondary_cluster_count")] == 2.0
     assert ("SF", "ol_cluster_count") not in by_key
+
+
+def test_build_redistribution_roster_includes_fullbacks():
+    """P7 open item 22, row 5: a flagged FB is in the roster, and his share goes only to
+    his team's healthy FBs."""
+    flagged = [{"player_id": "fb1", "team": "KC"}]
+    positions: dict[str, tuple[str | None, str | None]] = {
+        "fb1": ("KC", "FB"),
+        "fb2": ("KC", "FB"),
+        "rb1": ("KC", "RB"),
+    }
+    roster = _build_redistribution_roster(flagged, positions, {"fb1": 0.2, "fb2": 0.1, "rb1": 0.6})
+    assert {(r["player_id"], r["injured"]) for r in roster} == {("fb1", True), ("fb2", False)}
 
 
 def test_compute_cluster_counts_skips_non_ol_secondary_positions():

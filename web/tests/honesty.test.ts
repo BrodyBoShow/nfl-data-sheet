@@ -21,7 +21,10 @@ import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import report from "../content/backtest-report.json";
+import { backtest, previousBacktest, type BacktestSummary, type EdgeInterval } from "../lib/backtest";
+import { correctionCounts, correctionRows, correctionTooltip, edgeIntervalsSentences } from "../lib/method";
 import { PlayersSection } from "../components/game/players";
+import { Correction } from "../components/method/correction";
 import type { PlayerEff, PlayerUsage } from "../lib/db";
 import {
   BLEND_MARK,
@@ -388,46 +391,145 @@ describe("the backtest report's frame", () => {
   });
 });
 
-// ---- Backtest input notice (P7 open item 22, row 3) ------------------------------------
-// The backtest ran on an OL-continuity input that was wrong for 2020–2021 (user,
-// 2026-10-18: on the page before any measurement or fix). Pinned verbatim here, so it
-// comes off only by a deliberate edit of this test as well as the page.
+// ---- Backtest correction (P7 open item 22, row 3) --------------------------------------
+// The backtest ran on an OL-continuity input that was wrong for 2020–2021. The 2026-10-18
+// notice promised the earlier figures beside the new ones; the correction keeps that
+// promise. Pinned here, so it comes off only by a deliberate edit of this test as well as
+// the page.
 
-describe("backtest input notice", () => {
-  it("16. /method says the input was wrong, before any backtest figure, and the status line links to it", () => {
+/** The correction section in `html`, checked against `earlier`/`now`: its wording, and
+ *  every row saying plainly whether its printed figure moved. */
+function checkCorrection(html: string, earlier: BacktestSummary, now: BacktestSummary): void {
+  const section = /<section[^>]*data-correction="true"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
+  expect(section, "correction section").toBeDefined();
+  const t = text(section!);
+  for (const s of [
+    "corrected: an input to these backtest numbers was wrong",
+    `until ${now.report.generated_utc.slice(0, 10)}, every backtest figure on this page and in the line ` +
+      "at the top of every page was computed with an offensive-line continuity input that was wrong for " +
+      "some teams in 2020 and 2021",
+    "the input was wrong in 119 of 672 team-weeks in 2020 and 172 of 704 in 2021",
+    "so it reached every out-of-sample season, and the coefficients and stability buckets today's " +
+      "projections use",
+    `the model refit (${earlier.model_version} to ${now.model_version}), and the backtest rerun`,
+    "the earlier column was computed on the wrong input",
+  ]) {
+    expect(t).toContain(s);
+  }
+  const expected = correctionRows(earlier, now);
+  const rows = [...section!.matchAll(/<tr data-unchanged="(true|false)">([\s\S]*?)<\/tr>/g)];
+  expect(rows).toHaveLength(expected.length);
+  rows.forEach((m, i) => {
+    const [figure, e, n, verdict] = [...m[2]!.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((c) => text(c[1]!));
+    const want = expected[i]!;
+    expect([figure, e, n], want.figure).toEqual([want.figure, want.earlier, want.now].map(normalize));
+    expect(verdict, want.figure).toBe(e === n ? "unchanged" : "changed");
+    expect(m[1], want.figure).toBe(String(e === n));
+  });
+  const { total, changed, unchanged } = correctionCounts(expected);
+  expect(t).toContain(
+    changed === 0
+      ? `none of the ${total} figures below changed at the precision this page shows`
+      : `of the ${total} figures below, ${unchanged} are unchanged at the precision this page shows and ` +
+          `${changed} changed`,
+  );
+}
+
+describe("backtest correction", () => {
+  it("16. a figure that moved reads 'changed', and the rest 'unchanged'", () => {
+    const moved: BacktestSummary = {
+      ...backtest,
+      model_version: "p5-test",
+      model: { ...backtest.model, beta_def: { value: backtest.model.beta_def.value + 0.01, se: backtest.model.beta_def.se } },
+      buckets: { ...backtest.buckets, mid: { ...backtest.buckets.mid!, n_games: backtest.buckets.mid!.n_games - 3 } },
+    };
+    const html = render(Correction({ earlier: backtest, now: moved }));
+    checkCorrection(html, backtest, moved);
+    const changed = correctionRows(backtest, moved).filter((r) => !r.unchanged).map((r) => r.figure);
+    expect(changed).toEqual(["β def (SE)", "MID: games"]);
+  });
+
+  it("16. /method shows the earlier figures beside the new, before any backtest figure, and the status line links to it", () => {
     const html = pages.method!;
-    const notice = /<section[^>]*data-input-notice="true"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
-    expect(notice, "notice section").toBeDefined();
-    const t = text(notice!);
-    for (const s of [
-      "an input to these backtest numbers was wrong",
-      "every backtest figure on this page and in the line at the top of every page was computed with an " +
-        "offensive-line continuity input that was wrong for some teams in 2020 and 2021",
-      "margin error (10.33 for the model, 9.76 for the closing line)",
-      "the input was wrong in 119 of 672 team-weeks in 2020 and 172 of 704 in 2021",
-      "it reaches every out-of-sample season, not only those two",
-      "it reaches today's projections too. the coefficients below were fit on 2019–25",
-      "the stability buckets and typical-miss figures every game view uses come from the same backtest",
-      "the size of the effect is being measured, and these numbers may change",
-      "show the earlier figures beside the new ones and say they were computed on the wrong input",
-    ]) {
-      expect(t).toContain(s);
-    }
+    checkCorrection(html, previousBacktest, backtest);
+    const { total, changed } = correctionCounts(correctionRows(previousBacktest, backtest));
     // Ahead of every backtest figure: the coefficients, the buckets, the edge and the report.
-    const at = html.indexOf('id="input-notice"');
+    const at = html.indexOf('id="correction"');
     for (const id of ['id="model"', 'id="stability"', 'id="edge"', "data-report-frame"]) {
       expect(at, id).toBeGreaterThan(-1);
       expect(at, id).toBeLessThan(html.indexOf(id));
     }
-    // The header line on every page carries the marker, linked to the notice.
-    const link = /<a[^>]*href="\/method#input-notice"[^>]*>([\s\S]*?)<\/a>/.exec(pages.status!);
+    // The header line on every page carries the marker, linked to the correction.
+    const link = /<a[^>]*href="\/method#correction"[^>]*>([\s\S]*?)<\/a>/.exec(pages.status!);
     expect(link, "status line link").not.toBeNull();
     expect(link![0]).toContain('class="tag erratum"');
     expect(text(link![1]!)).toBe("erratum");
     expect(normalize(/title="([^"]*)"/.exec(link![0])?.[1] ?? "")).toBe(
-      "computed with an offensive-line input that was wrong for some teams in 2020–2021. the effect is " +
-        "being measured, and these numbers may change.",
+      normalize(correctionTooltip(previousBacktest, backtest)),
     );
+    expect(normalize(correctionTooltip(previousBacktest, backtest))).toContain(
+      `${changed} of ${total} figures on /method changed at the precision shown, and the rest are unchanged`,
+    );
+  });
+});
+
+// ---- Edge intervals excluding zero (P7 open item 22) ------------------------------------
+// An interval that excludes zero by chance must read as chance: how many would at 95%,
+// which side of zero, and that it's no evidence of an edge in either direction.
+
+const interval = (slice: string, r: number, lo: number, hi: number, market = "spread"): EdgeInterval => ({
+  market, slice, r, ci_low: lo, ci_high: hi, n: 500,
+});
+const twenty = (excluded: EdgeInterval[]): BacktestSummary => ({
+  ...backtest,
+  edge_intervals: [
+    ...excluded,
+    ...Array.from({ length: 20 - excluded.length }, (_, i) => interval(`s${i}`, 0.01, -0.05, 0.07)),
+  ],
+});
+
+describe("edge intervals", () => {
+  it("17. two of twenty excluding zero, both below, reads as what chance produces and no edge either way", () => {
+    const t = normalize(
+      edgeIntervalsSentences(
+        // The bucket bound is p5-v3's measured one (P7 open item 22).
+        twenty([interval("2025", -0.121, -0.226, -0.018), interval("bucket high", -0.081, -0.164, -0.0004940895518897146)]),
+      ).join(" "),
+    );
+    expect(t).toContain("2 exclude zero: spread 2025, r −0.121 [−0.226, −0.018]; spread bucket high, r −0.081 [−0.164, −0.0005]");
+    expect(t).toContain("at 95%, about 1 of 20 would exclude zero by chance alone, so this is what chance produces");
+    expect(t).toContain("each is below zero: there, the model's side did worse against the closing line");
+    expect(t).toContain("it is not evidence of an edge in either direction");
+    for (const claim of ["significant", "edge exists", "evidence of an edge.", "validated"]) {
+      expect(t, claim).not.toContain(claim);
+    }
+  });
+
+  it("17. more than chance would usually give stops saying it's chance, and still says it isn't validation", () => {
+    const six = Array.from({ length: 6 }, (_, i) => interval(`x${i}`, -0.1, -0.2, -0.01));
+    const t = normalize(edgeIntervalsSentences(twenty(six)).join(" "));
+    expect(t).not.toContain("what chance produces");
+    expect(t).not.toContain("not evidence of an edge");
+    expect(t).toContain("6 or more would happen by chance only");
+    expect(t).toContain("it still isn't validation, which needs an interval entirely above zero");
+  });
+
+  it("17. /method prints the sentences built from its own summary, and no app-printed bound reads as a bare zero", () => {
+    const html = pages.method!;
+    const p = /<p[^>]*data-edge-intervals="true"[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1];
+    expect(text(p ?? "")).toBe(normalize(edgeIntervalsSentences(backtest).join(" ")));
+    // Outside the embedded report: every printed interval bound that shows as zero must be
+    // an exact zero in the data. No figure on the page is.
+    const own = text(html.split(report.html).join(" "));
+    expect(own).not.toMatch(/[[,] ?−?0\.0+\]|\[−?0\.0+,/);
+  });
+
+  it("18. the report's review section says what an interval excluding zero is", () => {
+    const md = readFileSync(new URL("../../docs/backtest_report.md", import.meta.url), "utf8");
+    const review = md.slice(md.indexOf("## Interpretation"));
+    expect(review).not.toContain("_Pending review.");
+    expect(review).toContain("No edge is demonstrated in either direction.");
+    expect(review).toMatch(/what chance predicts|what chance produces/);
   });
 });
 
