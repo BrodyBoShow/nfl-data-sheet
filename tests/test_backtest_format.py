@@ -11,7 +11,7 @@ from scripts.backtest import _fmt_bound, _fmt_ci
     ("v", "expected"),
     [
         (-0.0004940895518897146, "-0.0005"),  # p5-v3's high-stability spread bound
-        (0.00044696701709777246, "0.0004"),  # p5-v2's, printed "0.000" before 2026-10-20
+        (0.00044696701709777246, "0.0004"),  # p5-v2's, printed "0.000" before 2026-10-27
         (0.0, "0.000"),
         (-0.08, "-0.080"),
         (0.015, "0.015"),
