@@ -1,5 +1,5 @@
 import { backtest } from "@/lib/backtest";
-import { formatFixed } from "@/lib/format";
+import { formatFixed, formatOwnPct } from "@/lib/format";
 import { isLowStability, lowStabilityTitle } from "@/lib/game";
 import { formatSignalValue } from "@/lib/signal-labels";
 
@@ -31,8 +31,16 @@ export function UnitHeads({ label, showPct }: { label: string; showPct: boolean 
           Pct
         </th>
       )}
-      <th scope="col" className="num">n</th>
-      <th scope="col" className="num">Stab</th>
+      <th scope="col" className="num" title="Plays, drives or red-zone trips behind the value, this season.">
+        n
+      </th>
+      <th
+        scope="col"
+        className="num"
+        title="Own %: the share of the value that is this team's own plays, this season and last, not the league average."
+      >
+        Own %
+      </th>
     </>
   );
 }
@@ -42,8 +50,8 @@ export function LowStabilityNote({ show }: { show: boolean }) {
   if (!show) return null;
   return (
     <p className="legend t-small ink-2" data-low-stability-note>
-      Grey numbers: stability below {formatFixed(backtest.stability_floor, 2)}, the lowest input stability in the
-      model&apos;s backtest. Mostly league average; see n and Stab.
+      Grey numbers: Own % below {formatOwnPct(backtest.stability_floor)}, the lowest input Own % in the
+      model&apos;s backtest. Mostly league average; see n and Own %.
     </p>
   );
 }
@@ -67,7 +75,7 @@ export function UnitCells({ u, showPct }: { u: UnitValue | null | undefined; sho
         </td>
       )}
       <td className="num">{u?.sample_n ?? DASH}</td>
-      <td className="num">{u?.stability == null ? DASH : formatFixed(u.stability, 2)}</td>
+      <td className="num">{u?.stability == null ? DASH : formatOwnPct(u.stability)}</td>
     </>
   );
 }

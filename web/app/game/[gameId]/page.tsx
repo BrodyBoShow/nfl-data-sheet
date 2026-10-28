@@ -16,9 +16,19 @@ import { TeamSignals } from "@/components/game/team-signals";
 import { SnapCountsCredit } from "@/components/marks";
 import { backtest } from "@/lib/backtest";
 import type { Card } from "@/lib/card";
-import { card as loadCard, game, gamePlayerEff, gamePlayerUsage, gameSignals, isGameId } from "@/lib/db";
+import {
+  card as loadCard,
+  game,
+  gamePlayerEff,
+  gamePlayerUsage,
+  gameSignals,
+  isGameId,
+  weekClusterLabels,
+  type ClusterLabelT,
+  type SignalRowT,
+} from "@/lib/db";
 import { etDay, formatEtClock, formatEtStamp, formatGameday } from "@/lib/format";
-import { buildLines, gameStatus, isLowStability, type GameStatus } from "@/lib/game";
+import { buildLines, gameStatus, isLowStability, modelInputPairings, type GameStatus } from "@/lib/game";
 import { normalizeTeam } from "@/lib/teams";
 import { noCardReason } from "@/lib/week";
 
@@ -54,7 +64,21 @@ function StatusText({ s }: { s: GameStatus }) {
   }
 }
 
-function CardBody({ card, asOf, now, players }: { card: Card; asOf: string; now: Date; players: ReactNode }) {
+function CardBody({
+  card,
+  asOf,
+  now,
+  players,
+  rows,
+  weekLabels,
+}: {
+  card: Card;
+  asOf: string;
+  now: Date;
+  players: ReactNode;
+  rows: SignalRowT[];
+  weekLabels: ClusterLabelT[];
+}) {
   const lines = buildLines(card);
   const status = gameStatus(card, now);
   const kickedOff = new Date(card.identity.kickoff) <= now;
@@ -86,7 +110,7 @@ function CardBody({ card, asOf, now, players }: { card: Card; asOf: string; now:
         </div>
         <div>
           <Environment card={card} kickedOff={kickedOff} />
-          <Availability card={card} />
+          <Availability card={card} rows={rows} weekLabels={weekLabels} />
         </div>
       </div>
       {lines && card.projection ? <Arithmetic card={card} projection={card.projection} /> : null}
@@ -95,11 +119,11 @@ function CardBody({ card, asOf, now, players }: { card: Card; asOf: string; now:
           Efficiency matchups · not used by the model
         </h2>
         <p className="legend t-small ink-2">
-          Each offense rating beside the opposing defense&apos;s matching rating, entering this week.
-          The model uses EPA/play only (above).
+          Each offense rating beside the opposing defense&apos;s matching rating, entering this week. A
+          defense&apos;s rating is what it allows. The model uses EPA/play only (marked as its input).
         </p>
-        <PairingTable rows={pairs.home_offense} subject={home} opponent={away} />
-        <PairingTable rows={pairs.away_offense} subject={away} opponent={home} />
+        <PairingTable rows={pairs.home_offense} modelRows={modelInputPairings(card, "home")} subject={home} opponent={away} />
+        <PairingTable rows={pairs.away_offense} modelRows={modelInputPairings(card, "away")} subject={away} opponent={home} />
         <LowStabilityNote
           show={[...pairs.home_offense, ...pairs.away_offense].some((r) =>
             [r.subject, r.opponent].some((b) => b != null && b.value !== null && isLowStability(b.stability)),
@@ -132,6 +156,12 @@ export default async function GamePage({ params }: { params: Params }) {
     asOfWeek >= 1 ? gamePlayerUsage(g.season, asOfWeek, home, away) : Promise.resolve([]),
     asOfWeek >= 1 ? gamePlayerEff(g.season, asOfWeek, home, away) : Promise.resolve([]),
   ]);
+  // Only a game with no availability count of its own needs the week's labels (Q6b).
+  const weekLabels =
+    rec?.card.ok === true &&
+    !rows.some((r) => r.sector === "availability" && r.game_id === null && /^(ol|secondary)_cluster_count$/.test(r.signal))
+      ? await weekClusterLabels(g.season, g.week)
+      : [];
   const now = new Date();
   const hasCard = rec?.card.ok === true;
   const hasTeamTable = !hasCard && rows.some((r) => r.sector === "efficiency");
@@ -170,7 +200,7 @@ export default async function GamePage({ params }: { params: Params }) {
       </div>
 
       {parsed?.ok === true ? (
-        <CardBody card={parsed.card} asOf={rec!.as_of} now={now} players={players} />
+        <CardBody card={parsed.card} asOf={rec!.as_of} now={now} players={players} rows={rows} weekLabels={weekLabels} />
       ) : parsed ? (
         <section className="section">
           <h2 className="section-label t-cap">Card</h2>

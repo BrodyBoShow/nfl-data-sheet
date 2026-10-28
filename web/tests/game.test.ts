@@ -14,7 +14,19 @@ import { LowStabilityNote } from "../components/game/signal-cells";
 import { TeamSignals } from "../components/game/team-signals";
 import { backtest } from "../lib/backtest";
 import { parseCard, type Card, type CardPairing } from "../lib/card";
-import { buildLines, edgeSpreadText, edgeTotalText, gameStatus, isLowStability, validationTag } from "../lib/game";
+import { formatOwnPct } from "../lib/format";
+import {
+  HEADLINE_PAIRING_BASES,
+  POSITION_VOCABULARY,
+  availabilityVocabularyNote,
+  modelInputPairings,
+  buildLines,
+  edgeSpreadText,
+  edgeTotalText,
+  gameStatus,
+  isLowStability,
+  validationTag,
+} from "../lib/game";
 import { formatSignalValue, signalLabel } from "../lib/signal-labels";
 import { SOURCES, sourcesFor } from "../lib/sources";
 import { parseTeamAliases } from "../scripts/team-aliases.mjs";
@@ -172,7 +184,7 @@ describe("context blocks", () => {
     const h = pairingHtml(rows);
     const dimmed = [...h.matchAll(/<td class="num ink-3" data-low-stability="true" title="([^"]*)"/g)];
     expect(dimmed).toHaveLength(1);
-    expect(dimmed[0]![1]).toContain("Stability 0.02: about 98% of this number is the league average");
+    expect(dimmed[0]![1]).toContain("Own 2%: about 98% of this number is the league average");
     const first = /<tr><th scope="row"[\s\S]*?<\/tr>/.exec(h)![0];
     const tds = [...first.matchAll(/<td class="([^"]*)"/g)].map((m) => m[1]);
     expect(tds).toEqual(["num ink-3", "num", "num", "num", "num", "num"]);
@@ -184,8 +196,120 @@ describe("context blocks", () => {
   it("the grey is defined once, only when something is grey", () => {
     expect(html(createElement(LowStabilityNote, { show: false }))).toBe("");
     expect(text(html(createElement(LowStabilityNote, { show: true })))).toContain(
-      `stability below ${backtest.stability_floor.toFixed(2)}`,
+      `Own % below ${formatOwnPct(backtest.stability_floor)}`,
     );
+  });
+
+  // ---- docs/phases/P11.md, slice 1 ----
+
+  it("the seven headline matchup rows are open, in order; the rest are collapsed and counted", () => {
+    // The headline bases are a hardcoded vocabulary, so they're checked against the
+    // registry (docs/signals.md's efficiency table), not the trimmed fixture card. A live
+    // card pairs every registry base except the model's own (synthesizer.py,
+    // exclude_bases=PRIMARY_SPEC.bases); the page adds that one from the decomposition.
+    const md = readFileSync(new URL("../../docs/signals.md", import.meta.url), "utf8");
+    const table = md.slice(md.indexOf("| Signal (`<name>_off`/`<name>_def`)"), md.indexOf("### Availability sector"));
+    const registry = [...table.matchAll(/^\| `([a-z_0-9]+)`( … `down4`)? \|/gm)].flatMap((m) =>
+      m[2] ? [1, 2, 3, 4].map((d) => m[1]!.replace(/down1$/, `down${d}`)) : [m[1]!],
+    );
+    expect(registry).toHaveLength(20);
+    for (const b of HEADLINE_PAIRING_BASES) expect(registry, b).toContain(b);
+    const synth = readFileSync(new URL("../../pipeline/synthesis/synthesizer.py", import.meta.url), "utf8");
+    expect(synth).toContain("exclude_bases=PRIMARY_SPEC.bases");
+
+    const like = locked.context.efficiency_pairings.home_offense[0]!;
+    const cardRows = registry.filter((b) => b !== "epa_per_play").map((base) => ({ ...like, base }));
+    const modelRows = modelInputPairings(locked, "home");
+    expect(modelRows.map((r) => r.base)).toEqual(["epa_per_play"]);
+    const h = html(createElement(PairingTable, { rows: cardRows, modelRows, subject: "GB", opponent: "ATL" }));
+    const tableRows = (kind: string) => {
+      const t = new RegExp(`<table[^>]*data-pairings="${kind}"[\\s\\S]*?</table>`).exec(h)?.[0] ?? "";
+      return [...t.matchAll(/<span class="raw-name[^>]*> ([a-z0-9_]+)<\/span>/g)].map((m) => m[1]);
+    };
+    expect(tableRows("headline")).toEqual([...HEADLINE_PAIRING_BASES]);
+    const more = registry.filter((b) => !(HEADLINE_PAIRING_BASES as readonly string[]).includes(b));
+    expect(more).toHaveLength(13);
+    expect(tableRows("more")).toEqual(more);
+    // EPA/play is marked as the model's input, and its numbers are the decomposition's.
+    expect(h.split("data-model-input").length - 1).toBe(1);
+    const term = locked.projection!.decomposition.home.terms.find((t) => t.role === "offense")!;
+    expect(modelRows[0]!.subject.value).toBe(term.value);
+    expect(modelRows[0]!.opponent!.team).toBe("ATL");
+    // "More" sits in a closed <details>, and says how many it holds.
+    const details = /<details[^>]*data-pairings-more[^>]*>([\s\S]*?)<\/details>/.exec(h)!;
+    expect(details[0]).not.toMatch(/<details[^>]*\bopen\b/);
+    expect(text(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(details[0])![1]!)).toBe(
+      `${more.length} more GB offense vs. ATL defense signals`,
+    );
+    expect(signalLabel("red_zone_td_rate")).toBe("Red-zone TD rate");
+  });
+
+  it("the defense column says 'allowed', and stability reads as Own % everywhere a team value shows", () => {
+    const h = pairingHtml(locked.context.efficiency_pairings.home_offense);
+    expect(text(h)).toContain("ATL def allowed");
+    expect(text(h)).not.toMatch(/\bStab\b/);
+    expect(text(h)).toContain("Own %");
+    const a = html(createElement(Arithmetic, { card: locked, projection: locked.projection! }));
+    expect(text(a)).not.toMatch(/\bStab\b/);
+    expect(text(a)).toMatch(/defense · EPA\/play allowed/);
+    expect(formatOwnPct(0.4567)).toBe("46%");
+  });
+
+  it("arithmetic and market detail are collapsed, and still in the page's HTML", () => {
+    const a = html(createElement(Arithmetic, { card: locked, projection: locked.projection! }));
+    expect(a).toMatch(/^<details[^>]*data-arithmetic/);
+    expect(a).not.toMatch(/^<details[^>]*\bopen\b/);
+    expect(text(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(a)![1]!)).toMatch(/^How the model got there · GB [\d.]+, ATL [\d.]+$/);
+    const m = html(createElement(MarketDetail, { card: locked }));
+    expect(m).toMatch(/^<details[^>]*data-market-detail/);
+    expect(m).not.toMatch(/^<details[^>]*\bopen\b/);
+  });
+
+  it("weeks 2-7: the availability note comes from the rows' own labels", () => {
+    const row = (team: string, signal: string, inputs_version: string) => ({
+      sector: "availability", game_id: null, team, signal, inputs_version,
+    });
+    const old = "snap_counts@2026-09-24 08:50:29 EDT,depth_charts@2026-09-24 08:42:14 EDT";
+    const fixed = `${old},positions@${POSITION_VOCABULARY}`;
+    const own = { noRows: false, ramsMissing: false };
+    expect(availabilityVocabularyNote([row("GB", "ol_cluster_count", old)], ["ATL", "GB"])).toEqual(own);
+    expect(availabilityVocabularyNote([row("GB", "ol_cluster_count", fixed)], ["ATL", "GB"])).toBeNull();
+    // The game's own rows decide when it has any, whatever the week's say.
+    expect(availabilityVocabularyNote([row("GB", "ol_cluster_count", fixed)], ["ATL", "GB"], [{ team: "KC", inputs_version: old }])).toBeNull();
+    // No cluster-count row for either team: the week's rows decide (2026 week 2, NYG@LA).
+    expect(availabilityVocabularyNote([], ["ATL", "GB"])).toBeNull(); // nothing to decide from
+    expect(availabilityVocabularyNote([], ["ATL", "GB"], [{ team: "KC", inputs_version: old }])).toEqual({ ...own, noRows: true });
+    expect(availabilityVocabularyNote([], ["ATL", "GB"], [{ team: "KC", inputs_version: fixed }])).toBeNull();
+    expect(availabilityVocabularyNote([], ["NYG", "LA"], [{ team: "KC", inputs_version: old }])).toEqual({ noRows: true, ramsMissing: true });
+    // Rows of other teams or other signals don't count as the game's own.
+    expect(availabilityVocabularyNote([row("KC", "ol_cluster_count", old), row("GB", "snap_share_at_risk", old)], ["ATL", "GB"])).toBeNull();
+    // A Rams game whose rows predate the fix and has no Rams row: the D19 sentence. A Rams
+    // row present, or the rows carrying the label, and it's gone.
+    expect(availabilityVocabularyNote([row("SF", "ol_cluster_count", old)], ["LA", "SF"])).toEqual({ ...own, ramsMissing: true });
+    expect(availabilityVocabularyNote([row("SF", "ol_cluster_count", old), row("LA", "secondary_cluster_count", old)], ["LA", "SF"])).toEqual(own);
+    expect(availabilityVocabularyNote([row("SF", "ol_cluster_count", fixed)], ["LA", "SF"])).toBeNull();
+    const blank = text(
+      html(createElement(Availability, { card: locked, rows: [], weekLabels: [{ team: "KC", inputs_version: old }] })),
+    );
+    expect(blank).toContain("so a blank here may be a team whose only flagged players were those.");
+
+    const card = { ...locked, identity: { ...locked.identity, home_team: "SF", away_team: "LA" } };
+    const shown = text(html(createElement(Availability, { card, rows: [row("SF", "ol_cluster_count", old)] as never })));
+    expect(shown).toContain(
+      `These O-line and secondary counts were computed before ${POSITION_VOCABULARY} and leave out offensive tackles and safeties coded SAF.`,
+    );
+    expect(shown).toContain("There's no Rams row: a team-code mismatch kept Rams counts from being written (since fixed).");
+    expect(shown).toContain("They aren't recomputed: that would put today's depth chart into a past week.");
+    expect(html(createElement(Availability, { card: locked, rows: [] }))).not.toContain("data-vocabulary-note");
+  });
+
+  it("the note's date and label are the analyst's own", () => {
+    const py = readFileSync(new URL("../../pipeline/analysts/availability_impact.py", import.meta.url), "utf8");
+    expect(/^_POSITION_VOCABULARY = "([0-9-]+)"$/m.exec(py)?.[1]).toBe(POSITION_VOCABULARY);
+    expect(py).toContain('f"positions@{_POSITION_VOCABULARY}"');
+    // The cluster signals the note reads are the ones the synthesizer puts on the card.
+    const synth = readFileSync(new URL("../../pipeline/synthesis/synthesizer.py", import.meta.url), "utf8");
+    expect(synth).toContain('_AVAILABILITY_CONTEXT = ("ol_cluster_count", "secondary_cluster_count")');
   });
 
   it("no-card team table: same column and dimming rules", () => {

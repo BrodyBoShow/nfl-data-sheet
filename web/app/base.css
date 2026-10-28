@@ -253,6 +253,25 @@ details.players-history {
 details.players-history > summary {
   cursor: pointer;
 }
+
+/* Collapsed by default (docs/phases/P11.md, B): the rows a table doesn't show, the rest
+   of the matchup signals, defense, the arithmetic and market detail. The content stays in
+   the server-rendered HTML; only its display is deferred. */
+details.players-hidden,
+details.pairings-more,
+details.players-defense {
+  margin-top: var(--space-2);
+}
+details.players-hidden > summary,
+details.pairings-more > summary,
+details.players-defense > summary,
+details.arithmetic > summary,
+details.market-detail > summary {
+  cursor: pointer;
+}
+details.players-defense {
+  margin-top: var(--space-3);
+}
 /* Player-table heads wrap (labels carry units and source tags); numbers never do. Without
    this the defense table measured 2,265px against a 1,088px column at 1280px. */
 table.players-table thead th {

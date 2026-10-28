@@ -342,6 +342,29 @@ export async function gamePlayerEff(
   return select("player_eff", asOfParams(season, asOfWeek, home, away, PLAYER_EFF_COLUMNS), PlayerEffRow);
 }
 
+const ClusterLabel = z.object({ team: z.string().nullable(), inputs_version: z.string() });
+export type ClusterLabelT = z.infer<typeof ClusterLabel>;
+
+/** Q6b: the week's availability cluster-count rows, every team, labels only. For a game
+ *  with no cluster-count row of its own: whether that week's counts predate the
+ *  position-code fix is read from the week's rows (lib/game.ts,
+ *  availabilityVocabularyNote). At most 64 rows (32 teams × 2 signals). */
+export async function weekClusterLabels(season: number, week: number): Promise<ClusterLabelT[]> {
+  checkSeasonWeek(season, week);
+  return select(
+    "signals",
+    {
+      season: `eq.${season}`,
+      week: `eq.${week}`,
+      sector: "eq.availability",
+      game_id: "is.null",
+      signal: "in.(ol_cluster_count,secondary_cluster_count)",
+      select: "team,inputs_version",
+    },
+    ClusterLabel,
+  );
+}
+
 /** Q6: the signal rows behind one game: both teams' team-week rows (efficiency,
  *  availability) plus the game's own rows (market, environment). */
 export async function gameSignals(

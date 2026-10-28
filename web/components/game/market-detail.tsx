@@ -68,10 +68,11 @@ export function MarketDetail({ card }: { card: Card }) {
   const teamVal = (t: string, k: string) => m.teams[t]?.[k]?.value ?? null;
 
   return (
-    <section className="section" aria-labelledby="market-h">
-      <h2 id="market-h" className="section-label t-cap">
+    // Collapsed by default (docs/phases/P11.md, B): the lines that matter are in Lines.
+    <details className="section market-detail" data-market-detail>
+      <summary id="market-h" className="section-label t-cap">
         Market detail · not used by the model
-      </h2>
+      </summary>
       <p className="t-small ink-2">
         Status: {status === null ? "no market rows" : STATUS[status] ?? `code ${status}`}
         {v("market_open_basis") !== null ? ` · open: ${OPEN_BASIS[v("market_open_basis")!] ?? "—"}` : ""}
@@ -129,6 +130,6 @@ export function MarketDetail({ card }: { card: Card }) {
           </tbody>
         </table>
       </div>
-    </section>
+    </details>
   );
 }

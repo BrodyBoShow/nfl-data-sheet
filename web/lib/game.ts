@@ -3,13 +3,14 @@
 // own (edge.at_lock / edge.vs_current), never recomputed. Every edge travels with its
 // validation status. The card's "model favors …" summary is never used (§5).
 import { backtest, type BacktestSummary } from "./backtest";
-import type { Card } from "./card";
+import type { Card, CardPairing } from "./card";
 import {
   favoredTeam,
   formatEtClock,
   formatFixed,
   formatInterval,
   formatLine,
+  formatOwnPct,
   formatSeasonRange,
   formatSpread,
 } from "./format";
@@ -26,9 +27,92 @@ export function isLowStability(stability: number | null | undefined, floor = bac
 export function lowStabilityTitle(stability: number, floor = backtest.stability_floor): string {
   const league = Math.round((1 - stability) * 100);
   return (
-    `Stability ${formatFixed(stability, 2)}: about ${league}% of this number is the league average. ` +
-    `Dimmed below ${formatFixed(floor, 2)}, the lowest input stability in the model's backtest.`
+    `Own ${formatOwnPct(stability)}: about ${league}% of this number is the league average. ` +
+    `Dimmed below ${formatOwnPct(floor)}, the lowest input Own % in the model's backtest.`
   );
+}
+
+/** The matchup rows open by default (docs/phases/P11.md, decision 2), in this order. The
+ *  other bases collapse under them.
+ *  - EPA/play stays though pass + rush nearly derive it: it's the model's only input, so
+ *    a reader sees what the projection is built from. Don't optimize it away.
+ *  - Red-zone TD rate decides games and none of the others derive it.
+ *  Every base here must be an efficiency base the card pairs (game.test.ts checks it). */
+export const HEADLINE_PAIRING_BASES = [
+  "epa_per_play",
+  "epa_per_play_pass",
+  "epa_per_play_rush",
+  "success_rate",
+  "explosive_rate",
+  "points_per_drive",
+  "red_zone_td_rate",
+] as const;
+
+/** The model's own inputs as matchup rows, from the projection's decomposition: each
+ *  offense term beside the opponent-defense term of the same base. The card's pairings
+ *  leave the model's bases out (synthesizer.py, `exclude_bases=PRIMARY_SPEC.bases`)
+ *  because the arithmetic shows them. The arithmetic is collapsed now, and EPA/play is a
+ *  headline row (HEADLINE_PAIRING_BASES), so it comes from here. These are the card's own
+ *  numbers, frozen with it like every other pairing. Empty without a projection. */
+export function modelInputPairings(card: Card, side: "home" | "away"): CardPairing[] {
+  const terms = card.projection?.decomposition[side].terms ?? [];
+  const brief = (t: (typeof terms)[number]) => ({
+    signal: t.signal,
+    team: t.team,
+    player_id: null,
+    value: t.value,
+    stability: t.stability,
+    sample_n: t.sample_n,
+  });
+  return terms
+    .filter((t) => t.role === "offense" && t.signal.endsWith("_off"))
+    .map((o) => {
+      const base = o.signal.slice(0, -"_off".length);
+      const d = terms.find((t) => t.role === "opponent_defense" && t.signal === `${base}_def`);
+      return { base, subject: brief(o), opponent: d ? brief(d) : null };
+    });
+}
+
+/** The deploy date of Availability's position-code fix, as its rows label it:
+ *  `positions@<date>` in `inputs_version` (availability_impact.py, _POSITION_VOCABULARY;
+ *  game.test.ts pins the two equal). docs/phases/P7.md, open item 22. */
+export const POSITION_VOCABULARY = "2026-10-28";
+
+const CLUSTER_SIGNALS = ["ol_cluster_count", "secondary_cluster_count"];
+
+export interface VocabularyNote {
+  /** The game has no cluster-count row of its own; the week's rows decided. Its counts
+   *  read "—", which may hide a team whose only flagged players were tackles or SAFs. */
+  noRows: boolean;
+  /** A Rams cluster-count row is missing too, where the old team-code mismatch (P8 D19)
+   *  kept it from being written. */
+  ramsMissing: boolean;
+}
+
+const predates = (r: { inputs_version: string }) => !r.inputs_version.includes("positions@");
+
+/** Whether this game's availability counts predate the position-code fix, from the rows'
+ *  own labels: a cluster-count row without a `positions@` label was counted with the old
+ *  code sets.
+ *  - The game's own rows decide when it has any.
+ *  - With none (both teams blank), the week's rows decide (`weekLabels`, Q6b): every
+ *    count that week was written by the same run.
+ *  null when every deciding row carries the label, or there is no row to decide from. */
+export function availabilityVocabularyNote(
+  rows: readonly { sector: string; game_id: string | null; team: string | null; signal: string; inputs_version: string }[],
+  teams: readonly string[],
+  weekLabels: readonly { team: string | null; inputs_version: string }[] = [],
+): VocabularyNote | null {
+  const counts = rows.filter(
+    (r) => r.sector === "availability" && r.game_id === null && r.team !== null && teams.includes(r.team) &&
+      CLUSTER_SIGNALS.includes(r.signal),
+  );
+  const deciding = counts.length ? counts : weekLabels;
+  if (!deciding.some(predates)) return null;
+  return {
+    noRows: counts.length === 0,
+    ramsMissing: teams.includes("LA") && !counts.some((r) => r.team === "LA"),
+  };
 }
 
 /** The Rank column shows only when some row in the table has a league_pct. */

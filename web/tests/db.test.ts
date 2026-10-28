@@ -137,6 +137,19 @@ describe("queries against real response shapes (fixtures)", () => {
     );
   });
 
+  it("Q6b weekClusterLabels reads only the week's cluster-count labels", async () => {
+    respond([{ team: "GB", inputs_version: "snap_counts@x" }]);
+    const rows = await db.weekClusterLabels(2026, 2);
+    expect(rows).toEqual([{ team: "GB", inputs_version: "snap_counts@x" }]);
+    const p = lastRequest().url.searchParams;
+    expect(lastRequest().url.pathname).toBe("/rest/v1/signals");
+    expect([p.get("season"), p.get("week"), p.get("sector"), p.get("game_id")]).toEqual([
+      "eq.2026", "eq.2", "eq.availability", "is.null",
+    ]);
+    expect(p.get("signal")).toBe("in.(ol_cluster_count,secondary_cluster_count)");
+    expect(p.get("select")).toBe("team,inputs_version");
+  });
+
   it.each([
     ["Q7 gamePlayerUsage", "player_usage", db.gamePlayerUsage, playerUsage, db.PLAYER_USAGE_COLUMNS],
     ["Q8 gamePlayerEff", "player_eff", db.gamePlayerEff, playerEff, db.PLAYER_EFF_COLUMNS],

@@ -1,6 +1,6 @@
 import { SnapCountsCredit } from "@/components/marks";
 import type { Card } from "@/lib/card";
-import { formatFixed, formatSpread } from "@/lib/format";
+import { formatFixed, formatOwnPct, formatSpread } from "@/lib/format";
 import { formatSignalValue, signalLabel } from "@/lib/signal-labels";
 
 // Model arithmetic (docs/phases/P6.md §5, §6). For each side: α + home field + β ×
@@ -26,7 +26,7 @@ function SideTable({ team, side, isHome }: { team: string; side: Side; isHome: b
             <th scope="col" className="num keep-case">β</th>
             <th scope="col" className="num">Contribution</th>
             <th scope="col" className="num">n</th>
-            <th scope="col" className="num">Stab</th>
+            <th scope="col" className="num">Own %</th>
           </tr>
         </thead>
         <tbody>
@@ -54,6 +54,7 @@ function SideTable({ team, side, isHome }: { team: string; side: Side; isHome: b
             <tr key={`${t.team}-${t.signal}`}>
               <th scope="row">
                 {t.team} {t.role === "offense" ? "offense" : "defense"} · {signalLabel(t.signal)}
+                {t.role === "offense" ? "" : " allowed"}
                 <span className="raw-name mono t-small ink-3"> {t.signal}</span>
               </th>
               <td className="num">{formatSignalValue(t.signal, t.value)}</td>
@@ -62,7 +63,7 @@ function SideTable({ team, side, isHome }: { team: string; side: Side; isHome: b
               <td className="num">{formatFixed(t.beta, 2)}</td>
               <td className="num" data-contribution>{formatFixed(t.contribution, 2)}</td>
               <td className="num">{t.sample_n ?? DASH}</td>
-              <td className="num">{formatFixed(t.stability, 2)}</td>
+              <td className="num">{formatOwnPct(t.stability)}</td>
             </tr>
           ))}
           <tr className="total-row">
@@ -81,10 +82,12 @@ export function Arithmetic({ card, projection }: { card: Card; projection: Proje
   const { home_team: home, away_team: away } = card.identity;
   const d = projection.decomposition;
   return (
-    <section className="section" aria-labelledby="arith-h">
-      <h2 id="arith-h" className="section-label t-cap">
-        How the model got there
-      </h2>
+    // Collapsed by default (docs/phases/P11.md, B); the projection it adds up to is in Lines.
+    <details className="section arithmetic" data-arithmetic>
+      <summary id="arith-h" className="section-label t-cap">
+        How the model got there · {home} {formatFixed(projection.pts_home, 1)}, {away}{" "}
+        {formatFixed(projection.pts_away, 1)}
+      </summary>
       <SideTable team={home} side={d.home} isHome />
       <SideTable team={away} side={d.away} isHome={false} />
       <p className="legend t-small ink-2 mono">
@@ -97,6 +100,6 @@ export function Arithmetic({ card, projection }: { card: Card; projection: Proje
         minus that week&apos;s league mean.
       </p>
       <SnapCountsCredit use="efficiency" />
-    </section>
+    </details>
   );
 }

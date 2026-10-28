@@ -30,6 +30,13 @@ export function formatFixed(x: number, decimals: number): string {
   return s.startsWith("-") ? MINUS + s.slice(1) : s;
 }
 
+/** A stability (0–1) as "Own %": the share of an estimate that is the unit's own plays,
+ *  not the league or group average filled in (docs/phases/P11.md, C2). One definition for
+ *  teams and players: `w_cur + w_prior` (docs/signals.md, "Prior blending"). */
+export function formatOwnPct(stability: number): string {
+  return `${formatFixed(stability * 100, 0)}%`;
+}
+
 /** An interval bound. Unlike formatFixed, a bound that rounds to zero but isn't zero keeps
  *  its sign and gets more decimals, up to four more, until a digit shows: "−0.0005", never
  *  a "0.000" that hides which side of zero it's on. Whether an interval excludes zero is

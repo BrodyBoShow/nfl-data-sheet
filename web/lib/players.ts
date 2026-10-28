@@ -13,7 +13,7 @@
 import minimums from "@/content/pct-minimums.json";
 
 import type { PlayerEff, PlayerUsage } from "./db";
-import { formatFixed } from "./format";
+import { formatFixed, formatOwnPct } from "./format";
 import type { SourceId } from "./sources";
 
 /** A provider credited at the column head. nflverse play-by-play and player stats are
@@ -41,8 +41,9 @@ export function formatPlayerValue(fmt: Fmt, v: number | null | undefined): strin
     case "yards":
     case "points":
       return formatFixed(v, 1);
-    case "seconds":
     case "stab":
+      return formatOwnPct(v);
+    case "seconds":
       return formatFixed(v, 2);
     case "count":
     case "rank":
@@ -131,9 +132,14 @@ export function headlineL4(family: Family, row: PlayerEff): number | null {
 }
 
 const STAB_TITLE =
-  "Stability (0–1): the share of this row's headline season value that is the player's own " +
+  "Own %: the share of this row's headline season value that is the player's own " +
   "plays, this season and last, rather than the position group's average. It covers the " +
   "headline column only: every other season column blends at its own rate.";
+
+/** The header label of a family's last-4 sample: the unit, never a bare "n" (P11 C4). */
+export function l4SampleLabel(family: Family): string {
+  return `L4 ${family.sample.label.toLowerCase()}`;
+}
 
 /** Marks, at the column head, a value that is a blended estimate rather than an observed
  *  rate (docs/signals.md, "Prior blend"): every player_eff_week `_std` metric, and the Pct
@@ -316,6 +322,37 @@ export function pctPopulation(family: Family, row: PlayerEff): string | null {
   return `${who} averaging ${n}+ ${PCT_UNIT[family.id]} per game played, through week ${row.week}`;
 }
 
+/** The row's percentile, or null when it isn't shown: no value, or no population to name. */
+export function shownPct(family: Family, row: PlayerEff): number | null {
+  return pctPopulation(family, row) === null ? null : ((row[family.headline.pct] as number | null) ?? null);
+}
+
+/** The Pos cell: the player's position, and the position group a percentile ranks within
+ *  when the two differ (an FB ranked among RBs). The row's own data, never the table's. */
+export function posLabel(row: { position: string | null; position_group: string | null }): string | null {
+  const { position, position_group: group } = row;
+  if (position === null) return group;
+  return group !== null && group !== position ? `${position} (${group})` : position;
+}
+
+/** The cohort caption of a family table, built from the rows it ranks (P11 A): each
+ *  position group present with its own minimum. The week is each row's Last wk. null
+ *  when no row is ranked. */
+export function cohortCaption(family: Family, rows: PlayerEff[]): string | null {
+  const groups = [
+    ...new Set(rows.filter((r) => shownPct(family, r) !== null).map((r) => r.position_group!)),
+  ].sort();
+  if (groups.length === 0) return null;
+  const parts = groups.map((g) => {
+    const min = pctMinimum(family.id, g);
+    return `${GROUP_PLURAL[g] ?? `${g} players`} ${formatFixed(min, Number.isInteger(min) ? 0 : 1)}+`;
+  });
+  return (
+    `Pct ranks each player within their position group (Pos), among players averaging ` +
+    `${parts.join(", ")} ${PCT_UNIT[family.id]} per game played, through the row's Last wk.`
+  );
+}
+
 // ---- Coverage history (participation _hist) --------------------------------------------
 
 export interface HistTable {
@@ -431,6 +468,70 @@ export function histRows(eff: PlayerEff[], team: string, table: HistTable): Play
   return eff
     .filter((r) => r.team === team && r[table.n.key] !== null)
     .sort(byVolume((r) => r[table.n.key] as number | null));
+}
+
+// ---- Default visibility (docs/phases/P11.md, B) ------------------------------------------
+//
+// A player shows by default when the analyst ranked them in some family: their headline
+// percentile is shown. That's the analyst's own per-game-played minimum, read from the
+// row, not re-derived here. So the shown set and the ranked set are the same players.
+// Defense isn't split: its headline percentile is gated null for everyone (P7 step 7),
+// and the ungated defense percentiles aren't granted to the web yet (P11 slice 5).
+
+export const RANKED_FAMILIES: Family[] = FAMILIES.filter((f) => f.id !== "defense");
+
+export interface FamilySplit {
+  shown: PlayerEff[];
+  /** Not ranked, with a position group: below the family's minimum per game played. */
+  belowMinimum: PlayerEff[];
+  /** No position group: a percentile can't be labeled, so it's withheld. */
+  noGroup: PlayerEff[];
+}
+
+export function splitFamilyRows(eff: PlayerEff[], team: string, family: Family): FamilySplit {
+  const rows = familyRows(eff, team, family);
+  return {
+    shown: rows.filter((r) => shownPct(family, r) !== null),
+    belowMinimum: rows.filter((r) => shownPct(family, r) === null && r.position_group !== null),
+    noGroup: rows.filter((r) => r.position_group === null),
+  };
+}
+
+export interface RoleSplit {
+  shown: PlayerUsage[];
+  /** Offensive linemen: no family ranks them, so they get their own collapsed line. */
+  offensiveLine: PlayerUsage[];
+  /** Everyone else not ranked in passing, rushing or receiving. A usage row with no
+   *  efficiency row (no family sample) lands here too, as "not ranked", never as zero. */
+  hidden: PlayerUsage[];
+}
+
+export function splitRoleRows(usage: PlayerUsage[], eff: PlayerEff[], team: string): RoleSplit {
+  const ranked = (u: PlayerUsage) => {
+    const e = eff.find((x) => x.player_id === u.player_id);
+    return e !== undefined && RANKED_FAMILIES.some((f) => shownPct(f, e) !== null);
+  };
+  const rows = roleRows(usage, team);
+  return {
+    shown: rows.filter(ranked),
+    offensiveLine: rows.filter((r) => !ranked(r) && r.position_group === "OL"),
+    hidden: rows.filter((r) => !ranked(r) && r.position_group !== "OL"),
+  };
+}
+
+/** "QB 1, RB 2, WR 3": hidden rows by position group, in that order; "no group" last. */
+export function countByGroup(rows: { position_group: string | null }[]): string {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const g = r.position_group ?? "no group";
+    counts.set(g, (counts.get(g) ?? 0) + 1);
+  }
+  const order = [...Object.keys(GROUP_PLURAL), "no group"];
+  const rank = (g: string) => (order.includes(g) ? order.indexOf(g) : order.length - 1);
+  return [...counts]
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(([g, n]) => `${g} ${n}`)
+    .join(", ");
 }
 
 /** The defense snap share comes from the usage row; it's shown only when that row is as

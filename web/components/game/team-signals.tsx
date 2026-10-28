@@ -36,7 +36,7 @@ export function TeamSignals({ rows, home, away }: { rows: SignalRowT[]; home: st
             {signals.map((s) => (
               <tr key={s}>
                 <th scope="row" className="sticky">
-                  {signalLabel(s)} ({s.endsWith("_off") ? "offense" : "defense"})
+                  {signalLabel(s)} ({s.endsWith("_off") ? "offense" : "defense, allowed"})
                   <span className="raw-name mono t-small ink-3"> {s}</span>
                 </th>
                 <UnitCells u={get(away, s)} showPct={showPct} />

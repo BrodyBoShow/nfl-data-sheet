@@ -30,16 +30,26 @@ import {
   BLEND_MARK,
   FAMILIES,
   HIST_TABLES,
+  RANKED_FAMILIES,
   ROLE_GROUPS,
   TACKLE_L4_MIN_DEF_SNAPS,
   TAGS,
   colLabel,
+  countByGroup,
+  familyRows,
   formatPlayerValue,
   formatSeasons,
   headlineL4,
+  histRows,
+  l4SampleLabel,
   parseSpan,
   pctMinimum,
   pctPopulation,
+  posLabel,
+  roleRows,
+  shownPct,
+  splitFamilyRows,
+  splitRoleRows,
   type Tag,
 } from "../lib/players";
 import { SOURCES } from "../lib/sources";
@@ -92,6 +102,7 @@ vi.mock("../lib/db", async (importOriginal) => {
       return row ? { ...row, card: parseCard(row.card) } : null;
     },
     gameSignals: async () => signals,
+    weekClusterLabels: async () => [],
   };
 });
 
@@ -550,14 +561,21 @@ const section = (html: string) => /<section[^>]*data-players[\s\S]*?<\/section>/
 const renderSection = (usage = USAGE, eff = EFF, teamSection: string | null = "Efficiency matchups") =>
   render(PlayersSection({ usage, eff, home: "GB", away: "ATL", asOfWeek: 2, teamSection })!);
 const tables = (html: string) => [...html.matchAll(/<table[^>]*data-family="([^"]+)"[\s\S]*?<\/table>/g)];
-/** Each table's player order, keyed by offense team and table. */
-function rowOrder(html: string): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+/** Every player table in document order, with its block's offense team and family. A
+ *  family can have two tables (shown, and the hidden rows under it). */
+function playerTables(html: string): { offense: string; family: string; ids: string[]; html: string }[] {
+  const out: { offense: string; family: string; ids: string[]; html: string }[] = [];
   for (const block of html.matchAll(/data-offense="([A-Z]+)"[\s\S]*?(?=data-offense=|$)/g)) {
     for (const t of tables(block[0])) {
-      out[`${block[1]}/${t[1]}`] = [...t[0].matchAll(/<tr data-row="([^"]+)"/g)].map((m) => m[1]!);
+      out.push({ offense: block[1]!, family: t[1]!, ids: [...t[0].matchAll(/<tr data-row="([^"]+)"/g)].map((m) => m[1]!), html: t[0] });
     }
   }
+  return out;
+}
+/** Each family's player order, keyed by offense team and table, shown then hidden. */
+function rowOrder(html: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const t of playerTables(html)) out[`${t.offense}/${t.family}`] = [...(out[`${t.offense}/${t.family}`] ?? []), ...t.ids];
   return out;
 }
 /** Column headers with their data-tags, by visible label (source tags stripped). */
@@ -699,13 +717,16 @@ describe("players section", () => {
     expect(headers(html).some((h) => h.label === pctLabel)).toBe(true);
   });
 
-  it("8. row order is unchanged when percentiles are shuffled", () => {
+  it("8. row order is by role, never by percentile", () => {
+    // P11 slice 1: whether a row is shown by default depends on whether it HAS a percentile
+    // (the analyst ranked it), never on the percentile's value. So:
+    // - inverting every percentile (p → 100 − p) changes no table's rows or order at all;
+    // - moving percentiles between rows can move rows between shown and hidden, but every
+    //   table, shown or hidden, stays in role order (the family's volume order).
     const base = rowOrder(renderSection());
     expect(Object.keys(base).length).toBeGreaterThanOrEqual(8);
     const pctKeys = Object.keys(EFF[0]!).filter((k) => k.endsWith("_pct")) as (keyof PlayerEff)[];
     expect(pctKeys.length).toBeGreaterThanOrEqual(3);
-    // Two permutations that would reorder any table sorted or ranked by percentile: each
-    // row takes the percentiles of its mirror row, or its own inverted (p → 100 − p).
     const shuffled = (invert: boolean) =>
       EFF.map((r, i) => {
         const out = { ...r } as Record<string, unknown>;
@@ -715,10 +736,26 @@ describe("players section", () => {
         }
         return out as unknown as PlayerEff;
       });
-    expect(rowOrder(renderSection(USAGE, shuffled(false)))).toEqual(base);
     expect(rowOrder(renderSection(USAGE, shuffled(true)))).toEqual(base);
     // The shuffle is real: the rendered percentiles changed.
     expect(renderSection(USAGE, shuffled(true))).not.toEqual(renderSection());
+
+    const other = (team: string) => (team === "GB" ? "ATL" : "GB");
+    const roleOrder = (eff: PlayerEff[], offense: string, family: string): string[] => {
+      const f = FAMILIES.find((x) => x.id === family);
+      if (family === "role") return roleRows(USAGE, offense).map((r) => r.player_id);
+      if (f) return familyRows(eff, f.id === "defense" ? other(offense) : offense, f).map((r) => r.player_id);
+      const h = HIST_TABLES.find((x) => `hist-${x.id}` === family)!;
+      return histRows(eff, offense, h).map((r) => r.player_id);
+    };
+    for (const eff of [EFF, shuffled(false), shuffled(true)]) {
+      const ts = playerTables(renderSection(USAGE, eff));
+      expect(ts.length).toBeGreaterThanOrEqual(8);
+      for (const t of ts) {
+        const order = roleOrder(eff, t.offense, t.family);
+        expect(t.ids, `${t.offense}/${t.family}`).toEqual(order.filter((id) => t.ids.includes(id)));
+      }
+    }
   });
 
   it("9. a missing value renders —, a sourced zero renders 0", () => {
@@ -822,47 +859,77 @@ describe("players section", () => {
       return { html, out };
     };
 
+    // P11 slice 1: the population isn't a 56-character string on every row any more. Each
+    // part of it is still in the row's own cells: the group in Pos, the week in Last wk, and
+    // the group's minimum in the caption under the table, built from the ranked rows. The
+    // full population rides on the Pct cell (data-pct-population, and its title).
+    const attr = (tr: string) => /data-pct-population="([^"]*)"/.exec(tr)?.[1];
+    const lastWk = (tr: string) => /data-last-week="(\d+)"/.exec(tr)?.[1];
+    const pos = (tr: string) => text(/<td[^>]*data-pos[^>]*>([\s\S]*?)<\/td>/.exec(tr)![1]!);
+
     const { html, out } = ranked(EFF);
     let shown = 0;
     for (const { f, row, tr } of out) {
-      const pct = row[f.headline.pct] as number | null;
-      if (!tr.includes("data-pct-population")) {
-        expect(pct, `${f.id} ${row.player_id}`).toBeNull(); // no Pct column: defense
-        continue;
-      }
+      const pct = shownPct(f, row);
       if (pct === null) {
-        expect(cellOf(tr, "pct_population"), row.player_id).toBe("—");
+        expect(attr(tr), `${f.id} ${row.player_id}`).toBeUndefined();
         continue;
       }
       shown++;
       expect(cellOf(tr, f.headline.pct)).toBe(formatPlayerValue("rank", pct));
-      const population = cellOf(tr, "pct_population");
+      const population = normalize(attr(tr)!);
       expect(population).toBe(normalize(pctPopulation(f, row)!));
+      expect(tr).toContain(`title="Ranked among ${pctPopulation(f, row)}"`);
       // The row's own group, its family's minimum for that group, and the row's own week.
       expect(population).toContain(`${pctMinimum(f.id, row.position_group!)}+`);
       expect(population).toMatch(new RegExp(`through week ${row.week}$`));
+      expect(lastWk(tr)).toBe(String(row.week));
+      expect(pos(tr)).toBe(normalize(posLabel(row)!));
+      expect(pos(tr)).toContain(normalize(row.position_group!));
     }
     expect(shown).toBeGreaterThanOrEqual(5);
+    // Defense shows no percentile at all (test 7), so every ranked row is offense.
+    expect(out.filter((o) => o.f.id === "defense").every((o) => attr(o.tr) === undefined)).toBe(true);
+
+    // Each family's caption names every ranked group's minimum, read from the rows.
+    for (const wrap of html.matchAll(/data-family-wrap="([a-z]+)"[\s\S]*?(?=data-family-wrap=|data-coverage-history|$)/g)) {
+      const f = FAMILIES.find((x) => x.id === wrap[1])!;
+      const cohort = /<p[^>]*data-cohort[^>]*>([\s\S]*?)<\/p>/.exec(wrap[0])?.[1];
+      const groups = new Set(
+        [...wrap[0].matchAll(/data-pct-population="([^"]*)"/g)].map((m) => m[1]!.split(" averaging")[0]!),
+      );
+      if (groups.size === 0) {
+        expect(cohort, f.id).toBeUndefined();
+        continue;
+      }
+      const c = normalize(cohort!);
+      expect(c).toContain("pct ranks each player within their position group (pos)");
+      expect(c).toContain("through the row's last wk");
+      for (const g of groups) expect(c, `${f.id} ${g}`).toContain(normalize(g));
+    }
 
     // Two rows of one table from different weeks name different populations.
     const target = out.find(
-      (o) =>
-        o.f.id === "receiving" &&
-        o.tr.includes("data-pct-population") &&
-        o.row.epa_per_target_pct !== null &&
-        o.row.week === 2,
+      (o) => o.f.id === "receiving" && shownPct(o.f, o.row) !== null && o.row.week === 2,
     )!;
     expect(target).toBeDefined();
     const moved = EFF.map((r) => (r.player_id === target.row.player_id ? { ...r, week: 1 } : r));
     const after = ranked(moved).out.find((o) => o.f.id === "receiving" && o.row.player_id === target.row.player_id)!;
-    expect(cellOf(after.tr, "pct_population")).toMatch(/through week 1$/);
-    expect(cellOf(target.tr, "pct_population")).not.toMatch(/through week 1$/);
+    expect(attr(after.tr)).toMatch(/through week 1$/);
+    expect(lastWk(after.tr)).toBe("1");
+    expect(attr(target.tr)).not.toMatch(/through week 1$/);
 
-    // A row that can't name its population has its percentile withheld, not shown bare.
+    // A row that can't name its population has its percentile withheld, not shown bare:
+    // it moves to the hidden rows, counted as having no position group.
     const noGroup = EFF.map((r) => (r.player_id === target.row.player_id ? { ...r, position_group: null } : r));
+    const bareHtml = renderSection(USAGE, noGroup);
     const bare = ranked(noGroup).out.find((o) => o.f.id === "receiving" && o.row.player_id === target.row.player_id)!;
-    expect(cellOf(bare.tr, "epa_per_target_pct")).toBe("—");
-    expect(cellOf(bare.tr, "pct_population")).toBe("—");
+    expect(attr(bare.tr)).toBeUndefined();
+    expect(bare.tr).not.toContain(`data-col="epa_per_target_pct"`);
+    const hiddenRec = /<details[^>]*data-hidden-rows="receiving"[\s\S]*?<\/details>/g;
+    const holding = [...bareHtml.matchAll(hiddenRec)].find((m) => m[0].includes(`data-row="${target.row.player_id}"`));
+    expect(holding, "hidden receiving rows").toBeDefined();
+    expect(text(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(holding![0])![1]!)).toContain("1 with no position group");
 
     // Known wording, and the minimums are the analyst's (pinned by the parser test below).
     expect(pctPopulation(FAMILIES.find((f) => f.id === "receiving")!, { ...target.row, position_group: "WR", week: 2 })).toBe(
@@ -877,6 +944,96 @@ describe("players section", () => {
       "there is no single population behind pct",
     );
     expect(html).not.toContain("League percentile within the position group");
+    expect(headers(html).map((h) => h.label)).not.toContain("ranked among");
+  });
+
+  it("19. shown by default = ranked by the analyst; every other row is counted, never dropped", () => {
+    // docs/phases/P11.md, B. Read from the rows' own percentiles, not re-derived.
+    const html = renderSection();
+    const ts = playerTables(html);
+    const detailsOf = (kind: string) => [...html.matchAll(new RegExp(`<details[^>]*data-hidden-rows="${kind}"[\\s\\S]*?</details>`, "g"))].map((m) => m[0]);
+    const idsIn = (h: string) => [...h.matchAll(/<tr data-row="([^"]+)"/g)].map((m) => m[1]!);
+    const summary = (h: string) => text(/<summary[^>]*>([\s\S]*?)<\/summary>/.exec(h)![1]!);
+    let hiddenSeen = 0;
+    for (const team of ["GB", "ATL"]) {
+      const block = html.slice(html.indexOf(`data-offense="${team}"`)).split(/data-offense=/)[1]!;
+      // Offense families: the open table holds exactly the ranked rows.
+      for (const f of RANKED_FAMILIES) {
+        const split = splitFamilyRows(EFF, team, f);
+        const wrap = new RegExp(`data-family-wrap="${f.id}"[\\s\\S]*?(?=data-family-wrap=|data-coverage-history|$)`).exec(block)?.[0] ?? "";
+        const open = wrap.replace(/<details[\s\S]*?<\/details>/g, "");
+        expect(idsIn(open), `${team} ${f.id} shown`).toEqual(split.shown.map((r) => r.player_id));
+        for (const r of split.shown) expect(shownPct(f, r), r.player_id).not.toBeNull();
+        const rest = [...split.belowMinimum, ...split.noGroup];
+        const hidden = /<details[^>]*data-hidden-rows[\s\S]*?<\/details>/.exec(wrap)?.[0];
+        if (rest.length === 0) {
+          expect(hidden, `${team} ${f.id}`).toBeUndefined();
+          continue;
+        }
+        hiddenSeen += rest.length;
+        expect(hidden).not.toMatch(/^<details[^>]*\bopen\b/);
+        expect(idsIn(hidden!).sort()).toEqual(rest.map((r) => r.player_id).sort());
+        expect(summary(hidden!)).toContain(normalize(`${rest.length} ${team} player${rest.length === 1 ? "" : "s"} in ${f.title} not ranked`));
+      }
+      // Role: ranked in any offense family → open; OL → its own line; the rest → counted.
+      const role = splitRoleRows(USAGE, EFF, team);
+      const roleOpen = ts.find((t) => t.offense === team && t.family === "role" && !/data-hidden-rows/.test(block.slice(0, block.indexOf(t.html))))!;
+      expect(roleOpen.ids).toEqual(role.shown.map((r) => r.player_id));
+      const ol = detailsOf("offensive-line").find((d) => d.includes(`${team} offensive line`));
+      if (role.offensiveLine.length) {
+        expect(summary(ol!)).toBe(normalize(`${team} offensive line · ${role.offensiveLine.length} players · snap %`));
+        expect(idsIn(ol!)).toEqual(role.offensiveLine.map((r) => r.player_id));
+      }
+      const others = detailsOf("role").find((d) => idsIn(d).every((id) => role.hidden.some((r) => r.player_id === id)) && idsIn(d).length > 0);
+      if (role.hidden.length) {
+        expect(summary(others!)).toBe(
+          normalize(
+            `${role.hidden.length} ${team} player${role.hidden.length === 1 ? "" : "s"} not ranked in passing, rushing or receiving · ${countByGroup(role.hidden)}`,
+          ),
+        );
+      }
+      // Nothing dropped: shown + OL + hidden is every role row.
+      expect([...role.shown, ...role.offensiveLine, ...role.hidden].map((r) => r.player_id).sort()).toEqual(
+        roleRows(USAGE, team).map((r) => r.player_id).sort(),
+      );
+    }
+    expect(hiddenSeen).toBeGreaterThan(0);
+
+    // Missing row ≠ NULL: a usage row with no efficiency row isn't shown and isn't lost. It's
+    // counted with the not-ranked rows (CLAUDE.md, "Missing row ≠ NULL column").
+    const wr = USAGE.find((r) => r.team === "GB" && r.position_group === "WR")!;
+    const ghost = { ...wr, player_id: "00-ghost", display_name: "No Eff Row" };
+    const withGhost = renderSection([...USAGE, ghost], EFF);
+    const ghostDetails = [...withGhost.matchAll(/<details[^>]*data-hidden-rows="role"[\s\S]*?<\/details>/g)].map((m) => m[0]);
+    expect(ghostDetails.some((d) => d.includes('data-row="00-ghost"'))).toBe(true);
+    expect(splitRoleRows([...USAGE, ghost], EFF, "GB").hidden.map((r) => r.player_id)).toContain("00-ghost");
+
+    // Defense: collapsed whole, every row inside, none hidden by a rule it can't apply.
+    const def = FAMILIES.find((f) => f.id === "defense")!;
+    for (const m of html.matchAll(/<details[^>]*class="[^"]*players-defense[^"]*"[^>]*>[\s\S]*?<\/details>/g)) {
+      expect(m[0]).not.toMatch(/^<details[^>]*\bopen\b/);
+      const team = /<caption[^>]*>([A-Z]+) defense/.exec(m[0])![1]!;
+      expect(idsIn(m[0])).toEqual(familyRows(EFF, team, def).map((r) => r.player_id));
+    }
+
+    // The legend says what's shown and that the rest is counted.
+    expect(text(/<p[^>]*data-visibility-legend[^>]*>([\s\S]*?)<\/p>/.exec(html)![1]!)).toContain(
+      "shown by default: the players ranked in passing, rushing or receiving",
+    );
+  });
+
+  it("20. a sample names its unit and stability reads Own %: no bare 'L4 n', no 'Stab'", () => {
+    const html = renderSection();
+    const labels = headers(html).map((h) => h.label);
+    expect(labels).not.toContain("l4 n");
+    expect(labels.some((l) => /^stab\b/.test(l))).toBe(false);
+    for (const f of FAMILIES) expect(labels, f.id).toContain(normalize(l4SampleLabel(f)));
+    expect(FAMILIES.map(l4SampleLabel)).toEqual(["L4 dropbacks", "L4 carries", "L4 targets", "L4 snaps"]);
+    expect(labels).toContain("own %");
+    expect(labels).toContain("own % ‡");
+    // Own % is the stored stability as a percent, nothing else.
+    const r = EFF.find((e) => e.rec_stability !== null)!;
+    expect(formatPlayerValue("stab", r.rec_stability)).toBe(`${Math.round(r.rec_stability! * 100)}%`);
   });
 
   it("14. the percentile minimums are parsed from the analyst's own constants", () => {
