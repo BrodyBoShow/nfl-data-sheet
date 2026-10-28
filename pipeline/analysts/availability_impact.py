@@ -44,8 +44,8 @@ _REDISTRIBUTION_POSITIONS = {"WR", "RB", "TE", "FB"}
 # the data it filters").
 _OTHER_POSITIONS = {"QB", "DE", "DT", "NT", "DL", "LB", "OLB", "ILB", "MLB", "K", "P", "LS"}
 # Names the vocabulary above in inputs_version, so a stored row says which code sets
-# counted it. Rows without it were written before 2026-10-27 and counted no OT, SAF or FB.
-_POSITION_VOCABULARY = "2026-10-27"
+# counted it. Rows without it were written before 2026-10-28 and counted no OT, SAF or FB.
+_POSITION_VOCABULARY = "2026-10-28"
 
 # injuries.designation mixes real injury statuses with non-injury unavailability
 # shorthand in the same free-text field -- verified live (docs/sources.md): Sleeper's

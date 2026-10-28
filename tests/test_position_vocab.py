@@ -28,7 +28,7 @@ def test_check_fails_on_a_code_no_set_knows() -> None:
 
 
 def test_check_fails_on_a_set_code_the_data_lacks() -> None:
-    """The sets before 2026-10-27: "T" and "SS" matched no player, and "OT"/"SAF"/"FB"
+    """The sets before 2026-10-28: "T" and "SS" matched no player, and "OT"/"SAF"/"FB"
     were in no set. Both directions fail."""
     old = {
         "ol": {"C", "G", "T", "OL"},

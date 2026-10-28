@@ -284,7 +284,7 @@ def test_build_flagged_positions_drops_unknown_position():
 
 def test_compute_cluster_counts_buckets_ol_and_secondary_separately():
     # "OT" and "SAF" are what players.position actually says (P7 open item 22, rows 1-2).
-    # This test used "T" until 2026-10-27, a code no player has, so it passed while no
+    # This test used "T" until 2026-10-28, a code no player has, so it passed while no
     # offensive tackle was ever counted.
     flagged_positions = [
         {"team": "KC", "position": "OT"},

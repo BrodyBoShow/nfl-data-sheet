@@ -20,6 +20,6 @@ these. The fit-input hash (`model.fit_inputs_hash`) catches those.
 TEAM_INPUTS_DEFINITION = "2026-09-30.try-plays-excluded"
 
 # pipeline/analysts/efficiency.py as a whole: how those tables become signals.
-# 2026-10-27: 2020's combined O-line snap codes in _OL_SNAP_POSITIONS (docs/phases/P7.md,
+# 2026-10-28: 2020's combined O-line snap codes in _OL_SNAP_POSITIONS (docs/phases/P7.md,
 # open item 22, row 3).
-EFFICIENCY_DEFINITION = "2026-10-27.ol-combo-codes"
+EFFICIENCY_DEFINITION = "2026-10-28.ol-combo-codes"

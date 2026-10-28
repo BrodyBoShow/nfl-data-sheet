@@ -1,6 +1,6 @@
 name: ci
 
-# The pipeline's checks on every push and pull request. Until 2026-10-27 nothing ran them
+# The pipeline's checks on every push and pull request. Until 2026-10-28 nothing ran them
 # outside a local session; the web has its own build on Vercel. Added for the position
 # vocabulary check (docs/phases/P7.md, open item 22), which has to fail a build, not
 # just log: a set that matches nothing produces no error, only missing rows.

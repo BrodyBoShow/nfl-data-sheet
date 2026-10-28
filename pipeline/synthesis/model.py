@@ -46,7 +46,7 @@ from pipeline.core.team_aliases import normalize_team_abbr
 
 # p5-v2 (2026-09-30): the re-fit on signals rebuilt with try plays excluded and the QB/OL
 # discounts firing, and the first version whose model file carries `fit_inputs_hash`.
-# p5-v3 (2026-10-27): the re-fit on 2020-2021 signals rebuilt with 2020's combined O-line
+# p5-v3 (2026-10-28): the re-fit on 2020-2021 signals rebuilt with 2020's combined O-line
 # snap codes counted (docs/phases/P7.md, open item 22, row 3).
 MODEL_VERSION = "p5-v3"
 
