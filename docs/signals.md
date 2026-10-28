@@ -25,6 +25,34 @@ Unique on (`season`, `week`, `game_id`, `team`, `player_id`, `sector`, `signal`)
 nulls handled deliberately (`NULLS NOT DISTINCT` or coalesced keys). Upserts replace the
 latest value.
 
+### Comparing `real` columns: read them one way (recorded 2026-10-28)
+
+`stability` and `league_pct` are `real` (float4). Every read path widens a float4 to a
+float64 differently, so one stored value has several float64 forms:
+
+| Read path | One stored value reads as |
+|---|---|
+| `stability::float8` in SQL | 0.12300000339746475 |
+| psycopg, no cast (float4's text form, ~6 significant digits on this connection) | 0.123 |
+| A fresh compute rounded through float32 (e.g. a parquet from a scratch recompute) | 0.12300000339746475 |
+
+Production is consistent: every pipeline read uses the uncast psycopg path. A comparison
+script isn't, unless it says which form each side holds:
+- **Stored vs stored:** read both sides the same way. Equality is then exact.
+- **Stored vs a fresh compute:** compare with a tolerance of about 1e-6. The 6-digit read
+  is up to 5.3e-7 from the float32.
+- **Never mix forms inside one column.** A frame holding some rows in one form and some in
+  the other turns ties into near-ties. Sorts, quantiles and `<` cutpoints then split them.
+
+Collisions so far, all in comparison code, none in production:
+- `fit_inputs_hash` leaves `stability` out (`pipeline/synthesis/model.py`, its
+  docstring): 7,003 of 7,936 rows differ from a recompute even at float4 precision.
+- `scripts/report_ol_backfill.py`'s preflight first compared a float8 cast against the
+  snapshot's 6-digit read. 44,204 rows falsely differed.
+- The 10-19 O-line measurement's patched parquet mixed forms. Its lower stability
+  cutpoint came out 8e-8 above two tied games, which put them in the wrong bucket
+  (`docs/phases/P7.md`, Phase B, B4).
+
 ## Player tables (P7): the one exception to the single shape
 
 **Everything team- or game-level lives in `signals`, in the shape above. That includes

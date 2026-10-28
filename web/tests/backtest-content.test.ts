@@ -56,7 +56,7 @@ describe("buildSummary on the committed report", () => {
 describe("the report for /method", () => {
   it("reads its provenance and win-rate tables", () => {
     const s = summarize();
-    expect(s.report).toEqual({ script: "scripts/backtest.py", generated_utc: "2026-09-30 22:48" });
+    expect(s.report).toEqual({ script: "scripts/backtest.py", generated_utc: "2026-10-28 02:14" });
     expect(s.win_rates).toHaveLength(10);
     expect(Math.max(...s.win_rates.map((b) => b.rate))).toBe(0.526);
     expect(s.win_rates.find((b) => b.rate === 0.526)).toMatchObject({ market: "spread", bucket: "2–3", decided: 287, wins: 151 });

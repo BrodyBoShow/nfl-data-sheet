@@ -408,7 +408,12 @@ function checkCorrection(html: string, earlier: BacktestSummary, now: BacktestSu
     `until ${now.report.generated_utc.slice(0, 10)}, every backtest figure on this page and in the line ` +
       "at the top of every page was computed with an offensive-line continuity input that was wrong for " +
       "some teams in 2020 and 2021",
-    "the input was wrong in 119 of 672 team-weeks in 2020 and 172 of 704 in 2021",
+    // The production count from the Efficiency runs' own meta (P7 Phase B, B2), with its
+    // unit. The 10-16 count it replaced couldn't be reproduced, and the page says so.
+    "the input was wrong in 75 of 544 team-weeks in 2020 and 132 of 576 in 2021, counting the " +
+      "regular-season weeks the model's fit reads",
+    "until 2026-10-28 this said 119 of 672 and 172 of 704: a count from a script that wasn't kept, which " +
+      "can't be reproduced",
     "so it reached every out-of-sample season, and the coefficients and stability buckets today's " +
       "projections use",
     `the model refit (${earlier.model_version} to ${now.model_version}), and the backtest rerun`,

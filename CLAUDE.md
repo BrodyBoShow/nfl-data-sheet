@@ -77,6 +77,10 @@ graph and layer rules: `docs/architecture.md`. Phase specs: `docs/phases/P1.md`â
 
 ## Data contracts
 - `signals` table shape and the signal registry: `docs/signals.md`
+  - `stability`/`league_pct` are `real`. A float8 cast, psycopg's 6-digit text read and a
+    float32 recompute give different float64s for one stored value. Any script comparing
+    them follows `docs/signals.md`, "Comparing `real` columns", and never mixes forms in
+    one column.
 - Player tables (`player_usage_week`, `player_eff_week`): one as-of row per player-week
   holding `_std`/`_game`/`_l4`/`_pct` per metric. Contract in `docs/signals.md`, "Player
   tables". Participation-derived values end in `_hist` and are multi-season history,
@@ -211,6 +215,19 @@ web/                      # Phase 6+
     the check has to run against the live column: `scripts/verify_position_vocab.py`, in
     CI and after every dispatcher tick (`docs/phases/P7.md`, open item 22). The sharpest
     instance.
+
+- **A figure that reaches a public page is reproducible from a kept script.** Measuring
+  it once isn't enough. The script that produced it is committed, or the figure isn't
+  published. The rules above govern whether a number was measured. This one governs
+  whether it can be measured again. Founding instance, 2026-10-28:
+  - /method said the O-line input "was wrong in 119 of 672 team-weeks in 2020 and 172 of
+    704 in 2021". Those figures came from a 10-16 scratch script that wasn't kept.
+  - Nine days later nobody could reproduce them, and their unit had only ever been
+    inferred from the totals. A different, production count replaced them (75 of 544 and
+    132 of 576), as a correction (`docs/phases/P7.md`, Phase B, B2).
+  - By contrast, `scripts/measure_ol_codes.py` and `scripts/report_ol_backfill.py` are
+    committed, which is why the 10-19 and 10-28 numbers survive and could be checked
+    against each other.
 
 ## Agent scoping (one file, one job)
 - One collector per source family, one analyst per sector â€” never combine two sources or

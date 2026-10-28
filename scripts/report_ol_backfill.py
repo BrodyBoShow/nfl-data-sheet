@@ -195,6 +195,9 @@ def after(since: dt.datetime) -> int:
     dv = _max_abs(pj["value_post"] - pj["value"])
     ds = _max_abs(pj["stability_post"] - pj["stability"])
     parity_ok = missing == 0 and dv <= PARITY_TOL and ds <= STAB_TOL
+    in_fit = changed.join(patched.select(KEY), on=KEY, how="semi").height
+    print(f"\nChanged rows among the measurement's signals: {in_fit} of {patched.height} "
+          "(10-19 trace: 7,936)")
     print(f"\n== 2. Parity with the measurement's patched signals ({patched.height} rows, "
           f"2020-2021): missing {missing}, max |dvalue| {dv:.2e} (tol {PARITY_TOL:g}), "
           f"max |dstab| {ds:.2e} (tol {STAB_TOL:g}) -> "

@@ -25,8 +25,10 @@ export function Correction({ earlier, now }: { earlier: BacktestSummary; now: Ba
         Until {now.report.generated_utc.slice(0, 10)}, every backtest figure on this page and in the line at the
         top of every page was computed with an offensive-line continuity input that was wrong for some teams in
         2020 and 2021. The 2020 snap counts label some linemen with combined codes such as G/T and C/G, and the
-        ratings didn&apos;t recognize them, so those linemen were left out. The input was wrong in 119 of 672
-        team-weeks in 2020 and 172 of 704 in 2021.
+        ratings didn&apos;t recognize them, so those linemen were left out. The input was wrong in 75 of 544
+        team-weeks in 2020 and 132 of 576 in 2021, counting the regular-season weeks the model&apos;s fit reads.
+        Until 2026-10-28 this said 119 of 672 and 172 of 704: a count from a script that wasn&apos;t kept, which
+        can&apos;t be reproduced. The new count comes from the rating runs&apos; own logs.
       </p>
       <p>
         The input measures how much of a team&apos;s offensive line returned from the year before. It sets how
