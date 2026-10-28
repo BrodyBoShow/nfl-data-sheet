@@ -3,7 +3,7 @@ import type { SignalRowT } from "@/lib/db";
 import { anyLeaguePct, isLowStability } from "@/lib/game";
 import { signalLabel } from "@/lib/signal-labels";
 
-import { LowStabilityNote, UnitCells, UnitHeads } from "./signal-cells";
+import { LowStabilityNote, PctNote, UnitCells, UnitHeads } from "./signal-cells";
 
 // Games without a card (P6.md §3): the efficiency signals entering the week, one row per
 // signal with both teams side by side. This is a display grouping of Q6 rows by team,
@@ -46,6 +46,7 @@ export function TeamSignals({ rows, home, away }: { rows: SignalRowT[]; home: st
           </tbody>
         </table>
       </div>
+      <PctNote show={showPct} />
       <LowStabilityNote show={eff.some((r) => r.value !== null && isLowStability(r.stability))} />
       <SnapCountsCredit use="efficiency" />
     </section>

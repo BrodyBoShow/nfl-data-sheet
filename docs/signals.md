@@ -345,6 +345,24 @@ on `opponent_team` for the opponent-adjustment solve. **Added:** Phase 2, 2026.
     `points_per_drive`/`three_and_out_rate`/`red_zone_td_rate` (see the drive-scope note
     below) — one definition, not two.
 
+**`league_pct` (written from 2026 week 8, P11 slice 2, 2026-10-28):** each team's
+percentile among every team with a value, per signal, in the run's (season, week).
+- **Formula:** `round(100 × (below + 0.5 × equal) / population)`. It's the same definition
+  as the player tables' `_pct` (`pipeline/core/percentile.py`, shared). Polars rounds
+  halves to even (measured, polars 1.44).
+- **Direction-neutral:** a high `epa_per_play_def` pct allows more. The web orients it
+  per unit (`web/lib/signal-labels.ts`, `goodDirection`).
+- **Not a fit input.** `fit_inputs_hash` covers `(season, week, team, signal, value)`, so
+  adding it moved no fingerprint and no hash. `EFFICIENCY_DEFINITION` keeps its label, and
+  only its digest was re-pinned.
+- **A whole number, so the `real` column holds it exactly** (see "Comparing `real`
+  columns" above).
+- **Weeks 1–7 of 2026 and every backfilled season have it null.** Those rows were
+  written before it existed. The next backfill fills them; nothing else does.
+- **The card carries it** on every pairing brief and decomposition term (synthesizer
+  `_brief` and `_projection_block`). `card_version` stays 1, because the field is
+  optional on the web.
+
 No down-split explosive-rate signals exist — `team_week` has no
 `down{1-4}_explosive_count` column, so none is fabricated.
 

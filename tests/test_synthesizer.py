@@ -331,6 +331,24 @@ def test_pair_unit_signals_team_subject():
     assert pairs[0]["opponent"]["team"] == "KC"
 
 
+def test_card_carries_league_pct_on_pairings_and_model_terms():
+    """P11 slice 2: Efficiency's league_pct reaches the card on every brief and every
+    decomposition term, so the page's Pct column has it for the model's input too. A row
+    without one carries null, never a filled value."""
+    eff = [{**r, "league_pct": 75.0 if r["team"] == "BUF" else 25.0} for r in _eff()]
+    pairs = pair_unit_signals(eff, {"team": "BUF", "player_id": None},
+                              {"team": "KC", "player_id": None})
+    by_base = {p["base"]: p for p in pairs}
+    assert by_base["success_rate"]["subject"]["league_pct"] == 75.0
+    assert by_base["success_rate"]["opponent"]["league_pct"] == 25.0
+    assert all(p["subject"]["league_pct"] is None for p in
+               pair_unit_signals(_eff(), {"team": "BUF", "player_id": None},
+                                 {"team": "KC", "player_id": None}))
+    card = _card(_build(KICKOFF - dt.timedelta(days=2), eff=eff))
+    terms = card["projection"]["decomposition"]["home"]["terms"]
+    assert {t["team"]: t["league_pct"] for t in terms} == {"BUF": 75.0, "KC": 25.0}
+
+
 def test_pair_unit_signals_player_subject_with_custom_suffix():
     rows = [
         {"team": "KC", "player_id": "00-1", "signal": "pass_epa_per_target_off",

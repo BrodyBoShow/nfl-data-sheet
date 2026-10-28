@@ -10,7 +10,7 @@ import { Environment } from "../components/game/environment";
 import { Lines } from "../components/game/lines";
 import { MarketDetail } from "../components/game/market-detail";
 import { PairingTable } from "../components/game/pairings";
-import { LowStabilityNote } from "../components/game/signal-cells";
+import { LowStabilityNote, PctNote } from "../components/game/signal-cells";
 import { TeamSignals } from "../components/game/team-signals";
 import { backtest } from "../lib/backtest";
 import { parseCard, type Card, type CardPairing } from "../lib/card";
@@ -27,7 +27,7 @@ import {
   isLowStability,
   validationTag,
 } from "../lib/game";
-import { formatSignalValue, signalLabel } from "../lib/signal-labels";
+import { OFFENSE_BETTER, efficiencyRoot, formatSignalValue, goodDirection, pctThird, signalLabel } from "../lib/signal-labels";
 import { SOURCES, sourcesFor } from "../lib/sources";
 import { parseTeamAliases } from "../scripts/team-aliases.mjs";
 import lockedRow from "./fixtures/card_2026_03_ATL_GB.json";
@@ -242,6 +242,83 @@ describe("context blocks", () => {
       `${more.length} more GB offense vs. ATL defense signals`,
     );
     expect(signalLabel("red_zone_td_rate")).toBe("Red-zone TD rate");
+  });
+
+  // ---- docs/phases/P11.md, slice 2 ----
+
+  /** The 20 efficiency bases, from the registry (docs/signals.md), not from the code. */
+  const registryBases = (): string[] => {
+    const md = readFileSync(new URL("../../docs/signals.md", import.meta.url), "utf8");
+    const t = md.slice(md.indexOf("| Signal (`<name>_off`/`<name>_def`)"), md.indexOf("### Availability sector"));
+    return [...t.matchAll(/^\| `([a-z_0-9]+)`( … `down4`)? \|/gm)].flatMap((m) =>
+      m[2] ? [1, 2, 3, 4].map((d) => m[1]!.replace(/down1$/, `down${d}`)) : [m[1]!],
+    );
+  };
+
+  it("the direction table matches the registry both ways", () => {
+    // A hardcoded vocabulary (CLAUDE.md): every efficiency base has a direction, and every
+    // root in the table is some base's. A new base fails here instead of going untinted.
+    const bases = registryBases();
+    expect(bases).toHaveLength(20);
+    for (const b of bases) {
+      expect(efficiencyRoot(b), b).not.toBeNull();
+      expect(goodDirection(`${b}_off`), b).not.toBeNull();
+      expect(goodDirection(`${b}_def`), b).not.toBeNull();
+    }
+    const used = new Set(bases.map((b) => efficiencyRoot(b)));
+    expect([...used].sort()).toEqual(Object.keys(OFFENSE_BETTER).sort());
+    // The one offense metric where lower is better, and a defense flips every direction.
+    expect(Object.entries(OFFENSE_BETTER).filter(([, d]) => d === "low").map(([r]) => r)).toEqual(["three_and_out_rate"]);
+    expect(goodDirection("epa_per_play_off")).toBe("high");
+    expect(goodDirection("epa_per_play_def")).toBe("low");
+    expect(goodDirection("three_and_out_rate_def")).toBe("high");
+    expect(goodDirection("success_rate_down3_def")).toBe("low");
+    expect(goodDirection("market_status")).toBeNull();
+  });
+
+  it("a team Pct is shaded by third, oriented to its unit, and says so in words", () => {
+    expect(pctThird("epa_per_play_off", 80)).toBe("better");
+    expect(pctThird("epa_per_play_def", 80)).toBe("worse"); // allows more than most
+    expect(pctThird("epa_per_play_def", 20)).toBe("better");
+    expect(pctThird("three_and_out_rate_off", 80)).toBe("worse");
+    expect(pctThird("epa_per_play_off", 50)).toBeNull();
+    expect(pctThird("epa_per_play_off", null)).toBeNull();
+    expect(pctThird("not_a_signal_off", 90)).toBeNull();
+
+    const rows = locked.context.efficiency_pairings.home_offense.map((r) => ({
+      ...r,
+      subject: { ...r.subject, league_pct: 90 },
+      opponent: r.opponent ? { ...r.opponent, league_pct: 90 } : null,
+    }));
+    const h = pairingHtml(rows);
+    const cells = [...h.matchAll(/<td class="([^"]*)" data-pct="true"( data-third="([a-z]+)")?( title="([^"]*)")?/g)];
+    expect(cells.length).toBe(rows.length * 2);
+    // Offense at 90: better. The defense at 90 allows more than 90% of teams: worse.
+    for (const [i, c] of cells.entries()) {
+      const want = i % 2 === 0 ? "better" : "worse";
+      expect(c[1]).toBe(`num pct-${want}`);
+      expect(c[3]).toBe(want);
+      expect(c[5]).toBe(`In the ${want} third of the league for this unit`);
+    }
+  });
+
+  it("older cards without league_pct show no Pct column and no Pct note, with no per-week rule", () => {
+    // league_pct is written from week 8 on. Nothing in the page names a week: the column
+    // and the note appear exactly when some row carries a value.
+    const h = pairingHtml(locked.context.efficiency_pairings.home_offense);
+    expect(h).not.toContain("data-pct");
+    expect(html(createElement(PctNote, { show: false }))).toBe("");
+    expect(text(html(createElement(PctNote, { show: true })))).toContain(
+      "Pct ranks each team among the league's teams entering this week, 0–100: higher means a higher value.",
+    );
+    const src = readFileSync(new URL("../app/game/[gameId]/page.tsx", import.meta.url), "utf8");
+    expect(src).not.toMatch(/week\s*[<>]=?\s*8|>=\s*8/);
+    // The model's input row carries its league_pct from the card's decomposition terms.
+    const raw = structuredClone(lockedRow.card) as { projection: { decomposition: { home: { terms: object[] } } } };
+    raw.projection.decomposition.home.terms = raw.projection.decomposition.home.terms.map((t) => ({ ...t, league_pct: 61 }));
+    const m = modelInputPairings(cardOf(raw), "home");
+    expect(m[0]!.subject.league_pct).toBe(61);
+    expect(m[0]!.opponent!.league_pct).toBe(61);
   });
 
   it("the defense column says 'allowed', and stability reads as Own % everywhere a team value shows", () => {

@@ -13,6 +13,10 @@
   --rule: #d6d3ca;
   --link: #1d4f73;
   --warn: #8a5300; /* pipeline state only: stale, missing, not validated, not projected */
+  /* A Pct cell's background when the value is in the better / worse third of the league for
+     the row's unit (docs/phases/P11.md, C3). Never the only cue: the cell's title says it. */
+  --better-bg: #e2ecdd;
+  --worse-bg: #f1e0da;
 
   /* Type. Plex Sans for UI and prose, Plex Mono for numbers, team codes, signal names. */
   --font-sans: var(--font-plex-sans), system-ui, sans-serif;
@@ -59,6 +63,8 @@
     --rule: #2a2d30;
     --link: #8db7d6;
     --warn: #d9a13b;
+    --better-bg: #1c2a1e;
+    --worse-bg: #2f1e1b;
     color-scheme: dark;
   }
 }

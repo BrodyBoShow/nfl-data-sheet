@@ -19,6 +19,7 @@ import psycopg
 
 from .db import ChangedUpsert, delete_rows, upsert_changed
 from .hashing import hash_row
+from .percentile import league_pct_expr
 
 _ROUND_DIGITS = 6
 
@@ -203,17 +204,8 @@ def as_of_percentiles(rows: pl.DataFrame, specs: list[tuple[str, str, str]]) -> 
 
 
 def _pct_expr(value: str, eligible: str) -> pl.Expr:
-    in_pop = pl.col(eligible).fill_null(False) & pl.col(value).is_not_null()
-    v = pl.when(in_pop).then(pl.col(value)).otherwise(None)
-    return (
-        (
-            100.0
-            * (v.rank("average").over("position_group") - 0.5)
-            / in_pop.sum().over("position_group")
-        )
-        .round(0)
-        .cast(pl.Int16)
-    )
+    # The shared definition (pipeline/core/percentile.py), within the position group.
+    return league_pct_expr(pl.col(value), pl.col(eligible), "position_group").cast(pl.Int16)
 
 
 # --------------------------------------------------------------------------------------

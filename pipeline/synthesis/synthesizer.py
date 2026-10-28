@@ -179,6 +179,8 @@ def _brief(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "value": row.get("value"),
         "stability": row.get("stability"),
         "sample_n": row.get("sample_n"),
+        # The web parses it when present (web/lib/card.ts), so card_version stays 1.
+        "league_pct": row.get("league_pct"),
     }
 
 
@@ -353,6 +355,7 @@ def _projection_block(
                     "centered": centered,
                     "stability": pred[f"{prefix}_{unit}_stab__{b}"],
                     "sample_n": None if row is None else row.get("sample_n"),
+                    "league_pct": None if row is None else row.get("league_pct"),
                     "beta": model.coef[coef],
                     "contribution": model.coef[coef] * centered,
                 })
@@ -711,7 +714,7 @@ def build_cards(
 
 _SIGNAL_COLS = (
     "game_id", "season", "week", "team", "player_id", "sector", "signal", "value",
-    "sample_n", "stability", "inputs_version",
+    "league_pct", "sample_n", "stability", "inputs_version",
 )
 
 

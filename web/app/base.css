@@ -272,6 +272,14 @@ details.market-detail > summary {
 details.players-defense {
   margin-top: var(--space-3);
 }
+
+/* A team Pct in the better / worse third for its unit (lib/signal-labels.ts, goodDirection). */
+td.pct-better {
+  background: var(--better-bg);
+}
+td.pct-worse {
+  background: var(--worse-bg);
+}
 /* Player-table heads wrap (labels carry units and source tags); numbers never do. Without
    this the defense table measured 2,265px against a 1,088px column at 1280px. */
 table.players-table thead th {

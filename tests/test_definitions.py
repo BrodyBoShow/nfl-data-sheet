@@ -32,7 +32,11 @@ PINNED = {
     # Bumped 2026-10-28 for 2020's combined O-line snap codes in _OL_SNAP_POSITIONS (P7 open
     # item 22, row 3): the 2020-2021 signals change, so the model is re-fit (p5-v3). The
     # label names the deploy date (UTC); the code was written 2026-10-19.
-    "EFFICIENCY_DEFINITION": ("2026-10-28.ol-combo-codes", "213d581d31f35855"),
+    # Re-pinned 2026-10-28 for league_pct (docs/phases/P11.md, slice 2), label kept:
+    # league_pct isn't a fit input. fit_inputs_hash covers (season, week, team, signal,
+    # value) only, and every value, sample_n and stability is unchanged
+    # (test_efficiency.py, league_pct tests).
+    "EFFICIENCY_DEFINITION": ("2026-10-28.ol-combo-codes", "32dbd0de23b8f543"),
 }
 
 _TEAM_INPUTS_FUNCTIONS: tuple[Callable[..., Any], ...] = (

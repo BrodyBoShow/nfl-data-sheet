@@ -42,6 +42,8 @@ const Term = z.object({
   centered: num,
   stability: num,
   sample_n: intOrNull,
+  // Not on terms written before P11 slice 2 (2026-10-28). Parsed when present.
+  league_pct: numOrNull.optional(),
   beta: num,
   contribution: num,
 });

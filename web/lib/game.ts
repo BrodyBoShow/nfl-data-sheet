@@ -63,6 +63,7 @@ export function modelInputPairings(card: Card, side: "home" | "away"): CardPairi
     value: t.value,
     stability: t.stability,
     sample_n: t.sample_n,
+    league_pct: t.league_pct,
   });
   return terms
     .filter((t) => t.role === "offense" && t.signal.endsWith("_off"))

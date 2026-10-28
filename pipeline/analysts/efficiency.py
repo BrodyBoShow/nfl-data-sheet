@@ -24,6 +24,7 @@ import psycopg
 from pipeline.core.base import Analyst, RunContext, WorkResult
 from pipeline.core.db import upsert_rows
 from pipeline.core.freshness import get_last_value
+from pipeline.core.percentile import league_pct_expr
 
 _log = logging.getLogger(__name__)
 
@@ -752,6 +753,19 @@ def _build_metric_signal_rows(
     return rows
 
 
+def _with_league_pct(df: pl.DataFrame) -> pl.DataFrame:
+    """`league_pct`: each team's percentile among every team with a value, per signal, in
+    this run's (season, week). It's the shared definition (`pipeline/core/percentile.py`),
+    the same as the player tables' `_pct`, and direction-neutral. A whole number, so it's
+    exact as `real` (docs/signals.md, "Comparing `real` columns"). It isn't a fit input:
+    `fit_inputs_hash` covers (season, week, team, signal, value) only (P11 slice 2)."""
+    return df.with_columns(
+        league_pct_expr(pl.col("value"), pl.lit(True), ["season", "week", "signal"])
+        .cast(pl.Float32)
+        .alias("league_pct")
+    )
+
+
 def _rows_to_df(rows: list[tuple[Any, ...]], schema: dict[str, Any]) -> pl.DataFrame:
     if not rows:
         return pl.DataFrame(schema=schema)
@@ -921,7 +935,7 @@ class EfficiencyAnalyst(Analyst):
             )
 
         if rows:
-            return pl.DataFrame(rows, schema=_SIGNAL_COLS)
+            return _with_league_pct(pl.DataFrame(rows, schema=_SIGNAL_COLS))
         return pl.DataFrame(schema=_SIGNAL_SCHEMA)
 
     def write_signals(self, ctx: RunContext, df: pl.DataFrame) -> WorkResult:

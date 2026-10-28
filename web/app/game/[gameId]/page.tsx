@@ -11,7 +11,7 @@ import { MarketDetail } from "@/components/game/market-detail";
 import { PairingTable } from "@/components/game/pairings";
 import { RawSignals } from "@/components/game/raw-signals";
 import { PlayersNotYet, PlayersSection } from "@/components/game/players";
-import { LowStabilityNote } from "@/components/game/signal-cells";
+import { LowStabilityNote, PctNote } from "@/components/game/signal-cells";
 import { TeamSignals } from "@/components/game/team-signals";
 import { SnapCountsCredit } from "@/components/marks";
 import { backtest } from "@/lib/backtest";
@@ -28,7 +28,7 @@ import {
   type SignalRowT,
 } from "@/lib/db";
 import { etDay, formatEtClock, formatEtStamp, formatGameday } from "@/lib/format";
-import { buildLines, gameStatus, isLowStability, modelInputPairings, type GameStatus } from "@/lib/game";
+import { anyLeaguePct, buildLines, gameStatus, isLowStability, modelInputPairings, type GameStatus } from "@/lib/game";
 import { normalizeTeam } from "@/lib/teams";
 import { noCardReason } from "@/lib/week";
 
@@ -84,6 +84,8 @@ function CardBody({
   const kickedOff = new Date(card.identity.kickoff) <= now;
   const { home_team: home, away_team: away } = card.identity;
   const pairs = card.context.efficiency_pairings;
+  const [homeRows, awayRows] = [pairs.home_offense, pairs.away_offense];
+  const [homeModel, awayModel] = [modelInputPairings(card, "home"), modelInputPairings(card, "away")];
   const showArithmetic = lines !== null && card.projection !== null;
   return (
     <>
@@ -116,14 +118,21 @@ function CardBody({
       {lines && card.projection ? <Arithmetic card={card} projection={card.projection} /> : null}
       <section className="section" aria-labelledby="pairings-h">
         <h2 id="pairings-h" className="section-label t-cap">
-          Efficiency matchups · not used by the model
+          {/* Since P11 slice 1 this holds the model's input (EPA/play) too, so it can't say
+              "not used by the model" (that was live 2026-10-28, slice 1 to slice 2). */}
+          Efficiency matchups · the model uses EPA/play only
         </h2>
         <p className="legend t-small ink-2">
           Each offense rating beside the opposing defense&apos;s matching rating, entering this week. A
           defense&apos;s rating is what it allows. The model uses EPA/play only (marked as its input).
         </p>
-        <PairingTable rows={pairs.home_offense} modelRows={modelInputPairings(card, "home")} subject={home} opponent={away} />
-        <PairingTable rows={pairs.away_offense} modelRows={modelInputPairings(card, "away")} subject={away} opponent={home} />
+        <PairingTable rows={homeRows} modelRows={homeModel} subject={home} opponent={away} />
+        <PairingTable rows={awayRows} modelRows={awayModel} subject={away} opponent={home} />
+        <PctNote
+          show={anyLeaguePct(
+            [...homeRows, ...awayRows, ...homeModel, ...awayModel].flatMap((r) => [r.subject.league_pct, r.opponent?.league_pct]),
+          )}
+        />
         <LowStabilityNote
           show={[...pairs.home_offense, ...pairs.away_offense].some((r) =>
             [r.subject, r.opponent].some((b) => b != null && b.value !== null && isLowStability(b.stability)),

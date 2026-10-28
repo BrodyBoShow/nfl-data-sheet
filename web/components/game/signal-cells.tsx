@@ -1,7 +1,12 @@
 import { backtest } from "@/lib/backtest";
 import { formatFixed, formatOwnPct } from "@/lib/format";
 import { isLowStability, lowStabilityTitle } from "@/lib/game";
-import { formatSignalValue } from "@/lib/signal-labels";
+import { formatSignalValue, pctThird } from "@/lib/signal-labels";
+
+const THIRD_TITLE = {
+  better: "In the better third of the league for this unit",
+  worse: "In the worse third of the league for this unit",
+} as const;
 
 // One unit's cells in an efficiency table: value · (league pct) · n · stab, always adjacent
 // (P6.md §4). Shared by the card pairings and the no-card team table.
@@ -27,7 +32,11 @@ export function UnitHeads({ label, showPct }: { label: string; showPct: boolean 
     <>
       <th scope="col" className="num">{label}</th>
       {showPct && (
-        <th scope="col" className="num" title="League percentile, 0–100">
+        <th
+          scope="col"
+          className="num"
+          title="Percentile among the league's teams entering this week, 0–100: higher means a higher value, not a better one. The shading says which is better for this unit."
+        >
           Pct
         </th>
       )}
@@ -46,6 +55,19 @@ export function UnitHeads({ label, showPct }: { label: string; showPct: boolean 
 }
 
 /** One line under a table that dims anything, defining the grey. */
+/** One line under tables that show a team Pct, saying what it ranks and what the shading
+ *  means. Shown only when some Pct is on the page. */
+export function PctNote({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <p className="legend t-small ink-2" data-pct-note>
+      Pct ranks each team among the league&apos;s teams entering this week, 0–100: higher means a higher value.
+      Shading marks the better or worse third of the league for that unit. Lower is better for three-and-outs, and
+      for everything a defense allows.
+    </p>
+  );
+}
+
 export function LowStabilityNote({ show }: { show: boolean }) {
   if (!show) return null;
   return (
@@ -60,6 +82,7 @@ export function UnitCells({ u, showPct }: { u: UnitValue | null | undefined; sho
   const shown = u ? formatSignalValue(u.signal, u.value) : null;
   const stability = u?.stability ?? null;
   const dim = shown !== null && stability !== null && isLowStability(stability);
+  const third = u ? pctThird(u.signal, u.league_pct) : null;
   return (
     <>
       <td
@@ -70,7 +93,12 @@ export function UnitCells({ u, showPct }: { u: UnitValue | null | undefined; sho
         {shown ?? DASH}
       </td>
       {showPct && (
-        <td className="num" data-pct>
+        <td
+          className={third ? `num pct-${third}` : "num"}
+          data-pct
+          data-third={third ?? undefined}
+          title={third ? THIRD_TITLE[third] : undefined}
+        >
           {u?.league_pct == null ? DASH : formatFixed(u.league_pct, 0)}
         </td>
       )}

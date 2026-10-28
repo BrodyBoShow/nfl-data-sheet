@@ -162,6 +162,70 @@ def _run_compute_with(monkeypatch, *, week, team_week, qb, ol, depth=()):
     return df.drop("as_of").sort(["signal", "team"]), analyst._last_run_meta
 
 
+def _e2e_inputs():
+    return dict(
+        team_week=_e2e_team_week(2098, range(1, 7)) + _e2e_team_week(2099, range(1, 4)),
+        qb=_e2e_qb(2098, range(1, 7)) + _e2e_qb(2099, range(1, 4)),
+        ol=_e2e_ol(2098, range(1, 7)) + _e2e_ol(2099, range(1, 4)),
+    )
+
+
+def test_league_pct_ranks_each_signal_among_the_week_s_teams(monkeypatch):
+    """league_pct (docs/phases/P11.md, slice 2): each team's percentile among every team
+    with a value, per signal, round(100 * (below + 0.5 * equal) / population), the same
+    definition as the player tables' _pct. Direction-neutral: higher value, higher pct."""
+    df, _ = _run_compute_with(monkeypatch, week=4, **_e2e_inputs())
+    assert df["league_pct"].dtype == pl.Float32
+    for signal, g in df.group_by("signal"):
+        g = g.filter(pl.col("value").is_not_null())
+        assert g.height == len(_E2E_TEAMS), signal
+        values = g["value"].to_list()
+        for v, pct in zip(values, g["league_pct"].to_list(), strict=True):
+            below = sum(x < v for x in values)
+            equal = sum(x == v for x in values)
+            # polars rounds halves to even (measured, polars 1.44); so does the player _pct.
+            assert pct == round(100 * (below + 0.5 * equal) / len(values)), (signal, v)
+        # A whole number, so the real column stores it exactly (docs/signals.md, "Comparing
+        # `real` columns").
+        assert all(float(p).is_integer() for p in g["league_pct"].to_list())
+
+
+def test_league_pct_changes_nothing_else(monkeypatch):
+    """Adding league_pct moves no value, sample_n or stability. That's why
+    EFFICIENCY_DEFINITION keeps its label and the model can't go stale: fit_inputs_hash
+    covers (season, week, team, signal, value) only."""
+    import pipeline.analysts.efficiency as eff
+
+    with_pct, meta = _run_compute_with(monkeypatch, week=4, **_e2e_inputs())
+    monkeypatch.setattr(eff, "_with_league_pct", lambda df: df)
+    without, meta_without = _run_compute_with(monkeypatch, week=4, **_e2e_inputs())
+    assert without["league_pct"].null_count() == without.height
+    assert with_pct["league_pct"].null_count() < with_pct.height
+    assert_frame_equal(with_pct.drop("league_pct"), without.drop("league_pct"))
+    assert meta == meta_without
+
+
+def test_league_pct_leaves_a_null_value_out_of_the_population():
+    import pipeline.analysts.efficiency as eff
+
+    df = pl.DataFrame(
+        {
+            "season": [2099] * 5,
+            "week": [4] * 5,
+            "signal": ["s_off"] * 4 + ["t_off"],
+            "team": ["AA", "BB", "CC", "DD", "AA"],
+            "value": [0.3, 0.1, None, 0.1, 0.5],
+            "league_pct": [None] * 5,
+        },
+        schema_overrides={"league_pct": pl.Float32},
+    )
+    out = eff._with_league_pct(df)["league_pct"].to_list()
+    # s_off, population 3 (CC has no value, so no pct): AA is above both ties,
+    # 100 * (2 + 0.5) / 3 = 83; BB and DD tie, 100 * (0 + 0.5 * 2) / 3 = 33. t_off ranks
+    # within itself only: 100 * 0.5 / 1 = 50.
+    assert out == [83.0, 33.0, None, 33.0, 50.0]
+
+
 def test_compute_ignores_future_weeks_end_to_end(monkeypatch):
     """The full compute() path, not just _filter_current_season: team_week, the QB-change
     factor, and the O-line-continuity factor must all ignore weeks >= the target week.
